@@ -1,0 +1,168 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RolType {
+  SUPER_ADMIN
+  SUPERVISOR
+  GUIA
+}
+
+enum StatusType {
+  ACTIVO
+  INACTIVO
+  SUSPENDIDO
+}
+
+enum TurnoStatus {
+  CREADO
+  EN_USO
+  LIBERADO
+  TERMINADO
+  CANCELADO
+}
+
+model Usuario {
+  id           Int        @id @default(autoincrement())
+  email        String     @unique
+  passwordHash String
+  nombre       String
+  rol          RolType
+  status       StatusType @default(ACTIVO)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  // Relaciones
+  guia       Guia?
+  supervisor Supervisor?
+
+  @@map("usuarios")
+}
+
+model Guia {
+  id        Int      @id @default(autoincrement())
+  usuarioId Int      @unique
+  telefono  String?
+  direccion String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relaciones
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  turnos  Turno[]
+
+  @@map("guias")
+}
+
+model Supervisor {
+  id        Int      @id @default(autoincrement())
+  usuarioId Int      @unique
+  telefono  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relaciones
+  usuario   Usuario     @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  recaladas Recalada[]
+  atenciones Atencion[]
+
+  @@map("supervisores")
+}
+
+model Pais {
+  id        Int      @id @default(autoincrement())
+  nombre    String   @unique
+  codigo    String   @unique // ISO code
+  status    StatusType @default(ACTIVO)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relaciones
+  recaladas Recalada[]
+
+  @@map("paises")
+}
+
+model Buque {
+  id        Int      @id @default(autoincrement())
+  nombre    String   @unique
+  naviera   String?
+  capacidad Int?
+  status    StatusType @default(ACTIVO)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relaciones
+  recaladas Recalada[]
+
+  @@map("buques")
+}
+
+model Recalada {
+  id            Int      @id @default(autoincrement())
+  buqueId       Int
+  paisOrigenId  Int
+  supervisorId  Int
+  fechaLlegada  DateTime
+  fechaSalida   DateTime?
+  observaciones String?
+  status        StatusType @default(ACTIVO)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relaciones
+  buque      Buque      @relation(fields: [buqueId], references: [id])
+  paisOrigen Pais       @relation(fields: [paisOrigenId], references: [id])
+  supervisor Supervisor @relation(fields: [supervisorId], references: [id])
+  atenciones Atencion[]
+
+  @@map("recaladas")
+}
+
+model Atencion {
+  id           Int      @id @default(autoincrement())
+  recaladaId   Int
+  supervisorId Int
+  turnosTotal  Int
+  descripcion  String?
+  fechaInicio  DateTime
+  fechaFin     DateTime?
+  status       StatusType @default(ACTIVO)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relaciones
+  recalada   Recalada   @relation(fields: [recaladaId], references: [id])
+  supervisor Supervisor @relation(fields: [supervisorId], references: [id])
+  turnos     Turno[]
+
+  @@map("atenciones")
+}
+
+model Turno {
+  id          Int         @id @default(autoincrement())
+  atencionId  Int
+  guiaId      Int?
+  numero      Int         // Número correlativo del turno
+  status      TurnoStatus @default(CREADO)
+  fechaInicio DateTime?   // Cuando el guía pone el turno "en uso"
+  fechaFin    DateTime?   // Cuando el guía libera o termina el turno
+  observaciones String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relaciones
+  atencion Atencion @relation(fields: [atencionId], references: [id])
+  guia     Guia?    @relation(fields: [guiaId], references: [id])
+
+  @@unique([atencionId, numero])
+  @@map("turnos")
+}
