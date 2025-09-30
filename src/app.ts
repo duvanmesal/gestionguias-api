@@ -5,6 +5,7 @@ import { corsOrigins } from "./config/env"
 import { requestLogger } from "./middlewares/request-logger"
 import { errorHandler } from "./middlewares/error-handler"
 import { router as healthRouter } from "./routes/health"
+import { apiRouter } from "./routes"
 import { logger } from "./libs/logger"
 
 const app = express()
@@ -43,8 +44,8 @@ app.use(requestLogger)
 // Health check routes (no auth required)
 app.use("/health", healthRouter)
 
-// API routes will be mounted here
-// app.use("/api/v1", apiRouter);
+// API routes with versioning
+app.use("/api", apiRouter)
 
 // 404 handler for unmatched routes
 app.use("*", (_req, res) => {

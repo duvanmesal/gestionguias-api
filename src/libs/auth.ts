@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express"
-import { verifyAccess, type JwtPayload } from "./jwt"
+import { verifyAccessToken, type JwtPayload } from "./jwt"
 import { UnauthorizedError } from "./errors"
+import type { RolType } from "@prisma/client"
 
 declare global {
   namespace Express {
@@ -24,7 +25,7 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction) {
       throw new UnauthorizedError("Missing token")
     }
 
-    const payload = verifyAccess(token)
+    const payload = verifyAccessToken(token)
     req.user = payload
 
     next()
@@ -34,5 +35,23 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction) {
     } else {
       next(new UnauthorizedError("Invalid or expired token"))
     }
+  }
+}
+
+export function requireOwnershipOrRole(roles: RolType[]) {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    if (!req.user) {
+      throw new UnauthorizedError("Authentication required")
+    }
+
+    const userId = req.params.id || req.params.userId
+    const isOwner = req.user.userId === userId
+    const hasRole = roles.includes(req.user.rol as RolType)
+
+    if (!isOwner && !hasRole) {
+      throw new UnauthorizedError("Access denied: insufficient permissions")
+    }
+
+    next()
   }
 }

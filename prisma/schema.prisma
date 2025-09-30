@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -31,25 +28,48 @@ enum TurnoStatus {
 }
 
 model Usuario {
-  id           Int        @id @default(autoincrement())
+  id           String     @id @default(cuid())
   email        String     @unique
   passwordHash String
-  nombre       String
+  nombres      String
+  apellidos    String
   rol          RolType
-  status       StatusType @default(ACTIVO)
+  activo       Boolean    @default(true)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
   // Relaciones
-  guia       Guia?
-  supervisor Supervisor?
+  guia          Guia?
+  supervisor    Supervisor?
+  refreshTokens RefreshToken[]
 
   @@map("usuarios")
 }
 
+model RefreshToken {
+  id           String    @id @default(cuid())
+  userId       String
+  usuario      Usuario   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String    @unique
+  issuedAt     DateTime  @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?
+  replacedBy   RefreshToken? @relation("Replacements", fields: [replacedById], references: [id])
+  replacements RefreshToken[] @relation("Replacements")
+  ip           String?
+  userAgent    String?
+  deviceId     String?
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@map("refresh_tokens")
+}
+
 model Guia {
-  id        Int      @id @default(autoincrement())
-  usuarioId Int      @unique
+  id        String   @id @default(cuid())
+  usuarioId String   @unique
   telefono  String?
   direccion String?
   createdAt DateTime @default(now())
@@ -63,27 +83,27 @@ model Guia {
 }
 
 model Supervisor {
-  id        Int      @id @default(autoincrement())
-  usuarioId Int      @unique
+  id        String   @id @default(cuid())
+  usuarioId String   @unique
   telefono  String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relaciones
-  usuario   Usuario     @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-  recaladas Recalada[]
+  usuario    Usuario     @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  recaladas  Recalada[]
   atenciones Atencion[]
 
   @@map("supervisores")
 }
 
 model Pais {
-  id        Int      @id @default(autoincrement())
-  nombre    String   @unique
-  codigo    String   @unique // ISO code
+  id        Int        @id @default(autoincrement())
+  nombre    String     @unique
+  codigo    String     @unique // ISO code
   status    StatusType @default(ACTIVO)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 
   // Relaciones
   recaladas Recalada[]
@@ -92,13 +112,13 @@ model Pais {
 }
 
 model Buque {
-  id        Int      @id @default(autoincrement())
-  nombre    String   @unique
+  id        Int        @id @default(autoincrement())
+  nombre    String     @unique
   naviera   String?
   capacidad Int?
   status    StatusType @default(ACTIVO)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 
   // Relaciones
   recaladas Recalada[]
@@ -107,16 +127,16 @@ model Buque {
 }
 
 model Recalada {
-  id            Int      @id @default(autoincrement())
+  id            Int        @id @default(autoincrement())
   buqueId       Int
   paisOrigenId  Int
-  supervisorId  Int
+  supervisorId  String
   fechaLlegada  DateTime
   fechaSalida   DateTime?
   observaciones String?
   status        StatusType @default(ACTIVO)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   // Relaciones
   buque      Buque      @relation(fields: [buqueId], references: [id])
@@ -128,16 +148,16 @@ model Recalada {
 }
 
 model Atencion {
-  id           Int      @id @default(autoincrement())
+  id           Int        @id @default(autoincrement())
   recaladaId   Int
-  supervisorId Int
+  supervisorId String
   turnosTotal  Int
   descripcion  String?
   fechaInicio  DateTime
   fechaFin     DateTime?
   status       StatusType @default(ACTIVO)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
   // Relaciones
   recalada   Recalada   @relation(fields: [recaladaId], references: [id])
@@ -148,16 +168,16 @@ model Atencion {
 }
 
 model Turno {
-  id          Int         @id @default(autoincrement())
-  atencionId  Int
-  guiaId      Int?
-  numero      Int         // Número correlativo del turno
-  status      TurnoStatus @default(CREADO)
-  fechaInicio DateTime?   // Cuando el guía pone el turno "en uso"
-  fechaFin    DateTime?   // Cuando el guía libera o termina el turno
+  id            Int         @id @default(autoincrement())
+  atencionId    Int
+  guiaId        String?
+  numero        Int         // Número correlativo del turno
+  status        TurnoStatus @default(CREADO)
+  fechaInicio   DateTime?   // Cuando el guía pone el turno "en uso"
+  fechaFin      DateTime?   // Cuando el guía libera o termina el turno
   observaciones String?
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
   // Relaciones
   atencion Atencion @relation(fields: [atencionId], references: [id])
