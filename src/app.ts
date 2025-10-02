@@ -1,6 +1,7 @@
 import express from "express"
 import helmet from "helmet"
 import cors from "cors"
+import cookieParser from "cookie-parser"
 import { corsOrigins } from "./config/env"
 import { requestLogger } from "./middlewares/request-logger"
 import { errorHandler } from "./middlewares/error-handler"
@@ -30,13 +31,15 @@ app.use(
     origin: corsOrigins,
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-Client-Platform"],
   }),
 )
 
 // Body parsing middleware
 app.use(express.json({ limit: "1mb" }))
 app.use(express.urlencoded({ extended: true, limit: "1mb" }))
+
+app.use(cookieParser())
 
 // Request logging
 app.use(requestLogger)

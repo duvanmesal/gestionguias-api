@@ -45,3 +45,9 @@ export class BusinessError extends AppError {
     super(422, "BUSINESS_RULE_VIOLATION", message, details)
   }
 }
+
+export class BadRequestError extends AppError {
+  constructor(message = "Bad request", details?: any) {
+    super(400, "BAD_REQUEST", message, details)
+  }
+}

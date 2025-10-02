@@ -1,3 +1,4 @@
+// src/libs/jwt.ts
 import * as jwt from "jsonwebtoken"
 import { env } from "../config/env"
 import type { RolType } from "@prisma/client"
@@ -9,6 +10,8 @@ export interface AccessTokenPayload {
   userId: string
   email: string
   rol: RolType
+  sid: string
+  aud: string // "web" | "mobile"
   jti?: string
 }
 
@@ -22,9 +25,8 @@ export type JwtPayload = AccessTokenPayload & jwt.JwtPayload
 export type JwtRefreshPayload = RefreshTokenPayload & jwt.JwtPayload
 
 const accessOptions: SignOptions = {
-  expiresIn: env.JWT_ACCESS_TTL,
+  expiresIn: env.JWT_ACCESS_TTL, // admite "15m", "1800", etc.
   issuer: "gestionguias-api",
-  audience: "gestionguias-client",
 }
 
 const refreshOptions: SignOptions = {
@@ -34,7 +36,7 @@ const refreshOptions: SignOptions = {
 }
 
 export const signAccessToken = (payload: AccessTokenPayload): string => {
-  const jti = `access_${Date.now()}_${Math.random().toString(36).substring(2)}`
+  const jti = `access_${Date.now()}_${Math.random().toString(36).slice(2)}`
   return jwt.sign({ ...payload, jti }, env.JWT_ACCESS_SECRET as Secret, accessOptions)
 }
 
@@ -50,7 +52,7 @@ export const verifyRefreshToken = (token: string): JwtRefreshPayload => {
   return jwt.verify(token, env.JWT_REFRESH_SECRET as Secret) as JwtRefreshPayload
 }
 
-// Legacy exports for backward compatibility
+// Legacy exports
 export const signAccess = signAccessToken
 export const verifyAccess = verifyAccessToken
 export const signRefresh = signRefreshToken

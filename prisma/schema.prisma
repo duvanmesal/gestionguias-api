@@ -27,6 +27,11 @@ enum TurnoStatus {
   CANCELADO
 }
 
+enum Platform {
+  WEB
+  MOBILE
+}
+
 model Usuario {
   id           String     @id @default(cuid())
   email        String     @unique
@@ -42,8 +47,38 @@ model Usuario {
   guia          Guia?
   supervisor    Supervisor?
   refreshTokens RefreshToken[]
+  sessions      Session[]
 
   @@map("usuarios")
+}
+
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  user             Usuario   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Platform (audience)
+  platform         Platform
+  // Device identity (optional but recommended for Mobile)
+  deviceId         String?
+  // Client fingerprint (better for WEB)
+  userAgent        String?
+  ip               String?
+
+  // Rotatory refresh token (stores hash, never plain value)
+  refreshTokenHash String?   @unique
+  refreshExpiresAt DateTime?
+  lastRotatedAt    DateTime?
+
+  // Session state control
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  revokedAt        DateTime?
+
+  // For fast queries
+  @@index([userId, platform])
+  @@index([deviceId])
+  @@map("sessions")
 }
 
 model RefreshToken {

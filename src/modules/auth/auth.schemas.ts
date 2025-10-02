@@ -4,10 +4,11 @@ import { RolType } from "@prisma/client"
 export const loginSchema = z.object({
   email: z.string().email("Invalid email format"),
   password: z.string().min(8, "Password must be at least 8 characters").max(72, "Password too long"),
+  deviceId: z.string().optional(), // Required for mobile, optional for web
 })
 
 export const refreshSchema = z.object({
-  refreshToken: z.string().min(10, "Invalid refresh token"),
+  refreshToken: z.string().min(10, "Invalid refresh token").optional(),
 })
 
 export const registerSchema = z.object({

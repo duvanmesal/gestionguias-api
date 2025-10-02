@@ -1,11 +1,16 @@
 import { prisma } from "../../prisma/client"
 import { hashPassword, verifyPassword } from "../../libs/password"
 import { signAccessToken } from "../../libs/jwt"
-import { generateRefreshToken, hashRefreshToken, generateDeviceId } from "../../libs/crypto"
-import { UnauthorizedError, ConflictError, NotFoundError } from "../../libs/errors"
+import { generateRefreshToken, hashRefreshToken } from "../../libs/crypto"
+import { UnauthorizedError, ConflictError, NotFoundError, BadRequestError } from "../../libs/errors"
 import { logger } from "../../libs/logger"
+import { parseTtlToSeconds } from "../../libs/time"   // ⬅️ NUEVO
 import type { LoginRequest, RegisterRequest } from "./auth.schemas"
-import type { RolType } from "@prisma/client"
+import type { RolType, Platform } from "@prisma/client"
+
+// TTLs leídos del .env (con fallback)
+const ACCESS_TTL_SEC = parseTtlToSeconds(process.env.JWT_ACCESS_TTL, 900)              // 15m por defecto
+const REFRESH_TTL_SEC = parseTtlToSeconds(process.env.JWT_REFRESH_TTL, 60 * 60 * 24 * 30) // 30d por defecto
 
 export interface LoginResult {
   user: {
@@ -19,8 +24,13 @@ export interface LoginResult {
   tokens: {
     accessToken: string
     accessTokenExpiresIn: number
-    refreshToken: string
+    refreshToken?: string
     refreshTokenExpiresAt: string
+  }
+  session: {
+    id: string
+    platform: Platform
+    createdAt: Date
   }
 }
 
@@ -28,53 +38,68 @@ export interface RefreshResult {
   tokens: {
     accessToken: string
     accessTokenExpiresIn: number
-    refreshToken: string
+    refreshToken?: string
     refreshTokenExpiresAt: string
+  }
+  session: {
+    id: string
   }
 }
 
+export interface SessionInfo {
+  id: string
+  platform: Platform
+  deviceId: string | null
+  ip: string | null
+  userAgent: string | null
+  createdAt: Date
+  lastRotatedAt: Date | null
+}
+
 export class AuthService {
-  async login(data: LoginRequest, ip?: string, userAgent?: string): Promise<LoginResult> {
-    // Find active user by email
+  async login(data: LoginRequest, platform: Platform, ip?: string, userAgent?: string): Promise<LoginResult> {
+    if (platform === "MOBILE" && !data.deviceId) {
+      throw new BadRequestError("deviceId is required for mobile platform")
+    }
+
     const user = await prisma.usuario.findUnique({
       where: { email: data.email },
     })
-
     if (!user || !user.activo) {
       throw new UnauthorizedError("Invalid credentials")
     }
 
-    // Verify password
     const isValidPassword = await verifyPassword(data.password, user.passwordHash)
     if (!isValidPassword) {
       throw new UnauthorizedError("Invalid credentials")
     }
 
-    // Generate tokens
+    // Refresh TTL desde .env
+    const refreshTokenValue = generateRefreshToken()
+    const refreshTokenHash = hashRefreshToken(refreshTokenValue)
+    const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_SEC * 1000)
+
+    const session = await prisma.session.create({
+      data: {
+        userId: user.id,
+        platform,
+        deviceId: data.deviceId || null,
+        userAgent,
+        ip,
+        refreshTokenHash,
+        refreshExpiresAt,
+      },
+    })
+
     const accessToken = signAccessToken({
       userId: user.id,
       email: user.email,
       rol: user.rol,
+      sid: session.id,
+      aud: platform.toLowerCase(),
     })
 
-    const refreshTokenValue = generateRefreshToken()
-    const refreshTokenHash = hashRefreshToken(refreshTokenValue)
-    const deviceId = generateDeviceId(userAgent, ip)
-
-    // Store refresh token in database
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-    await prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tokenHash: refreshTokenHash,
-        expiresAt,
-        ip,
-        userAgent,
-        deviceId,
-      },
-    })
-
-    logger.info({ userId: user.id, email: user.email }, "User logged in successfully")
+    logger.info({ userId: user.id, email: user.email, platform, sessionId: session.id }, "User logged in successfully")
 
     return {
       user: {
@@ -87,125 +112,151 @@ export class AuthService {
       },
       tokens: {
         accessToken,
-        accessTokenExpiresIn: 15 * 60, // 15 minutes in seconds
+        accessTokenExpiresIn: ACCESS_TTL_SEC,
         refreshToken: refreshTokenValue,
-        refreshTokenExpiresAt: expiresAt.toISOString(),
+        refreshTokenExpiresAt: refreshExpiresAt.toISOString(),
+      },
+      session: {
+        id: session.id,
+        platform: session.platform,
+        createdAt: session.createdAt,
       },
     }
   }
 
-  async refresh(refreshToken: string, ip?: string, userAgent?: string): Promise<RefreshResult> {
+  async refresh(refreshToken: string, platform: Platform, ip?: string, userAgent?: string): Promise<RefreshResult> {
     const refreshTokenHash = hashRefreshToken(refreshToken)
 
-    // Find the refresh token
-    const storedToken = await prisma.refreshToken.findUnique({
-      where: { tokenHash: refreshTokenHash },
-      include: { usuario: true },
+    const session = await prisma.session.findUnique({
+      where: { refreshTokenHash },
+      include: { user: true },
     })
 
-    if (!storedToken) {
+    if (!session) {
+      logger.warn({ hash: refreshTokenHash }, "Refresh token not found (possible reuse)")
       throw new UnauthorizedError("Invalid refresh token")
     }
 
-    // Check if token is revoked or expired
-    if (storedToken.revokedAt) {
-      // Token reuse detected - revoke all tokens for this user
-      await this.revokeAllUserTokens(storedToken.userId)
+    if (session.revokedAt) {
+      await this.revokeAllUserSessions(session.userId)
+      logger.warn({ userId: session.userId, sessionId: session.id }, "Token reuse detected - all sessions revoked")
       throw new ConflictError("Token reuse detected. All sessions have been terminated.")
     }
 
-    if (storedToken.expiresAt < new Date()) {
+    if (session.refreshExpiresAt && session.refreshExpiresAt < new Date()) {
       throw new UnauthorizedError("Refresh token expired")
     }
 
-    if (!storedToken.usuario.activo) {
+    if (!session.user.activo) {
       throw new UnauthorizedError("User account is inactive")
     }
 
-    // Generate new tokens (rotation)
-    const newAccessToken = signAccessToken({
-      userId: storedToken.usuario.id,
-      email: storedToken.usuario.email,
-      rol: storedToken.usuario.rol,
-    })
+    if (session.platform !== platform) {
+      throw new UnauthorizedError("Platform mismatch")
+    }
 
+    // Nueva rotación
     const newRefreshTokenValue = generateRefreshToken()
     const newRefreshTokenHash = hashRefreshToken(newRefreshTokenValue)
-    const deviceId = generateDeviceId(userAgent, ip)
+    const newRefreshExpiresAt = new Date(Date.now() + REFRESH_TTL_SEC * 1000)
 
-    // Create new refresh token and revoke the old one
-    const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
+    // Rotación atómica
+    const rotated = await prisma.session.updateMany({
+      where: { id: session.id, refreshTokenHash },
+      data: {
+        refreshTokenHash: newRefreshTokenHash,
+        refreshExpiresAt: newRefreshExpiresAt,
+        lastRotatedAt: new Date(),
+        ip,
+        userAgent,
+      },
+    })
 
-    await prisma.$transaction([
-      // Revoke old token
-      prisma.refreshToken.update({
-        where: { id: storedToken.id },
-        data: { revokedAt: new Date() },
-      }),
-      // Create new token
-      prisma.refreshToken.create({
-        data: {
-          userId: storedToken.userId,
-          tokenHash: newRefreshTokenHash,
-          expiresAt: newExpiresAt,
-          ip,
-          userAgent,
-          deviceId,
-          replacedById: storedToken.id,
-        },
-      }),
-    ])
+    if (rotated.count === 0) {
+      await this.revokeAllUserSessions(session.userId)
+      logger.warn({ userId: session.userId, sessionId: session.id }, "Refresh token reuse detected (race) - all sessions revoked")
+      throw new ConflictError("Token reuse detected. All sessions have been terminated.")
+    }
 
-    logger.info({ userId: storedToken.userId }, "Tokens refreshed successfully")
+    const newAccessToken = signAccessToken({
+      userId: session.user.id,
+      email: session.user.email,
+      rol: session.user.rol,
+      sid: session.id,
+      aud: platform.toLowerCase(),
+    })
+
+    logger.info({ userId: session.userId, sessionId: session.id }, "Tokens refreshed successfully")
 
     return {
       tokens: {
         accessToken: newAccessToken,
-        accessTokenExpiresIn: 15 * 60, // 15 minutes in seconds
+        accessTokenExpiresIn: ACCESS_TTL_SEC,
         refreshToken: newRefreshTokenValue,
-        refreshTokenExpiresAt: newExpiresAt.toISOString(),
+        refreshTokenExpiresAt: newRefreshExpiresAt.toISOString(),
+      },
+      session: {
+        id: session.id,
       },
     }
   }
 
-  async logout(refreshToken: string): Promise<void> {
-    const refreshTokenHash = hashRefreshToken(refreshToken)
-
-    const storedToken = await prisma.refreshToken.findUnique({
-      where: { tokenHash: refreshTokenHash },
-    })
-
-    if (storedToken && !storedToken.revokedAt) {
-      await prisma.refreshToken.update({
-        where: { id: storedToken.id },
+  async logout(sessionId: string): Promise<void> {
+    const session = await prisma.session.findUnique({ where: { id: sessionId } })
+    if (session && !session.revokedAt) {
+      await prisma.session.update({
+        where: { id: sessionId },
         data: { revokedAt: new Date() },
       })
-
-      logger.info({ userId: storedToken.userId }, "User logged out successfully")
+      logger.info({ userId: session.userId, sessionId }, "Session logged out successfully")
     }
   }
 
   async logoutAll(userId: string): Promise<void> {
-    await this.revokeAllUserTokens(userId)
+    await this.revokeAllUserSessions(userId)
     logger.info({ userId }, "All user sessions terminated")
+  }
+
+  async listSessions(userId: string): Promise<SessionInfo[]> {
+    const sessions = await prisma.session.findMany({
+      where: {
+        userId,
+        revokedAt: null,
+        refreshExpiresAt: { gt: new Date() },
+      },
+      select: {
+        id: true,
+        platform: true,
+        deviceId: true,
+        ip: true,
+        userAgent: true,
+        createdAt: true,
+        lastRotatedAt: true,
+      },
+      orderBy: { createdAt: "desc" },
+    })
+    return sessions
+  }
+
+  async revokeSession(sessionId: string, userId: string): Promise<void> {
+    const session = await prisma.session.findFirst({ where: { id: sessionId, userId } })
+    if (!session) throw new NotFoundError("Session not found")
+    if (session.revokedAt) throw new BadRequestError("Session already revoked")
+
+    await prisma.session.update({
+      where: { id: sessionId },
+      data: { revokedAt: new Date() },
+    })
+    logger.info({ userId, sessionId }, "Session revoked by user")
   }
 
   async register(
     data: RegisterRequest,
   ): Promise<{ user: { id: string; email: string; nombres: string; apellidos: string; rol: RolType } }> {
-    // Check if user already exists
-    const existingUser = await prisma.usuario.findUnique({
-      where: { email: data.email },
-    })
+    const existingUser = await prisma.usuario.findUnique({ where: { email: data.email } })
+    if (existingUser) throw new ConflictError("User with this email already exists")
 
-    if (existingUser) {
-      throw new ConflictError("User with this email already exists")
-    }
-
-    // Hash password
     const passwordHash = await hashPassword(data.password)
-
-    // Create user
     const user = await prisma.usuario.create({
       data: {
         email: data.email,
@@ -219,15 +270,7 @@ export class AuthService {
 
     logger.info({ userId: user.id, email: user.email, rol: user.rol }, "New user registered")
 
-    return {
-      user: {
-        id: user.id,
-        email: user.email,
-        nombres: user.nombres,
-        apellidos: user.apellidos,
-        rol: user.rol,
-      },
-    }
+    return { user: { id: user.id, email: user.email, nombres: user.nombres, apellidos: user.apellidos, rol: user.rol } }
   }
 
   async getProfile(userId: string) {
@@ -244,23 +287,14 @@ export class AuthService {
         updatedAt: true,
       },
     })
-
-    if (!user) {
-      throw new NotFoundError("User not found")
-    }
-
+    if (!user) throw new NotFoundError("User not found")
     return user
   }
 
-  private async revokeAllUserTokens(userId: string): Promise<void> {
-    await prisma.refreshToken.updateMany({
-      where: {
-        userId,
-        revokedAt: null,
-      },
-      data: {
-        revokedAt: new Date(),
-      },
+  private async revokeAllUserSessions(userId: string): Promise<void> {
+    await prisma.session.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
     })
   }
 }
