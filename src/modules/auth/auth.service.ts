@@ -213,9 +213,14 @@ export class AuthService {
   }
 
   async logoutAll(userId: string): Promise<void> {
-    await this.revokeAllUserSessions(userId)
+    const now = new Date()
+    await prisma.session.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: now, lastRotatedAt: now },
+    })
     logger.info({ userId }, "All user sessions terminated")
   }
+
 
   async listSessions(userId: string): Promise<SessionInfo[]> {
     const sessions = await prisma.session.findMany({

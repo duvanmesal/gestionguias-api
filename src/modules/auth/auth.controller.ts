@@ -2,9 +2,13 @@ import type { Request, Response, NextFunction } from "express"
 import { authService } from "./auth.service"
 import { ok, created } from "../../libs/http"
 import { logger } from "../../libs/logger"
-import { BadRequestError } from "../../libs/errors"
-import type { LoginRequest, RefreshRequest, RegisterRequest } from "./auth.schemas"
+import { BadRequestError, UnauthorizedError } from "../../libs/errors"
+import type { LoginRequest, RefreshRequest, RegisterRequest, LogoutAllRequest } from "./auth.schemas"
+import { verifyPassword } from "../../libs/password"
 import type { Platform } from "@prisma/client"
+import { prisma } from "../../prisma/client"
+
+const REFRESH_COOKIE_PATH = (process.env.API_PREFIX || "") + "/auth/refresh"
 
 export class AuthController {
   async login(req: Request, res: Response, next: NextFunction) {
@@ -92,7 +96,6 @@ export class AuthController {
 
   async logout(req: Request, res: Response, next: NextFunction) {
     try {
-      const REFRESH_COOKIE_PATH = (process.env.API_PREFIX || "") + "/auth/refresh"
       if (!req.user?.sid) {
         throw new BadRequestError("Session ID not found in token")
       }
@@ -116,21 +119,41 @@ export class AuthController {
     }
   }
 
-  async logoutAll(req: Request, res: Response, next: NextFunction) {
+    async logoutAll(req: Request, res: Response, next: NextFunction) {
     try {
       if (!req.user) {
         return res.status(401).json({ error: "Unauthorized" })
       }
 
+      const body = req.body as LogoutAllRequest
+      if (!body?.verification) {
+        throw new BadRequestError("verification object is required")
+      }
+
+      const user = await prisma.usuario.findUnique({ where: { id: req.user.userId } })
+      if (!user || !user.activo) {
+        throw new UnauthorizedError("User not found or inactive")
+      }
+
+      if (body.verification.method === "password") {
+        const okPass = await verifyPassword(body.verification.password, user.passwordHash)
+        if (!okPass) throw new UnauthorizedError("Invalid credentials")
+      } else if (body.verification.method === "mfa") {
+        throw new BadRequestError("MFA verification not implemented")
+      } else {
+        throw new BadRequestError("Unsupported verification method")
+      }
+
+      // Revoca TODAS las sesiones del usuario
       await authService.logoutAll(req.user.userId)
 
-      const platform = req.clientPlatform as Platform
-      if (platform === "WEB") {
+      // WEB: limpia la cookie rt
+      if (req.clientPlatform === "WEB") {
         res.clearCookie("rt", {
           httpOnly: true,
           secure: process.env.NODE_ENV === "production",
           sameSite: "strict",
-          path: "/auth/refresh",
+          path: REFRESH_COOKIE_PATH,
         })
       }
 
