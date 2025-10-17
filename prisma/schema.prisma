@@ -7,6 +7,8 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Enums
+
 enum RolType {
   SUPER_ADMIN
   SUPERVISOR
@@ -32,16 +34,46 @@ enum Platform {
   MOBILE
 }
 
+enum ProfileStatus {
+  INCOMPLETE
+  COMPLETE
+}
+
+enum DocumentType {
+  CC
+  CE
+  PAS
+  NIT
+  OTRO
+}
+
+enum InvitationStatus {
+  PENDING
+  USED
+  EXPIRED
+}
+
+// Modelos
 model Usuario {
-  id           String     @id @default(cuid())
-  email        String     @unique
+  id           String  @id @default(cuid())
+  email        String  @unique
   passwordHash String
   nombres      String
   apellidos    String
   rol          RolType
-  activo       Boolean    @default(true)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  activo       Boolean @default(true)
+
+  // Onboarding
+  profileStatus      ProfileStatus @default(INCOMPLETE)
+  profileCompletedAt DateTime?
+
+  // Documento de identidad (obligatorio al completar perfil)
+  documentType   DocumentType?
+  documentNumber String?
+  telefono       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relaciones
   guia          Guia?
@@ -49,48 +81,86 @@ model Usuario {
   refreshTokens RefreshToken[]
   sessions      Session[]
 
+  // Invitaciones (quien invita y la invitación recibida)
+  sentInvitations    Invitation[] @relation("InviterRelation")
+  receivedInvitation Invitation?  @relation("InviteeRelation")
+
+  // Índices de búsqueda/filtrado por documento
+  @@index([documentType, documentNumber])
+
+  // Unicidad estricta documento (activar si lo decides)
+  // @@unique([documentType, documentNumber])
+
   @@map("usuarios")
 }
 
+model Invitation {
+  id               String           @id @default(cuid())
+  email            String
+  role             RolType
+  tempPasswordHash String
+  tokenHash        String?          @unique
+  status           InvitationStatus @default(PENDING)
+  expiresAt        DateTime
+  usedAt           DateTime?
+
+  // Quien invita
+  inviterId String
+  inviter   Usuario @relation("InviterRelation", fields: [inviterId], references: [id], onDelete: Cascade)
+
+  // Usuario invitado (opcional si lo pre-creas; único para evitar duplicidad 1:1)
+  userId String?  @unique
+  user   Usuario? @relation("InviteeRelation", fields: [userId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Índices útiles
+  @@index([email])
+  @@index([status])
+  @@index([expiresAt])
+
+  @@map("invitations")
+}
+
 model Session {
-  id               String    @id @default(cuid())
-  userId           String
-  user             Usuario   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String  @id @default(cuid())
+  userId String
+  user   Usuario @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // Platform (audience)
-  platform         Platform
-  // Device identity (optional but recommended for Mobile)
-  deviceId         String?
-  // Client fingerprint (better for WEB)
-  userAgent        String?
-  ip               String?
+  // Plataforma / dispositivo
+  platform  Platform
+  deviceId  String?
+  userAgent String?
+  ip        String?
 
-  // Rotatory refresh token (stores hash, never plain value)
+  // Refresh token rotatorio (hash, nunca el valor en claro)
   refreshTokenHash String?   @unique
   refreshExpiresAt DateTime?
   lastRotatedAt    DateTime?
 
-  // Session state control
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  revokedAt        DateTime?
+  // Estado de sesión
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  revokedAt DateTime?
 
-  // For fast queries
+  // Índices
   @@index([userId, platform])
   @@index([deviceId])
+
   @@map("sessions")
 }
 
 model RefreshToken {
-  id           String    @id @default(cuid())
+  id           String         @id @default(cuid())
   userId       String
-  usuario      Usuario   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash    String    @unique
-  issuedAt     DateTime  @default(now())
+  usuario      Usuario        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String         @unique
+  issuedAt     DateTime       @default(now())
   expiresAt    DateTime
   revokedAt    DateTime?
   replacedById String?
-  replacedBy   RefreshToken? @relation("Replacements", fields: [replacedById], references: [id])
+  replacedBy   RefreshToken?  @relation("Replacements", fields: [replacedById], references: [id])
   replacements RefreshToken[] @relation("Replacements")
   ip           String?
   userAgent    String?
@@ -99,6 +169,7 @@ model RefreshToken {
   @@index([userId])
   @@index([expiresAt])
   @@index([revokedAt])
+
   @@map("refresh_tokens")
 }
 
@@ -110,7 +181,6 @@ model Guia {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Relaciones
   usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
   turnos  Turno[]
 
@@ -124,8 +194,7 @@ model Supervisor {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Relaciones
-  usuario    Usuario     @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  usuario    Usuario    @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
   recaladas  Recalada[]
   atenciones Atencion[]
 
@@ -140,7 +209,6 @@ model Pais {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
-  // Relaciones
   recaladas Recalada[]
 
   @@map("paises")
@@ -155,7 +223,6 @@ model Buque {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
-  // Relaciones
   recaladas Recalada[]
 
   @@map("buques")
@@ -173,7 +240,6 @@ model Recalada {
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
-  // Relaciones
   buque      Buque      @relation(fields: [buqueId], references: [id])
   paisOrigen Pais       @relation(fields: [paisOrigenId], references: [id])
   supervisor Supervisor @relation(fields: [supervisorId], references: [id])
@@ -194,7 +260,6 @@ model Atencion {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  // Relaciones
   recalada   Recalada   @relation(fields: [recaladaId], references: [id])
   supervisor Supervisor @relation(fields: [supervisorId], references: [id])
   turnos     Turno[]
@@ -206,18 +271,18 @@ model Turno {
   id            Int         @id @default(autoincrement())
   atencionId    Int
   guiaId        String?
-  numero        Int         // Número correlativo del turno
+  numero        Int         // correlativo
   status        TurnoStatus @default(CREADO)
-  fechaInicio   DateTime?   // Cuando el guía pone el turno "en uso"
-  fechaFin      DateTime?   // Cuando el guía libera o termina el turno
+  fechaInicio   DateTime?
+  fechaFin      DateTime?
   observaciones String?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
-  // Relaciones
   atencion Atencion @relation(fields: [atencionId], references: [id])
   guia     Guia?    @relation(fields: [guiaId], references: [id])
 
   @@unique([atencionId, numero])
+
   @@map("turnos")
 }

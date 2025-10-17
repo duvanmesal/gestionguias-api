@@ -3,6 +3,7 @@ import { hashPassword, verifyPassword } from "../../libs/password"
 import { NotFoundError, ConflictError, BusinessError, UnauthorizedError } from "../../libs/errors"
 import { logger } from "../../libs/logger"
 import type { CreateUserRequest, UpdateUserRequest, ChangePasswordRequest } from "../auth/auth.schemas"
+import type { CompleteProfileRequest } from "./user.schemas"
 import { RolType } from "@prisma/client"
 
 export interface PaginationOptions {
@@ -61,6 +62,7 @@ export class UserService {
           apellidos: true,
           rol: true,
           activo: true,
+          profileStatus: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -349,6 +351,78 @@ export class UserService {
       },
       "User activated",
     )
+  }
+
+  async completeProfile(userId: string, data: CompleteProfileRequest): Promise<any> {
+    const user = await prisma.usuario.findUnique({
+      where: { id: userId },
+    })
+
+    if (!user) {
+      throw new NotFoundError("User not found")
+    }
+
+    if (user.profileStatus === "COMPLETE") {
+      throw new BusinessError("Profile is already complete")
+    }
+
+    // Check for duplicate document number
+    if (data.documentType && data.documentNumber) {
+      const existingUserWithDoc = await prisma.usuario.findFirst({
+        where: {
+          documentType: data.documentType,
+          documentNumber: data.documentNumber,
+          id: { not: userId },
+        },
+      })
+
+      if (existingUserWithDoc) {
+        throw new ConflictError("A user with this document type and number already exists")
+      }
+    }
+
+    // Update user profile
+    const updatedUser = await prisma.usuario.update({
+      where: { id: userId },
+      data: {
+        nombres: data.nombres,
+        apellidos: data.apellidos,
+        telefono: data.telefono,
+        documentType: data.documentType,
+        documentNumber: data.documentNumber,
+        profileStatus: "COMPLETE",
+        profileCompletedAt: new Date(),
+      },
+      select: {
+        id: true,
+        email: true,
+        nombres: true,
+        apellidos: true,
+        rol: true,
+        activo: true,
+        profileStatus: true,
+        profileCompletedAt: true,
+        documentType: true,
+        telefono: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    })
+
+    logger.info(
+      {
+        userId,
+        documentType: data.documentType,
+        documentNumberMasked: data.documentNumber.slice(-4).padStart(data.documentNumber.length, "*"),
+      },
+      "User profile completed",
+    )
+
+    // Return without full document number (masked)
+    return {
+      ...updatedUser,
+      documentNumber: data.documentNumber.slice(-4).padStart(data.documentNumber.length, "*"),
+    }
   }
 }
 

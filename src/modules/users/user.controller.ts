@@ -3,6 +3,7 @@ import { userService } from "./user.service"
 import { ok, created } from "../../libs/http"
 import { logger } from "../../libs/logger"
 import type { CreateUserRequest, UpdateUserRequest, ChangePasswordRequest } from "../auth/auth.schemas"
+import type { CompleteProfileRequest } from "./user.schemas"
 import type { RolType } from "@prisma/client"
 
 export class UserController {
@@ -122,6 +123,34 @@ export class UserController {
       res.status(204).send()
     } catch (error) {
       next(error)
+    }
+  }
+
+  async completeProfile(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: "Unauthorized" })
+        return
+      }
+
+      const data = req.body as CompleteProfileRequest
+      const userId = req.user.userId
+
+      const user = await userService.completeProfile(userId, data)
+
+      logger.info(
+        {
+          userId,
+          profileStatus: user.profileStatus,
+        },
+        "Profile completed successfully",
+      )
+
+      res.json(ok(user))
+      return
+    } catch (error) {
+      next(error)
+      return
     }
   }
 }

@@ -4,12 +4,19 @@ import { requireAuth, requireOwnershipOrRole } from "../libs/auth"
 import { requireSuperAdmin } from "../libs/rbac"
 import { userController } from "../modules/users/user.controller"
 import { createUserSchema, updateUserSchema, changePasswordSchema } from "../modules/auth/auth.schemas"
+import { completeProfileSchema } from "../modules/users/user.schemas"
 import { RolType } from "@prisma/client"
 
 const router = Router()
 
 // All routes require authentication
 router.use(requireAuth)
+
+router.patch(
+  "/me/profile",
+  validate({ body: completeProfileSchema }),
+  userController.completeProfile.bind(userController),
+)
 
 // List users - only SUPER_ADMIN
 router.get("/", requireSuperAdmin, userController.list.bind(userController))

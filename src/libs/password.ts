@@ -1,27 +1,31 @@
-import { hash, verify } from "argon2"
+import { hash as argonHash, verify as argonVerify, argon2id } from "argon2";
+
+const PASSWORD_PEPPER = process.env.PASSWORD_PEPPER ?? "";
 
 /**
- * Hash a password using Argon2id (recommended for password hashing)
+ * Hash con Argon2id + pepper
  */
-export const hashPassword = async (password: string): Promise<string> => {
-  return hash(password, {
-    type: 2, // Argon2id
-    memoryCost: 2 ** 16, // 64 MB
-    timeCost: 3, // 3 iterations
-    parallelism: 1, // 1 thread
-  })
+export async function hashPassword(password: string): Promise<string> {
+  const toHash = `${password}${PASSWORD_PEPPER}`;
+  return argonHash(toHash, {
+    type: argon2id,     // Argon2id recomendado
+    memoryCost: 2 ** 16, // 64 MiB
+    timeCost: 3,         // 3 iteraciones
+    parallelism: 1,      // 1 hilo
+  });
 }
 
 /**
- * Verify a password against its hash
+ * Verifica con Argon2id + pepper
  */
-export const verifyPassword = async (password: string, hash: string): Promise<boolean> => {
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
   try {
-    return await verify(hash, password)
-  } catch (error) {
-    return false
+    const candidate = `${password}${PASSWORD_PEPPER}`;
+    return await argonVerify(hash, candidate);
+  } catch {
+    return false;
   }
 }
 
-// Legacy export for backward compatibility
-export const comparePassword = verifyPassword
+// compat
+export const comparePassword = verifyPassword;

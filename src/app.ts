@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser"
 import { corsOrigins } from "./config/env"
 import { requestLogger } from "./middlewares/request-logger"
 import { errorHandler } from "./middlewares/error-handler"
+import { requireCompletedProfile } from "./middlewares/require-completed-profile"
 import { router as healthRouter } from "./routes/health"
 import { apiRouter } from "./routes"
 import { logger } from "./libs/logger"
@@ -49,6 +50,8 @@ app.use("/health", healthRouter)
 
 // API routes with versioning
 app.use("/api", apiRouter)
+
+app.use("/api", requireCompletedProfile)
 
 // 404 handler for unmatched routes
 app.use("*", (_req, res) => {
