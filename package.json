@@ -20,7 +20,9 @@
     "seed": "prisma db seed",
     "test": "jest --passWithNoTests",
     "test:watch": "jest --watch",
-    "test:cov": "jest --coverage"
+    "test:cov": "jest --coverage",
+    "test:unit": "jest src/__tests__/unit --runInBand",
+    "test:http": "jest src/__tests__/http --runInBand"
   },
   "keywords": [
     "api",

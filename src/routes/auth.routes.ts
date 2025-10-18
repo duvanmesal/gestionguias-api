@@ -8,7 +8,12 @@ import { sensitiveLimiter } from "../middlewares/rate-limit"
 
 const router = Router()
 
-router.post("/login", detectClientPlatform, validate({ body: loginSchema }), authController.login.bind(authController))
+router.post("/login",
+  sensitiveLimiter,
+  detectClientPlatform,
+  validate({ body: loginSchema }),
+  authController.login.bind(authController));
+
 
 router.post(
   "/refresh",
@@ -19,6 +24,7 @@ router.post(
 
 router.post("/logout", detectClientPlatform, requireAuth, authController.logout.bind(authController))
 
+/*
 router.post(
   "/auth/logout-all",
   sensitiveLimiter,
@@ -27,6 +33,7 @@ router.post(
   validate({ body: logoutAllSchema }),
   authController.logoutAll,
 )
+*/
 
 // router.post("/register", validate({ body: registerSchema }), authController.register.bind(authController));
 
