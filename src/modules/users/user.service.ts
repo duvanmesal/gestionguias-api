@@ -26,31 +26,40 @@ export interface PaginatedResult<T> {
 
 export class UserService {
   async list(options: PaginationOptions = {}): Promise<PaginatedResult<any>> {
-    const { page = 1, pageSize = 20, search, rol, activo } = options
+    // Normalización defensiva
+    const rawPage = Number(options.page ?? 1)
+    const rawPageSize = Number(options.pageSize ?? 20)
+
+    const MIN_PAGE_SIZE = 1
+    const MAX_PAGE_SIZE = 100
+
+    const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1
+    const pageSizeClampedBase = Number.isFinite(rawPageSize) && rawPageSize > 0 ? Math.floor(rawPageSize) : 20
+    const pageSize = Math.min(Math.max(pageSizeClampedBase, MIN_PAGE_SIZE), MAX_PAGE_SIZE)
 
     const skip = (page - 1) * pageSize
-    const take = Math.min(pageSize, 100) // Max 100 items per page
+    const take = pageSize
 
     // Build where clause
     const where: any = {}
 
-    if (search) {
+    const q = (options.search ?? "").trim()
+    if (q !== "") {
       where.OR = [
-        { nombres: { contains: search, mode: "insensitive" } },
-        { apellidos: { contains: search, mode: "insensitive" } },
-        { email: { contains: search, mode: "insensitive" } },
+        { nombres:   { contains: q, mode: "insensitive" } },
+        { apellidos: { contains: q, mode: "insensitive" } },
+        { email:     { contains: q, mode: "insensitive" } },
       ]
     }
 
-    if (rol) {
-      where.rol = rol
+    if (options.rol) {
+      where.rol = options.rol
     }
 
-    if (typeof activo === "boolean") {
-      where.activo = activo
+    if (typeof options.activo === "boolean") {
+      where.activo = options.activo
     }
 
-    // Get total count and data
     const [total, users] = await Promise.all([
       prisma.usuario.count({ where }),
       prisma.usuario.findMany({
@@ -72,7 +81,8 @@ export class UserService {
       }),
     ])
 
-    const totalPages = Math.ceil(total / pageSize)
+    // ¡Importante!: usar el pageSize EFECTIVO para coherencia con 'take'
+    const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
     return {
       data: users,
@@ -85,8 +95,9 @@ export class UserService {
     }
   }
 
+
   async create(data: CreateUserRequest, createdBy: string): Promise<any> {
-    // Check if user already exists
+    // Verificar duplicado por email
     const existingUser = await prisma.usuario.findUnique({
       where: { email: data.email },
     })
@@ -95,10 +106,10 @@ export class UserService {
       throw new ConflictError("User with this email already exists")
     }
 
-    // Hash password
+    // Hash de contraseña
     const passwordHash = await hashPassword(data.password)
 
-    // Create user
+    // Crear usuario
     const user = await prisma.usuario.create({
       data: {
         email: data.email,
@@ -106,7 +117,7 @@ export class UserService {
         nombres: data.nombres,
         apellidos: data.apellidos,
         rol: data.rol,
-        activo: true,
+        activo: true, // tu contrato actual
       },
       select: {
         id: true,
@@ -132,6 +143,7 @@ export class UserService {
 
     return user
   }
+
 
   async get(id: string): Promise<any> {
     const user = await prisma.usuario.findUnique({

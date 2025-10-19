@@ -77,6 +77,27 @@ export const changePasswordSchema = z.object({
     ),
 });
 
+export const listUsersQuerySchema = z.object({
+  page: z
+    .string()
+    .transform((v) => parseInt(v))
+    .refine((n) => !isNaN(n) && n > 0, "page must be a positive integer")
+    .optional()
+    .default("1"),
+  pageSize: z
+    .string()
+    .transform((v) => parseInt(v))
+    .refine((n) => !isNaN(n) && n >= 1 && n <= 100, "pageSize must be between 1 and 100")
+    .optional()
+    .default("20"),
+  search: z.string().trim().optional(),
+  rol: z.nativeEnum(RolType).optional(),
+  activo: z
+    .union([z.string(), z.boolean()])
+    .transform((v) => (v === "true" || v === true ? true : v === "false" || v === false ? false : undefined))
+    .optional(),
+})
+
 // Type exports for controllers
 export type LoginRequest = z.infer<typeof loginSchema>;
 export type RefreshRequest = z.infer<typeof refreshSchema>;
@@ -85,3 +106,4 @@ export type LogoutAllRequest = z.infer<typeof logoutAllSchema>;
 export type CreateUserRequest = z.infer<typeof createUserSchema>;
 export type UpdateUserRequest = z.infer<typeof updateUserSchema>;
 export type ChangePasswordRequest = z.infer<typeof changePasswordSchema>;
+export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
