@@ -15,7 +15,7 @@ v1Router.use("/invitations", invitationRoutes);
 v1Router.use("/emails", emailRoutes); // ← aquí montamos emails
 
 // Mount versioned routes
-router.use("/v1", v1Router);
+router.use("/", v1Router);
 
 // API info endpoint
 router.get("/", (_req, res) => {
@@ -25,10 +25,10 @@ router.get("/", (_req, res) => {
       version: "1.0.0",
       description: "API para gestión de turnos de guías turísticos",
       endpoints: {
-        auth: "/api/v1/auth",
-        users: "/api/v1/users",
-        invitations: "/api/v1/invitations",
-        emails: "/api/v1/emails",
+        auth: `${process.env.API_PREFIX ?? "/api"}/auth`,
+        users: `${process.env.API_PREFIX ?? "/api"}/users`,
+        invitations: `${process.env.API_PREFIX ?? "/api"}/invitations`,
+        emails: `${process.env.API_PREFIX ?? "/api"}/emails`,
         health: "/health",
       },
     },

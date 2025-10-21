@@ -62,10 +62,19 @@ export class AuthService {
       throw new BadRequestError("deviceId is required for mobile platform")
     }
 
-    const user = await prisma.usuario.findUnique({
-      where: { email: data.email },
-    })
-    if (!user || !user.activo) {
+    logger.info({ email: data.email }, "[Auth/Login] lookup by email")
+    const user = await prisma.usuario.findUnique({ where: { email: data.email } })
+
+    if (!user) {
+      logger.warn({ email: data.email }, "[Auth/Login] user not found")
+      throw new UnauthorizedError("Invalid credentials")
+    }
+    if (!user.activo) {
+      logger.warn({ userId: user.id }, "[Auth/Login] inactive user")
+      throw new UnauthorizedError("Invalid credentials")
+    }
+    if (!user.passwordHash) {
+      logger.error({ userId: user.id }, "[Auth/Login] missing passwordHash")
       throw new UnauthorizedError("Invalid credentials")
     }
 
@@ -73,6 +82,15 @@ export class AuthService {
     if (!isValidPassword) {
       throw new UnauthorizedError("Invalid credentials")
     }
+
+    if (!user || !user.activo) {
+      throw new UnauthorizedError("Invalid credentials")
+    }
+
+    logger.info(
+      { userId: user.id, email: user.email, platform, ip, userAgent },
+      "[Auth/Login] success"
+    )
 
     // Refresh TTL desde .env
     const refreshTokenValue = generateRefreshToken()

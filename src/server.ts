@@ -15,7 +15,7 @@ async function startServer() {
         {
           port: env.PORT,
           environment: env.NODE_ENV,
-          cors: env.CORS_ORIGINS,
+          cors: env.CORS_ALLOWED_ORIGINS,
         },
         "Server started successfully",
       )

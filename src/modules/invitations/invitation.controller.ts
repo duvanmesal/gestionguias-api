@@ -3,6 +3,7 @@ import { invitationService } from "./invitation.service"
 import { ok, created } from "../../libs/http"
 import { logger } from "../../libs/logger"
 import type { CreateInvitationRequest } from "./invitation.schemas"
+import type { InvitationStatus } from "@prisma/client"
 
 export class InvitationController {
   async create(req: Request, res: Response, next: NextFunction) {
@@ -38,22 +39,20 @@ export class InvitationController {
 
   async list(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!req.user) {
-        return res.status(401).json({ error: "Unauthorized" })
-      }
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" })
 
-      const { status, email } = req.query
-
-      const invitations = await invitationService.listInvitations({
-        status: status as any,
-        email: email as string,
+      const { status, email } = req.query as { status?: InvitationStatus; email?: string }
+      const items = await invitationService.listInvitations({
+        status,
+        email: email?.toLowerCase(),
       })
 
-      return res.json(ok({ invitations }))
+      return res.json(ok(items))
     } catch (error) {
       return next(error)
     }
   }
+
 
   async resend(req: Request, res: Response, next: NextFunction) {
     try {

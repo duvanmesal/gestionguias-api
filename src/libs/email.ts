@@ -7,7 +7,7 @@ const SMTP_PORT = Number.parseInt(process.env.SMTP_PORT || "587", 10);
 const SMTP_USER = process.env.SMTP_USER || "";
 const SMTP_PASS = process.env.SMTP_PASS || "";
 const EMAIL_FROM = process.env.EMAIL_FROM || "Gestión de Guías <noreply@gestionguias.com>";
-const APP_LOGIN_URL = process.env.APP_LOGIN_URL || "http://localhost:4200/login";
+const APP_LOGIN_URL = process.env.APP_LOGIN_URL || "http://localhost:3001/login";
 const APP_NAME = process.env.APP_NAME || "Gestión de Guías Turísticos";
 
 export interface InvitationEmailData {

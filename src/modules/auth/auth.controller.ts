@@ -13,6 +13,18 @@ const REFRESH_COOKIE_PATH = (process.env.API_PREFIX || "") + "/auth/refresh"
 export class AuthController {
   async login(req: Request, res: Response, next: NextFunction) {
     try {
+      logger.info(
+        {
+          hasBody: !!req.body,
+          email: (req.body as any)?.email,
+          platformHeader: req.get("X-Client-Platform"),
+          clientPlatform: req.clientPlatform,
+          ip: req.ip,
+          userAgent: req.get("User-Agent"),
+        },
+        "[Auth/Login] incoming"
+      )
+      
       if (!req.clientPlatform) {
         throw new BadRequestError("X-Client-Platform header is required")
       }

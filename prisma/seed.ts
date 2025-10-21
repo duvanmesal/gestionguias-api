@@ -1,11 +1,13 @@
 import "dotenv/config";
+const env: Record<string, string | undefined> = (globalThis as any)?.process?.env ?? {};
+
 import { PrismaClient, RolType, ProfileStatus } from "@prisma/client";
 import { hash as argonHash, argon2id } from "argon2";
 
 const prisma = new PrismaClient();
 
 // --- helpers locales (evitan depender de src/) ---
-const PASSWORD_PEPPER = process.env.PASSWORD_PEPPER ?? "";
+const PASSWORD_PEPPER = env.PASSWORD_PEPPER ?? "";
 
 async function hashPassword(plain: string) {
   const toHash = `${plain}${PASSWORD_PEPPER}`;
@@ -20,9 +22,9 @@ async function hashPassword(plain: string) {
 async function main() {
   console.log("🌱 Starting database seeding...");
 
-  const SUPER_EMAIL = process.env.SEED_SUPERADMIN_EMAIL ?? "superadmin@local.test";
-  const SUPER_PASS  = process.env.SEED_SUPERADMIN_PASS  ?? "ChangeMe!123";
-  const NODE_ENV    = process.env.NODE_ENV ?? "development";
+  const SUPER_EMAIL = env.SEED_SUPERADMIN_EMAIL ?? "superadmin@local.test";
+  const SUPER_PASS  = env.SEED_SUPERADMIN_PASS  ?? "ChangeMe!123";
+  const NODE_ENV    = env.NODE_ENV ?? "development";
 
   await upsertSuperAdmin(SUPER_EMAIL, SUPER_PASS);
   await upsertCountries();
@@ -160,7 +162,7 @@ async function upsertTestUsers() {
 main()
   .catch((e) => {
     console.error("❌ Error during seeding:", e);
-    process.exit(1);
+    (globalThis as any)?.process?.exit?.(1);
   })
   .finally(async () => {
     await prisma.$disconnect();
