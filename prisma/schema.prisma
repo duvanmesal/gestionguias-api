@@ -53,7 +53,6 @@ enum InvitationStatus {
   EXPIRED
 }
 
-// Modelos
 model Usuario {
   id           String  @id @default(cuid())
   email        String  @unique
@@ -67,7 +66,7 @@ model Usuario {
   profileStatus      ProfileStatus @default(INCOMPLETE)
   profileCompletedAt DateTime?
 
-  // Documento de identidad (obligatorio al completar perfil)
+  // Documento de identidad
   documentType   DocumentType?
   documentNumber String?
   telefono       String?
@@ -81,16 +80,11 @@ model Usuario {
   refreshTokens RefreshToken[]
   sessions      Session[]
 
-  // Invitaciones (quien invita y la invitación recibida)
+  // Invitaciones
   sentInvitations    Invitation[] @relation("InviterRelation")
   receivedInvitation Invitation?  @relation("InviteeRelation")
 
-  // Índices de búsqueda/filtrado por documento
   @@index([documentType, documentNumber])
-
-  // Unicidad estricta documento (activar si lo decides)
-  // @@unique([documentType, documentNumber])
-
   @@map("usuarios")
 }
 
@@ -104,22 +98,18 @@ model Invitation {
   expiresAt        DateTime
   usedAt           DateTime?
 
-  // Quien invita
   inviterId String
   inviter   Usuario @relation("InviterRelation", fields: [inviterId], references: [id], onDelete: Cascade)
 
-  // Usuario invitado (opcional si lo pre-creas; único para evitar duplicidad 1:1)
   userId String?  @unique
   user   Usuario? @relation("InviteeRelation", fields: [userId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Índices útiles
   @@index([email])
   @@index([status])
   @@index([expiresAt])
-
   @@map("invitations")
 }
 
@@ -128,26 +118,21 @@ model Session {
   userId String
   user   Usuario @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // Plataforma / dispositivo
   platform  Platform
   deviceId  String?
   userAgent String?
   ip        String?
 
-  // Refresh token rotatorio (hash, nunca el valor en claro)
   refreshTokenHash String?   @unique
   refreshExpiresAt DateTime?
   lastRotatedAt    DateTime?
 
-  // Estado de sesión
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   revokedAt DateTime?
 
-  // Índices
   @@index([userId, platform])
   @@index([deviceId])
-
   @@map("sessions")
 }
 
@@ -169,7 +154,6 @@ model RefreshToken {
   @@index([userId])
   @@index([expiresAt])
   @@index([revokedAt])
-
   @@map("refresh_tokens")
 }
 
@@ -202,29 +186,35 @@ model Supervisor {
 }
 
 model Pais {
-  id        Int        @id @default(autoincrement())
-  nombre    String     @unique
-  codigo    String     @unique // ISO code
-  status    StatusType @default(ACTIVO)
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id         Int         @id @default(autoincrement())
+  nombre     String      @unique
+  codigo     String      @unique // ISO code o interno
+  status     StatusType  @default(ACTIVO)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
 
-  recaladas Recalada[]
+  recaladas  Recalada[]
+  buques     Buque[]
 
+  @@index([status])
   @@map("paises")
 }
 
 model Buque {
-  id        Int        @id @default(autoincrement())
-  nombre    String     @unique
-  naviera   String?
-  capacidad Int?
-  status    StatusType @default(ACTIVO)
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id         Int         @id @default(autoincrement())
+  nombre     String      @unique
+  naviera    String?
+  capacidad  Int?
+  status     StatusType  @default(ACTIVO)
+  paisId     Int?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
 
-  recaladas Recalada[]
+  pais       Pais?       @relation(fields: [paisId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  recaladas  Recalada[]
 
+  @@index([paisId])
+  @@index([status])
   @@map("buques")
 }
 
@@ -283,6 +273,5 @@ model Turno {
   guia     Guia?    @relation(fields: [guiaId], references: [id])
 
   @@unique([atencionId, numero])
-
   @@map("turnos")
 }
