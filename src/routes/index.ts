@@ -4,6 +4,10 @@ import { userRoutes } from "./users.routes";
 import { invitationRoutes } from "./invitations.routes";
 import { emailRoutes } from "./email.routes";
 
+// 🔹 Nuevos catálogos
+import paisRoutes from "./pais.routes";
+import buqueRoutes from "./buque.routes";
+
 const router = Router();
 
 // API v1 routes
@@ -12,7 +16,11 @@ const v1Router = Router();
 v1Router.use("/auth", authRoutes);
 v1Router.use("/users", userRoutes);
 v1Router.use("/invitations", invitationRoutes);
-v1Router.use("/emails", emailRoutes); // ← aquí montamos emails
+v1Router.use("/emails", emailRoutes);
+
+// 🔹 Nuevas rutas de catálogos
+v1Router.use("/paises", paisRoutes);
+v1Router.use("/buques", buqueRoutes);
 
 // Mount versioned routes
 router.use("/", v1Router);
@@ -29,6 +37,8 @@ router.get("/", (_req, res) => {
         users: `${process.env.API_PREFIX ?? "/api"}/users`,
         invitations: `${process.env.API_PREFIX ?? "/api"}/invitations`,
         emails: `${process.env.API_PREFIX ?? "/api"}/emails`,
+        paises: `${process.env.API_PREFIX ?? "/api"}/paises`,
+        buques: `${process.env.API_PREFIX ?? "/api"}/buques`,
         health: "/health",
       },
     },
