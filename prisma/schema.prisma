@@ -62,11 +62,9 @@ model Usuario {
   rol          RolType
   activo       Boolean @default(true)
 
-  // Onboarding
   profileStatus      ProfileStatus @default(INCOMPLETE)
   profileCompletedAt DateTime?
 
-  // Documento de identidad
   documentType   DocumentType?
   documentNumber String?
   telefono       String?
@@ -74,13 +72,11 @@ model Usuario {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Relaciones
   guia          Guia?
   supervisor    Supervisor?
   refreshTokens RefreshToken[]
   sessions      Session[]
 
-  // Invitaciones
   sentInvitations    Invitation[] @relation("InviterRelation")
   receivedInvitation Invitation?  @relation("InviteeRelation")
 
@@ -188,7 +184,7 @@ model Supervisor {
 model Pais {
   id         Int         @id @default(autoincrement())
   nombre     String      @unique
-  codigo     String      @unique // ISO code o interno
+  codigo     String      @unique
   status     StatusType  @default(ACTIVO)
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
@@ -261,7 +257,7 @@ model Turno {
   id            Int         @id @default(autoincrement())
   atencionId    Int
   guiaId        String?
-  numero        Int         // correlativo
+  numero        Int
   status        TurnoStatus @default(CREADO)
   fechaInicio   DateTime?
   fechaFin      DateTime?
