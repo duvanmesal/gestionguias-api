@@ -1,7 +1,3 @@
-¡Perfecto, Duván! Aquí tienes la **especificación completa** para migrar tu registro a un **flujo por invitación por email**, con contraseñas temporales, expiración en 24 h, “primer login” en estado incompleto y forzado a completar perfil. Lo dejé listo para que lo integres en tu stack Express + TS + Prisma + PostgreSQL, con Docker y logs consistentes.
-
----
-
 # 1) Objetivo y alcance
 
 * **Sustituir registro abierto** por **alta vía invitación** emitida por un rol autorizado (p. ej., `SUPER_ADMIN`).
