@@ -30,7 +30,7 @@ async function main() {
   console.log("🌱 Starting database seeding...")
 
   const SUPER_EMAIL = env.SEED_SUPERADMIN_EMAIL ?? "duvandev@test.com"
-  const SUPER_PASS  = env.SEED_SUPERADMIN_PASS  ?? "dev!123456"
+  const SUPER_PASS  = env.SEED_SUPERADMIN_PASS  ?? "Dev!123456"
   const NODE_ENV    = env.NODE_ENV ?? "development"
 
   await upsertSuperAdmin(SUPER_EMAIL, SUPER_PASS)

@@ -75,6 +75,7 @@ model Usuario {
   guia          Guia?
   supervisor    Supervisor?
   refreshTokens RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
   sessions      Session[]
 
   sentInvitations    Invitation[] @relation("InviterRelation")
@@ -107,6 +108,24 @@ model Invitation {
   @@index([status])
   @@index([expiresAt])
   @@map("invitations")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+
+  userId    String
+  user      Usuario  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([usedAt])
+  @@map("password_reset_tokens")
 }
 
 model Session {

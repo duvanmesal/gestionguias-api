@@ -260,7 +260,221 @@ const pass  = process.env.SEED_SUPERADMIN_PASS  ?? "ChangeMe!123";
 
 ---
 
-## 1.9 Definition of Done
+### **1.9 Cambio de contraseña (implementado)**
+
+El sistema implementa un mecanismo seguro para el **cambio de contraseña de usuarios autenticados**, pensado especialmente para:
+
+* Usuarios que ingresan con una **contraseña temporal**.
+* Usuarios que desean **actualizar sus credenciales** de forma voluntaria.
+* Reforzar seguridad invalidando sesiones activas tras el cambio.
+
+Este endpoint **ya se encuentra implementado** en el repositorio.
+
+---
+
+### **1.9.1 Cambio de contraseña**
+
+#### POST `/auth/change-password`
+
+* **Auth requerida:**
+  `Authorization: Bearer <accessToken>`
+
+* **Headers obligatorios:**
+  `X-Client-Platform: WEB | MOBILE`
+
+* **Body**
+  Se admite **uno de los dos campos** para la contraseña actual (compatibilidad):
+
+```json
+{
+  "currentPassword": "OldPass123!",
+  "newPassword": "NewStrongPass123!"
+}
+```
+
+o
+
+```json
+{
+  "oldPassword": "OldPass123!",
+  "newPassword": "NewStrongPass123!"
+}
+```
+
+---
+
+### **Reglas de negocio**
+
+* El usuario **solo puede cambiar su propia contraseña**.
+* Se valida la contraseña actual antes de aplicar el cambio.
+* La nueva contraseña debe cumplir reglas de complejidad:
+
+  * mínimo 8 caracteres
+  * mayúscula, minúscula, número y carácter especial
+* La nueva contraseña **no puede ser igual** a la anterior.
+* Tras el cambio:
+
+  * Se actualiza el `passwordHash`.
+  * Se **revocan todas las sesiones activas** del usuario para forzar re-login.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "message": "Password changed successfully"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+* `400` → validación fallida (password débil o igual a la anterior).
+* `401` → contraseña actual incorrecta o usuario no autorizado.
+* `404` → usuario no encontrado.
+
+---
+
+### **Consideraciones de seguridad**
+
+* La contraseña nunca se expone ni se almacena en texto plano.
+* Se utiliza hashing seguro (`Argon2id`).
+* La revocación de sesiones evita el uso de tokens antiguos.
+* El endpoint está protegido con:
+
+  * `requireAuth`
+  * validación estricta con `Zod`
+  * rate limiting para mitigar ataques de fuerza bruta.
+
+---
+
+## **1.10 Recuperación de contraseña (Forgot Password)**
+
+El sistema implementa un flujo seguro de **recuperación de contraseña** para usuarios que han olvidado sus credenciales, sin comprometer la seguridad ni exponer información sensible sobre la existencia de cuentas.
+
+Este mecanismo **ya se encuentra implementado** en el repositorio.
+
+---
+
+### **1.10.1 Solicitud de recuperación**
+
+#### POST `/auth/forgot-password`
+
+Permite solicitar un enlace de recuperación enviando únicamente el correo electrónico.
+
+* **Auth requerida:** ❌ No
+
+* **Headers obligatorios:**
+  `X-Client-Platform: WEB | MOBILE`
+
+* **Body:**
+
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+---
+
+### **Reglas de negocio**
+
+* El endpoint **siempre responde exitosamente**, independientemente de si el email existe o no.
+* Si el email:
+
+  * **no existe**, o
+  * corresponde a un usuario **inactivo (`activo=false`)**
+
+  → **no se genera token ni se envía correo**.
+* Si el usuario existe y está activo:
+
+  * Se genera un **token de recuperación de un solo uso**.
+  * Se guarda **únicamente el hash del token** en base de datos.
+  * Se invalidan tokens de recuperación previos no utilizados.
+  * Se envía un **correo con enlace de restablecimiento**.
+* El token:
+
+  * Tiene un **TTL configurable** (`PASSWORD_RESET_TTL_MINUTES`, default 15).
+  * Puede usarse **una sola vez**.
+  * Expira automáticamente.
+
+Este diseño evita **enumeración de usuarios** y ataques de fuerza bruta por inferencia.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "message": "If the email exists, you will receive password reset instructions."
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+> ⚠️ La respuesta es **intencionalmente genérica** por motivos de seguridad.
+
+---
+
+### **Modelo de datos asociado (Prisma)**
+
+```prisma
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      Usuario  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([usedAt])
+}
+```
+
+---
+
+### **Consideraciones de seguridad**
+
+* Nunca se almacena el token en texto plano.
+* Los tokens se hashean usando **HMAC + pepper (`TOKEN_PEPPER`)**.
+* El flujo es **silencioso** frente a emails inexistentes o usuarios inactivos.
+* El endpoint está protegido con:
+
+  * `rate limiting`
+  * validación estricta con `Zod`
+* El enlace apunta al frontend:
+
+  * `APP_RESET_PASSWORD_URL?token=xxxxx`
+
+---
+
+### **Flujo resumido**
+
+1. Cliente envía email al endpoint `/auth/forgot-password`.
+2. Backend valida formato del email.
+3. Si el usuario existe y está activo:
+
+   * genera token
+   * guarda hash en DB
+   * invalida tokens previos
+   * envía correo con enlace
+4. Backend responde **200 OK** siempre.
+5. El frontend redirige al flujo de **reset-password** usando el token.
+
+## 1.11 Definition of Done
 
 * Login/Refresh/Logout/Logout-all/Me funcionando correctamente.
 * CRUD de usuarios con RBAC activo.
@@ -270,4 +484,5 @@ const pass  = process.env.SEED_SUPERADMIN_PASS  ?? "ChangeMe!123";
 * Pruebas en Postman cubriendo casos correctos y de error.
 * Logs mostrando entradas/salidas de forma consistente.
 
+### **Estado**
 **Estado:** implementado y validado en el repositorio.

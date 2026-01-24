@@ -24,3 +24,19 @@ export function generateDeviceId(userAgent?: string, ip?: string): string {
   const data = `${userAgent || "unknown"}-${ip || "unknown"}`
   return createHash("sha256").update(data).digest("hex").substring(0, 16)
 }
+
+/**
+ * Generates a cryptographically secure one-time password reset token
+ */
+export function generatePasswordResetToken(): string {
+  return randomBytes(32).toString("hex") // 64 chars
+}
+
+/**
+ * Hash reset token for storage (never store token in plain text)
+ * Uses HMAC-SHA256 with TOKEN_PEPPER
+ */
+export function hashPasswordResetToken(token: string): string {
+  const pepper = env.TOKEN_PEPPER || "default_token_pepper_change_in_production"
+  return createHmac("sha256", pepper).update(token).digest("hex")
+}

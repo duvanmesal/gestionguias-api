@@ -9,6 +9,7 @@ import type {
   RegisterRequest,
   LogoutAllRequest,
   ChangePasswordRequest,
+  ForgotPasswordRequest,
 } from "./auth.schemas"
 import { verifyPassword } from "../../libs/password"
 import type { Platform } from "@prisma/client"
@@ -42,7 +43,10 @@ export class AuthController {
 
       const result = await authService.login(data, platform, ip, userAgent)
 
-      logger.info({ userId: result.user.id, email: result.user.email, platform, ip, userAgent }, "Login successful")
+      logger.info(
+        { userId: result.user.id, email: result.user.email, platform, ip, userAgent },
+        "Login successful",
+      )
 
       if (platform === "WEB" && result.tokens.refreshToken) {
         res.cookie("rt", result.tokens.refreshToken, {
@@ -233,12 +237,44 @@ export class AuthController {
     }
   }
 
+  // ✅ NUEVO: forgot-password (no requiere auth)
+  async forgotPassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!(req as any).clientPlatform) {
+        throw new BadRequestError("X-Client-Platform header is required")
+      }
+
+      const body = req.body as ForgotPasswordRequest
+
+      logger.info(
+        {
+          email: body.email,
+          platformHeader: req.get("X-Client-Platform"),
+          clientPlatform: (req as any).clientPlatform,
+          ip: req.ip,
+          userAgent: req.get("User-Agent"),
+        },
+        "[Auth/ForgotPassword] incoming",
+      )
+
+      await authService.forgotPassword(body.email)
+
+      // Respuesta "ciega" para evitar enumeración de usuarios
+      return res.json(ok({ message: "If the email exists, a recovery message has been sent" }))
+    } catch (error) {
+      return next(error)
+    }
+  }
+
   async register(req: Request, res: Response, next: NextFunction) {
     try {
       const data = req.body as RegisterRequest
       const result = await authService.register(data)
 
-      logger.info({ userId: result.user.id, email: result.user.email, rol: result.user.rol }, "User registration successful")
+      logger.info(
+        { userId: result.user.id, email: result.user.email, rol: result.user.rol },
+        "User registration successful",
+      )
 
       return res.status(201).json(created(result))
     } catch (error) {

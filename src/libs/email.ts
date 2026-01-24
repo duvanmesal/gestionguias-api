@@ -1,29 +1,36 @@
 // src/libs/email.ts
-import nodemailer from "nodemailer";
-import { logger } from "./logger";
+import nodemailer from "nodemailer"
+import { logger } from "./logger"
+import { env } from "../config/env"
 
-const SMTP_HOST = process.env.SMTP_HOST || "localhost";
-const SMTP_PORT = Number.parseInt(process.env.SMTP_PORT || "587", 10);
-const SMTP_USER = process.env.SMTP_USER || "";
-const SMTP_PASS = process.env.SMTP_PASS || "";
-const EMAIL_FROM = process.env.EMAIL_FROM || "Gestión de Guías <noreply@gestionguias.com>";
-const APP_LOGIN_URL = process.env.APP_LOGIN_URL || "http://localhost:3001/login";
-const APP_NAME = process.env.APP_NAME || "Gestión de Guías Turísticos";
+const SMTP_HOST = env.SMTP_HOST
+const SMTP_PORT = env.SMTP_PORT
+const SMTP_USER = env.SMTP_USER
+const SMTP_PASS = env.SMTP_PASS
+const EMAIL_FROM = env.EMAIL_FROM
+const APP_LOGIN_URL = env.APP_LOGIN_URL
+const APP_NAME = process.env.APP_NAME || "Gestión de Guías Turísticos"
 
 export interface InvitationEmailData {
-  email: string;
-  tempPassword: string;
-  inviterName?: string;
-  expiresInHours: number;
+  email: string
+  tempPassword: string
+  inviterName?: string
+  expiresInHours: number
+}
+
+export interface PasswordResetEmailData {
+  to: string
+  resetUrl: string
+  ttlMinutes: number
 }
 
 export type SendEmailInput = {
-  to: string;
-  subject: string;
-  html?: string;
-  text?: string;
-  headers?: Record<string, string>;
-};
+  to: string
+  subject: string
+  html?: string
+  text?: string
+  headers?: Record<string, string>
+}
 
 // ---- transporter (Brevo 587 = STARTTLS) ----
 export const transporter = nodemailer.createTransport({
@@ -35,14 +42,13 @@ export const transporter = nodemailer.createTransport({
     pass: SMTP_PASS,
   },
   tls: {
-    // Recomendado para Brevo con 587
     minVersion: "TLSv1.2",
   },
-});
+})
 
 // ---- INVITATION TEMPLATE ----
 function generateInvitationHTML(data: InvitationEmailData): string {
-  const { email, tempPassword, inviterName, expiresInHours } = data;
+  const { email, tempPassword, inviterName, expiresInHours } = data
 
   return `
 <!DOCTYPE html>
@@ -109,7 +115,66 @@ function generateInvitationHTML(data: InvitationEmailData): string {
   </div>
 </body>
 </html>
-  `.trim();
+  `.trim()
+}
+
+// ---- PASSWORD RESET TEMPLATE ----
+function generatePasswordResetHTML(data: PasswordResetEmailData): string {
+  const { resetUrl, ttlMinutes } = data
+
+  return `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Recuperación de contraseña - ${APP_NAME}</title>
+  <style>
+    body { margin:0; padding:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif; background:#f5f5f5; color:#333 }
+    .container { max-width:600px; margin:40px auto; background:#fff; border-radius:8px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,.1) }
+    .header { background:linear-gradient(135deg,#0ea5e9 0%,#6366f1 100%); padding:40px 30px; text-align:center; color:#fff }
+    .header h1 { margin:0; font-size:26px; font-weight:700 }
+    .content { padding:40px 30px }
+    .content p { line-height:1.6; margin:0 0 16px 0; color:#555 }
+    .cta-button { display:block; width:fit-content; margin:28px auto; padding:14px 36px; background:linear-gradient(135deg,#0ea5e9 0%,#6366f1 100%); color:#fff; text-decoration:none; border-radius:8px; font-weight:700; font-size:15px; text-align:center; }
+    .hint { text-align:center; color:#6c757d; font-size:13px; margin-top:10px }
+    .warning-box { background:#fff3cd; border-left:4px solid #f59e0b; padding:16px; margin:22px 0; border-radius:4px }
+    .warning-box p { margin:0; color:#856404; font-size:14px }
+    .footer { background:#f8f9fa; padding:24px 30px; text-align:center; font-size:12px; color:#6c757d }
+    a { color:#0ea5e9 }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🔐 Recuperación de contraseña</h1>
+    </div>
+    <div class="content">
+      <p>Recibimos una solicitud para restablecer tu contraseña en <strong>${APP_NAME}</strong>.</p>
+      <p>Haz clic en el botón para crear una nueva contraseña:</p>
+
+      <a href="${resetUrl}" class="cta-button">Restablecer contraseña</a>
+
+      <p class="hint">Si el botón no funciona, copia y pega este enlace:</p>
+      <p class="mono">${resetUrl}</p>
+
+      <div class="warning-box">
+        <p>⏰ <strong>Importante:</strong> Este enlace expira en <strong>${ttlMinutes} minutos</strong>.</p>
+      </div>
+
+      <p style="margin-top:24px; font-size:14px; color:#6c757d;">
+        <strong>Nota de seguridad:</strong> Si tú no solicitaste este cambio, puedes ignorar este correo.
+      </p>
+    </div>
+    <div class="footer">
+      <p><strong>${APP_NAME}</strong></p>
+      <p>Este correo fue enviado automáticamente. No respondas a este mensaje.</p>
+    </div>
+  </div>
+</body>
+</html>
+  `.trim()
 }
 
 // ---- low-level sender (reutilizable) ----
@@ -121,53 +186,87 @@ export async function sendEmail({ to, subject, html, text, headers }: SendEmailI
     html,
     text,
     headers,
-  });
+  })
 
   logger.info(
     { to, subject, messageId: info.messageId, response: info.response, accepted: info.accepted, rejected: info.rejected },
-    "[email] sent"
-  );
+    "[email] sent",
+  )
 
-  return info;
+  return info
 }
 
 // ---- API: invitación ----
 export async function sendInvitationEmail(data: InvitationEmailData): Promise<void> {
   try {
-    const html = generateInvitationHTML(data);
-    const subject = "Has sido invitado a Gestión de Guías – activa tu cuenta";
-    const preheader = `Tu acceso inicial y contraseña temporal caducan en ${data.expiresInHours} horas.`;
+    const html = generateInvitationHTML(data)
+    const subject = "Has sido invitado a Gestión de Guías – activa tu cuenta"
+    const preheader = `Tu acceso inicial y contraseña temporal caducan en ${data.expiresInHours} horas.`
 
     const info = await sendEmail({
       to: data.email,
       subject,
       html,
       text: `
-            Has sido invitado a ${APP_NAME}.
+Has sido invitado a ${APP_NAME}.
 
-            Usuario: ${data.email}
-            Contraseña Temporal: ${data.tempPassword}
+Usuario: ${data.email}
+Contraseña Temporal: ${data.tempPassword}
 
-            Accede aquí: ${APP_LOGIN_URL}
+Accede aquí: ${APP_LOGIN_URL}
 
-            Esta invitación expira en ${data.expiresInHours} horas.
-            No compartas este correo. Si no solicitaste acceso, ignóralo.
-        `.trim(),
+Esta invitación expira en ${data.expiresInHours} horas.
+No compartas este correo. Si no solicitaste acceso, ignóralo.
+      `.trim(),
       headers: { "X-Preheader": preheader },
-    });
+    })
 
-    logger.info(
-      { email: data.email, messageId: info.messageId },
-      "Invitation email sent successfully"
-    );
+    logger.info({ email: data.email, messageId: info.messageId }, "Invitation email sent successfully")
   } catch (error) {
-    logger.error({ error, email: data.email }, "Failed to send invitation email");
-    throw new Error("Failed to send invitation email");
+    logger.error({ error, email: data.email }, "Failed to send invitation email")
+    throw new Error("Failed to send invitation email")
+  }
+}
+
+// ---- API: reset password ----
+export async function sendPasswordResetEmail(data: PasswordResetEmailData): Promise<void> {
+  try {
+    const html = generatePasswordResetHTML(data)
+    const subject = `Recupera tu contraseña – ${APP_NAME}`
+    const preheader = `Enlace válido por ${data.ttlMinutes} minutos.`
+
+    const info = await sendEmail({
+      to: data.to,
+      subject,
+      html,
+      text: `
+Recuperación de contraseña - ${APP_NAME}
+
+Recibimos una solicitud para restablecer tu contraseña.
+
+Abre este enlace para continuar:
+${data.resetUrl}
+
+Este enlace expira en ${data.ttlMinutes} minutos.
+
+Si no solicitaste este cambio, ignora este correo.
+      `.trim(),
+      headers: { "X-Preheader": preheader },
+    })
+
+    logger.info({ to: data.to, messageId: info.messageId }, "Password reset email sent successfully")
+  } catch (error) {
+    logger.error({ error, to: data.to }, "Failed to send password reset email")
+    throw new Error("Failed to send password reset email")
   }
 }
 
 // ---- API: prueba de mailing ----
-export async function sendTestEmail(to: string, subject = "Prueba SMTP – Gestión de Guías", message = "Hola, esto es una prueba de envío de correo."): Promise<void> {
+export async function sendTestEmail(
+  to: string,
+  subject = "Prueba SMTP – Gestión de Guías",
+  message = "Hola, esto es una prueba de envío de correo.",
+): Promise<void> {
   try {
     const html = `
       <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5">
@@ -177,7 +276,7 @@ export async function sendTestEmail(to: string, subject = "Prueba SMTP – Gesti
         <hr style="border:none;border-top:1px solid #eee;margin:16px 0"/>
         <p style="color:#777;font-size:12px">${APP_NAME}</p>
       </div>
-    `.trim();
+    `.trim()
 
     const info = await sendEmail({
       to,
@@ -185,23 +284,23 @@ export async function sendTestEmail(to: string, subject = "Prueba SMTP – Gesti
       html,
       text: message,
       headers: { "X-Preheader": "Prueba de transporte SMTP" },
-    });
+    })
 
-    logger.info({ to, subject, messageId: info.messageId }, "Test email sent successfully");
+    logger.info({ to, subject, messageId: info.messageId }, "Test email sent successfully")
   } catch (error) {
-    logger.error({ error, to }, "Failed to send test email");
-    throw new Error("Failed to send test email");
+    logger.error({ error, to }, "Failed to send test email")
+    throw new Error("Failed to send test email")
   }
 }
 
 // ---- Health-check del transporte ----
 export async function verifyEmailConnection(): Promise<boolean> {
   try {
-    await transporter.verify();
-    logger.info("Email service connection verified");
-    return true;
+    await transporter.verify()
+    logger.info("Email service connection verified")
+    return true
   } catch (error) {
-    logger.error({ error }, "Email service connection failed");
-    return false;
+    logger.error({ error }, "Email service connection failed")
+    return false
   }
 }

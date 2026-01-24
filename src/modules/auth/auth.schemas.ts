@@ -1,10 +1,6 @@
 import { z } from "zod"
 import { RolType } from "@prisma/client"
 
-/* =========================
-   AUTH
-========================= */
-
 export const loginSchema = z.object({
   email: z.string().email("Invalid email format"),
   password: z
@@ -18,9 +14,14 @@ export const refreshSchema = z.object({
   refreshToken: z.string().min(10, "Invalid refresh token").optional(),
 })
 
-/* =========================
-   REGISTER / USERS
-========================= */
+// ✅ NEW: forgot password (request recovery)
+export const forgotPasswordSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email("Invalid email format"),
+})
 
 export const registerSchema = z.object({
   email: z.string().email("Invalid email format"),
@@ -46,10 +47,6 @@ export const updateUserSchema = z.object({
   activo: z.boolean().optional(),
 })
 
-/* =========================
-   LOGOUT ALL (SECURITY)
-========================= */
-
 export const logoutAllSchema = z.object({
   verification: z.discriminatedUnion("method", [
     z.object({
@@ -62,10 +59,6 @@ export const logoutAllSchema = z.object({
     }),
   ]),
 })
-
-/* =========================
-   CHANGE PASSWORD (NEW)
-========================= */
 
 export const changePasswordSchema = z
   .object({
@@ -103,10 +96,6 @@ export const changePasswordSchema = z
     }
   })
 
-/* =========================
-   USERS LIST
-========================= */
-
 export const listUsersQuerySchema = z.object({
   page: z
     .string()
@@ -133,12 +122,9 @@ export const listUsersQuerySchema = z.object({
     .optional(),
 })
 
-/* =========================
-   TYPES
-========================= */
-
 export type LoginRequest = z.infer<typeof loginSchema>
 export type RefreshRequest = z.infer<typeof refreshSchema>
+export type ForgotPasswordRequest = z.infer<typeof forgotPasswordSchema> // ✅ NEW
 export type RegisterRequest = z.infer<typeof registerSchema>
 export type LogoutAllRequest = z.infer<typeof logoutAllSchema>
 export type CreateUserRequest = z.infer<typeof createUserSchema>

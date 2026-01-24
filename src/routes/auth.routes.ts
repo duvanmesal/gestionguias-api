@@ -8,6 +8,7 @@ import {
   refreshSchema,
   logoutAllSchema,
   changePasswordSchema,
+  forgotPasswordSchema,
 } from "../modules/auth/auth.schemas";
 import { sensitiveLimiter } from "../middlewares/rate-limit";
 
@@ -26,6 +27,15 @@ router.post(
   detectClientPlatform,
   validate({ body: refreshSchema }),
   authController.refresh.bind(authController),
+);
+
+// ✅ NEW: request password recovery
+router.post(
+  "/forgot-password",
+  sensitiveLimiter,
+  detectClientPlatform,
+  validate({ body: forgotPasswordSchema }),
+  authController.forgotPassword.bind(authController),
 );
 
 router.post(
