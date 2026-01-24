@@ -26,7 +26,10 @@ function hashToken(token: string): string {
   return crypto.createHmac("sha256", PASSWORD_PEPPER).update(token).digest("hex")
 }
 
+export type CreateInvitationAction = "CREATED" | "RESENT"
+
 export interface CreateInvitationResult {
+  action: CreateInvitationAction
   invitation: {
     id: string
     email: string
@@ -40,51 +43,52 @@ export interface CreateInvitationResult {
 
 export class InvitationService {
   /**
-   * Crea la invitación, crea Usuario activo con la contraseña temporal (hash),
-   * enlaza invitation.userId y envía el correo. Si el envío falla → rollback.
+   * Invite-or-Resend por email:
+   * - Si user existe y profileStatus=COMPLETE -> conflicto (ya es usuario real)
+   * - Si existe invitación PENDING vigente -> conflicto (ya hay una activa)
+   * - Si user INCOMPLETE o invitación vieja -> reactiva + resetea password + pone invitación en PENDING + envía correo
+   *
+   * Nota: con Invitation.userId @unique lo correcto es REUSAR una invitación previa (update) en vez de crear infinitas.
    */
   async createInvitation(emailRaw: string, role: RolType, inviterId: string): Promise<CreateInvitationResult> {
-    const email = emailRaw.toLowerCase()
+    const email = emailRaw.trim().toLowerCase()
     logger.info({ email, role, inviterId }, "[Invite] start createInvitation")
 
-    // Conflictos típicos
-    const existingUser = await prisma.usuario.findUnique({ where: { email } })
-    if (existingUser) {
-      logger.warn({ email, existingUserId: existingUser.id }, "[Invite] user already exists")
+    // 1) Buscar usuario existente (para decidir si se permite reinvitar)
+    const existingUser = await prisma.usuario.findUnique({
+      where: { email },
+      select: { id: true, profileStatus: true },
+    })
+
+    // 2) Si el usuario ya es REAL (perfil completo) → no se invita
+    if (existingUser && existingUser.profileStatus === "COMPLETE") {
+      logger.warn({ email, userId: existingUser.id }, "[Invite] user exists and is COMPLETE")
       throw new ConflictError("User with this email already exists")
     }
 
-    const pendingInvitation = await prisma.invitation.findFirst({
+    // 3) Si ya hay invitación activa (PENDING no expirada) → no se reenvía desde input
+    const activeInvitation = await prisma.invitation.findFirst({
       where: { email, status: "PENDING", expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: "desc" },
     })
-    if (pendingInvitation) {
-      logger.warn({ email, invitationId: pendingInvitation.id }, "[Invite] active invitation already exists")
+    if (activeInvitation) {
+      logger.warn({ email, invitationId: activeInvitation.id }, "[Invite] active invitation already exists")
       throw new ConflictError("An active invitation already exists for this email")
     }
 
-    // Generar credenciales temporales
+    // 4) Generar credenciales temporales
     const tempPassword = generateTempPassword()
     const tempPasswordHash = await hashPassword(tempPassword)
     const token = generateInvitationToken()
     const tokenHash = hashToken(token)
     const expiresAt = new Date(Date.now() + INVITE_TTL_HOURS * 60 * 60 * 1000)
 
-    // Crear invitación
-    const invitation = await prisma.invitation.create({
-      data: {
-        email,
-        role,
-        tempPasswordHash,
-        tokenHash,
-        expiresAt,
-        inviterId,
-        status: "PENDING",
-      },
-    })
-
-    // Crear Usuario (obligatorio enviar nombres/apellidos)
-    const user = await prisma.usuario.create({
-      data: {
+    // 5) Upsert usuario:
+    //    - si existe (INCOMPLETE) -> resetea password, activa y actualiza rol
+    //    - si no existe -> lo crea como invitado
+    const user = await prisma.usuario.upsert({
+      where: { email },
+      create: {
         email,
         rol: role,
         activo: true,
@@ -92,21 +96,55 @@ export class InvitationService {
         nombres: "Invitado",
         apellidos: "Pendiente",
       },
+      update: {
+        passwordHash: tempPasswordHash,
+        activo: true,
+        rol: role,
+      },
       select: { id: true, email: true },
     })
 
-    // Enlazar invitación → userId
-    await prisma.invitation.update({
-      where: { id: invitation.id },
-      data: { userId: user.id },
+    // 6) Reusar invitación previa si existe (por userId @unique)
+    const lastInvitation = await prisma.invitation.findFirst({
+      where: { email },
+      orderBy: { createdAt: "desc" },
     })
 
+    const action: CreateInvitationAction = lastInvitation ? "RESENT" : "CREATED"
+
+    const invitation = lastInvitation
+      ? await prisma.invitation.update({
+          where: { id: lastInvitation.id },
+          data: {
+            role,
+            tempPasswordHash,
+            tokenHash,
+            expiresAt,
+            status: "PENDING",
+            usedAt: null,
+            userId: user.id,
+            inviterId,
+          },
+        })
+      : await prisma.invitation.create({
+          data: {
+            email,
+            role,
+            tempPasswordHash,
+            tokenHash,
+            expiresAt,
+            inviterId,
+            status: "PENDING",
+            userId: user.id,
+          },
+        })
+
     logger.info(
-      { email, role, inviterId, invitationId: invitation.id, userId: user.id, expiresAt },
-      "[Invite] invitation + user created and linked"
+      { email, role, inviterId, invitationId: invitation.id, userId: user.id, expiresAt, action },
+      "[Invite] invite-or-resend completed",
     )
 
-    // Enviar correo (rollback si falla)
+    // 7) Enviar correo (rollback mínimo si falla)
     try {
       const inviter = await prisma.usuario.findUnique({
         where: { id: inviterId },
@@ -124,15 +162,22 @@ export class InvitationService {
     } catch (error) {
       logger.error(
         { invitationId: invitation.id, email, userId: user.id, err: (error as Error)?.message },
-        "[Invite] email failed; rolling back invitation and user"
+        "[Invite] email failed; marking invitation as EXPIRED",
       )
-      // best-effort rollback
-      try { await prisma.invitation.delete({ where: { id: invitation.id } }) } catch {}
-      try { await prisma.usuario.delete({ where: { id: user.id } }) } catch {}
+
+      // rollback mínimo: evitar dejar PENDING viva si el correo no salió
+      try {
+        await prisma.invitation.update({
+          where: { id: invitation.id },
+          data: { status: "EXPIRED" },
+        })
+      } catch {}
+
       throw new Error("Failed to send invitation email")
     }
 
     return {
+      action,
       invitation: {
         id: invitation.id,
         email: invitation.email,
@@ -140,7 +185,7 @@ export class InvitationService {
         expiresAt: invitation.expiresAt,
         status: invitation.status,
       },
-      tempPassword, // ⚠️ solo dev/test
+      tempPassword,
     }
   }
 
@@ -186,7 +231,7 @@ export class InvitationService {
   }
 
   /**
-   * Reenvía la invitación:
+   * Reenvía la invitación por ID:
    * - Regenera tempPassword y actualiza invitation.tempPasswordHash + expiresAt
    * - Upsert de usuario:
    *    - si existe → actualiza passwordHash y lo deja activo
@@ -250,7 +295,7 @@ export class InvitationService {
 
     logger.info(
       { invitationId, email, resenderId, userId: user.id, expiresAt },
-      "[Invite] resent with new temp password and user upserted"
+      "[Invite] resent with new temp password and user upserted",
     )
   }
 }

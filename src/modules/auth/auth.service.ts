@@ -4,12 +4,12 @@ import { signAccessToken } from "../../libs/jwt"
 import { generateRefreshToken, hashRefreshToken } from "../../libs/crypto"
 import { UnauthorizedError, ConflictError, NotFoundError, BadRequestError } from "../../libs/errors"
 import { logger } from "../../libs/logger"
-import { parseTtlToSeconds } from "../../libs/time"   // ⬅️ NUEVO
+import { parseTtlToSeconds } from "../../libs/time"
 import type { LoginRequest, RegisterRequest } from "./auth.schemas"
 import type { RolType, Platform } from "@prisma/client"
 
 // TTLs leídos del .env (con fallback)
-const ACCESS_TTL_SEC = parseTtlToSeconds(process.env.JWT_ACCESS_TTL, 900)              // 15m por defecto
+const ACCESS_TTL_SEC = parseTtlToSeconds(process.env.JWT_ACCESS_TTL, 900) // 15m por defecto
 const REFRESH_TTL_SEC = parseTtlToSeconds(process.env.JWT_REFRESH_TTL, 60 * 60 * 24 * 30) // 30d por defecto
 
 export interface LoginResult {
@@ -83,13 +83,9 @@ export class AuthService {
       throw new UnauthorizedError("Invalid credentials")
     }
 
-    if (!user || !user.activo) {
-      throw new UnauthorizedError("Invalid credentials")
-    }
-
     logger.info(
       { userId: user.id, email: user.email, platform, ip, userAgent },
-      "[Auth/Login] success"
+      "[Auth/Login] success",
     )
 
     // Refresh TTL desde .env
@@ -192,7 +188,10 @@ export class AuthService {
 
     if (rotated.count === 0) {
       await this.revokeAllUserSessions(session.userId)
-      logger.warn({ userId: session.userId, sessionId: session.id }, "Refresh token reuse detected (race) - all sessions revoked")
+      logger.warn(
+        { userId: session.userId, sessionId: session.id },
+        "Refresh token reuse detected (race) - all sessions revoked",
+      )
       throw new ConflictError("Token reuse detected. All sessions have been terminated.")
     }
 
@@ -238,7 +237,6 @@ export class AuthService {
     })
     logger.info({ userId }, "All user sessions terminated")
   }
-
 
   async listSessions(userId: string): Promise<SessionInfo[]> {
     const sessions = await prisma.session.findMany({
@@ -293,7 +291,9 @@ export class AuthService {
 
     logger.info({ userId: user.id, email: user.email, rol: user.rol }, "New user registered")
 
-    return { user: { id: user.id, email: user.email, nombres: user.nombres, apellidos: user.apellidos, rol: user.rol } }
+    return {
+      user: { id: user.id, email: user.email, nombres: user.nombres, apellidos: user.apellidos, rol: user.rol },
+    }
   }
 
   async getProfile(userId: string) {
@@ -312,6 +312,34 @@ export class AuthService {
     })
     if (!user) throw new NotFoundError("User not found")
     return user
+  }
+
+  // ✅ NUEVO: cambia la contraseña validando la actual
+  // Recomendación: revoca sesiones activas después de cambiarla.
+  async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
+    const user = await prisma.usuario.findUnique({ where: { id: userId } })
+    if (!user) throw new NotFoundError("User not found")
+    if (!user.activo) throw new UnauthorizedError("User account is inactive")
+    if (!user.passwordHash) throw new UnauthorizedError("User has no password set")
+
+    const okPass = await verifyPassword(currentPassword, user.passwordHash)
+    if (!okPass) throw new UnauthorizedError("Invalid current password")
+
+    // Evita dejar la misma contraseña
+    const isSame = await verifyPassword(newPassword, user.passwordHash)
+    if (isSame) throw new BadRequestError("New password must be different from current password")
+
+    const newHash = await hashPassword(newPassword)
+
+    await prisma.usuario.update({
+      where: { id: userId },
+      data: { passwordHash: newHash },
+    })
+
+    // Seguridad: se cierran sesiones activas para obligar re-login
+    await this.logoutAll(userId)
+
+    logger.info({ userId }, "Password changed successfully")
   }
 
   private async revokeAllUserSessions(userId: string): Promise<void> {

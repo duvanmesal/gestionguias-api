@@ -265,11 +265,23 @@ export class UserService {
       throw new BusinessError("Cannot change password for inactive user")
     }
 
+    // Debe venir currentPassword u oldPassword (según schema nuevo)
+    const current = data.currentPassword ?? (data as any).oldPassword
+    if (!current) {
+      throw new BusinessError("currentPassword/oldPassword is required")
+    }
+
+    // Evita TS error + caso usuario sin password seteado
+    if (!user.passwordHash) {
+      throw new BusinessError("User has no password set")
+    }
+
     // Verify current password
-    const isValidPassword = await verifyPassword(data.currentPassword, user.passwordHash)
+    const isValidPassword = await verifyPassword(current, user.passwordHash)
     if (!isValidPassword) {
       throw new UnauthorizedError("Current password is incorrect")
     }
+
 
     // Hash new password
     const newPasswordHash = await hashPassword(data.newPassword)
@@ -280,14 +292,15 @@ export class UserService {
       data: { passwordHash: newPasswordHash },
     })
 
-    // Revoke all refresh tokens to force re-login
-    await prisma.refreshToken.updateMany({
+    // Revoke all sessions to force re-login
+    await prisma.session.updateMany({
       where: {
         userId: id,
         revokedAt: null,
       },
       data: {
         revokedAt: new Date(),
+        lastRotatedAt: new Date(),
       },
     })
 

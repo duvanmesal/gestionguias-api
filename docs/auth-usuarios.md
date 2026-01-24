@@ -1,5 +1,3 @@
-
-
 # 1. Auth + Usuarios/Roles (implementado)
 
 ## 1.1 Objetivo
@@ -272,4 +270,4 @@ const pass  = process.env.SEED_SUPERADMIN_PASS  ?? "ChangeMe!123";
 * Pruebas en Postman cubriendo casos correctos y de error.
 * Logs mostrando entradas/salidas de forma consistente.
 
-**Estado:** implementado y validado en el repositorio. ✅
+**Estado:** implementado y validado en el repositorio.

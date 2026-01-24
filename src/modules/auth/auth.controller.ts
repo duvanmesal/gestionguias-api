@@ -3,7 +3,13 @@ import { authService } from "./auth.service"
 import { ok, created } from "../../libs/http"
 import { logger } from "../../libs/logger"
 import { BadRequestError, UnauthorizedError } from "../../libs/errors"
-import type { LoginRequest, RefreshRequest, RegisterRequest, LogoutAllRequest } from "./auth.schemas"
+import type {
+  LoginRequest,
+  RefreshRequest,
+  RegisterRequest,
+  LogoutAllRequest,
+  ChangePasswordRequest,
+} from "./auth.schemas"
 import { verifyPassword } from "../../libs/password"
 import type { Platform } from "@prisma/client"
 import { prisma } from "../../prisma/client"
@@ -18,19 +24,19 @@ export class AuthController {
           hasBody: !!req.body,
           email: (req.body as any)?.email,
           platformHeader: req.get("X-Client-Platform"),
-          clientPlatform: req.clientPlatform,
+          clientPlatform: (req as any).clientPlatform,
           ip: req.ip,
           userAgent: req.get("User-Agent"),
         },
-        "[Auth/Login] incoming"
+        "[Auth/Login] incoming",
       )
-      
-      if (!req.clientPlatform) {
+
+      if (!(req as any).clientPlatform) {
         throw new BadRequestError("X-Client-Platform header is required")
       }
-      const REFRESH_COOKIE_PATH = (process.env.API_PREFIX || "") + "/auth/refresh"
+
       const data = req.body as LoginRequest
-      const platform = req.clientPlatform as Platform
+      const platform = (req as any).clientPlatform as Platform
       const ip = req.ip
       const userAgent = req.get("User-Agent")
 
@@ -60,19 +66,18 @@ export class AuthController {
 
   async refresh(req: Request, res: Response, next: NextFunction) {
     try {
-      const REFRESH_COOKIE_PATH = (process.env.API_PREFIX || "") + "/auth/refresh"
-      if (!req.clientPlatform) {
+      if (!(req as any).clientPlatform) {
         throw new BadRequestError("X-Client-Platform header is required")
       }
 
-      const platform = req.clientPlatform as Platform
+      const platform = (req as any).clientPlatform as Platform
       const ip = req.ip
       const userAgent = req.get("User-Agent")
 
       let refreshToken: string | undefined
 
       if (platform === "WEB") {
-        refreshToken = req.cookies?.rt
+        refreshToken = (req as any).cookies?.rt
         if (!refreshToken) {
           throw new BadRequestError("Refresh token cookie not found")
         }
@@ -108,13 +113,12 @@ export class AuthController {
 
   async logout(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!req.user?.sid) {
+      if (!(req as any).user?.sid) {
         throw new BadRequestError("Session ID not found in token")
       }
 
-      const platform = req.clientPlatform as Platform
-
-      await authService.logout(req.user.sid)
+      const platform = (req as any).clientPlatform as Platform
+      await authService.logout((req as any).user.sid)
 
       if (platform === "WEB") {
         res.clearCookie("rt", {
@@ -131,9 +135,9 @@ export class AuthController {
     }
   }
 
-    async logoutAll(req: Request, res: Response, next: NextFunction) {
+  async logoutAll(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!req.user) {
+      if (!(req as any).user) {
         return res.status(401).json({ error: "Unauthorized" })
       }
 
@@ -142,7 +146,7 @@ export class AuthController {
         throw new BadRequestError("verification object is required")
       }
 
-      const user = await prisma.usuario.findUnique({ where: { id: req.user.userId } })
+      const user = await prisma.usuario.findUnique({ where: { id: (req as any).user.userId } })
       if (!user || !user.activo) {
         throw new UnauthorizedError("User not found or inactive")
       }
@@ -157,10 +161,10 @@ export class AuthController {
       }
 
       // Revoca TODAS las sesiones del usuario
-      await authService.logoutAll(req.user.userId)
+      await authService.logoutAll((req as any).user.userId)
 
       // WEB: limpia la cookie rt
-      if (req.clientPlatform === "WEB") {
+      if ((req as any).clientPlatform === "WEB") {
         res.clearCookie("rt", {
           httpOnly: true,
           secure: process.env.NODE_ENV === "production",
@@ -177,11 +181,11 @@ export class AuthController {
 
   async sessions(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!req.user) {
+      if (!(req as any).user) {
         return res.status(401).json({ error: "Unauthorized" })
       }
 
-      const sessions = await authService.listSessions(req.user.userId)
+      const sessions = await authService.listSessions((req as any).user.userId)
       return res.json(ok({ sessions }))
     } catch (error) {
       return next(error)
@@ -190,18 +194,40 @@ export class AuthController {
 
   async revokeSession(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!req.user) {
+      if (!(req as any).user) {
         return res.status(401).json({ error: "Unauthorized" })
       }
 
       const { sessionId } = req.params
-
       if (!sessionId) {
         throw new BadRequestError("Session ID is required")
       }
 
-      await authService.revokeSession(sessionId, req.user.userId)
+      await authService.revokeSession(sessionId, (req as any).user.userId)
       return res.status(204).send()
+    } catch (error) {
+      return next(error)
+    }
+  }
+
+  // ✅ NUEVO: change-password (requiere auth)
+  async changePassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!(req as any).user) {
+        return res.status(401).json({ error: "Unauthorized" })
+      }
+
+      const body = req.body as ChangePasswordRequest
+
+      // tu schema permite oldPassword o currentPassword
+      const current = body.oldPassword ?? body.currentPassword
+      if (!current) {
+        throw new BadRequestError("oldPassword/currentPassword is required")
+      }
+
+      await authService.changePassword((req as any).user.userId, current, body.newPassword)
+
+      return res.json(ok({ message: "Password changed successfully" }))
     } catch (error) {
       return next(error)
     }
@@ -212,10 +238,7 @@ export class AuthController {
       const data = req.body as RegisterRequest
       const result = await authService.register(data)
 
-      logger.info(
-        { userId: result.user.id, email: result.user.email, rol: result.user.rol },
-        "User registration successful",
-      )
+      logger.info({ userId: result.user.id, email: result.user.email, rol: result.user.rol }, "User registration successful")
 
       return res.status(201).json(created(result))
     } catch (error) {
@@ -225,10 +248,10 @@ export class AuthController {
 
   async me(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!req.user) {
+      if (!(req as any).user) {
         return res.status(401).json({ error: "Unauthorized" })
       }
-      const user = await authService.getProfile(req.user.userId)
+      const user = await authService.getProfile((req as any).user.userId)
       return res.json(ok(user))
     } catch (error) {
       return next(error)
