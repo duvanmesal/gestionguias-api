@@ -466,7 +466,6 @@ model PasswordResetToken {
 1. Cliente envía email al endpoint `/auth/forgot-password`.
 2. Backend valida formato del email.
 3. Si el usuario existe y está activo:
-
    * genera token
    * guarda hash en DB
    * invalida tokens previos
@@ -474,7 +473,91 @@ model PasswordResetToken {
 4. Backend responde **200 OK** siempre.
 5. El frontend redirige al flujo de **reset-password** usando el token.
 
-## 1.11 Definition of Done
+### **1.11.1 Restablecer contraseña (Reset Password)**
+
+#### POST `/auth/reset-password`
+
+Permite **restablecer la contraseña** usando un **token de recuperación** previamente generado con `POST /auth/forgot-password`.
+
+* **Auth requerida:** ❌ No
+
+* **Headers obligatorios:**
+  `X-Client-Platform: WEB | MOBILE`
+
+* **Body:**
+
+```json
+{
+  "token": "db6600599a5ff80d37c8a4cad534489ee3c7b2c3f41fd3df1a8d0c6bdda2b84a",
+  "newPassword": "NuevaPassword1!"
+}
+```
+
+---
+
+### **Reglas de negocio**
+
+* El token debe cumplir:
+
+  * existir en BD (por `tokenHash`)
+  * **no estar usado** (`usedAt = null`)
+  * **no estar expirado** (`expiresAt > now`)
+* El usuario asociado debe:
+
+  * existir
+  * estar **activo** (`activo = true`)
+* La nueva contraseña debe:
+
+  * cumplir reglas de complejidad:
+
+    * mínimo 8 caracteres
+    * mayúscula, minúscula, número y carácter especial
+  * **no puede ser igual** a la contraseña anterior
+* Al aplicar el cambio:
+
+  * se actualiza `usuario.passwordHash` (hash seguro)
+  * se marca el token como **usado** (`usedAt = now`)
+  * se invalidan otros tokens activos del mismo usuario (higiene)
+  * se **revocan todas las sesiones** del usuario (`logoutAll`) para forzar re-login
+* El proceso se ejecuta de forma **atómica** (transacción) para evitar condiciones de carrera.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "message": "Password updated successfully"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+* `400` → token inválido/expirado/usado, password débil o igual a la anterior.
+* `401` → (no suele aplicarse aquí) el flujo no requiere auth, pero puede usarse si tu handler global lo mapea distinto.
+* `404` → (no se expone para seguridad) no se revela si el usuario existe o no; se responde como token inválido.
+
+---
+
+### **Consideraciones de seguridad**
+
+* El token **no se guarda en texto plano**, solo su hash (`tokenHash`) usando HMAC + `TOKEN_PEPPER`.
+* Respuesta y errores **no filtran información** del usuario asociado.
+* El endpoint está protegido con:
+
+  * `sensitiveLimiter` (rate limiting)
+  * validación estricta con `Zod`
+  * invalidación de sesiones al finalizar
+
+---
+
+## 1.12 Definition of Done
 
 * Login/Refresh/Logout/Logout-all/Me funcionando correctamente.
 * CRUD de usuarios con RBAC activo.
@@ -483,6 +566,13 @@ model PasswordResetToken {
 * Validaciones estrictas con Zod.
 * Pruebas en Postman cubriendo casos correctos y de error.
 * Logs mostrando entradas/salidas de forma consistente.
+* **Forgot Password implementado y validado (email “ciego”, token 1-uso con TTL, hash en DB, invalidación de tokens previos).** *25/01/2026*
+* **Reset Password implementado y validado (token 1-uso, expiración, cambio de hash, invalidación de tokens activos, revocación de sesiones).** *25/01/2026*
+* **Change Password implementado y validado (compatibilidad oldPassword/currentPassword, password policy, revocación de sesiones).** *25/01/2026*
+* **Rutas protegidas con `X-Client-Platform` donde aplica (WEB/MOBILE).** *25/01/2026*
+* **Rate limiting aplicado a endpoints sensibles (`login`, `forgot-password`, `reset-password`, `change-password`).** *25/01/2026*
+* **Flujo completo probado: forgot-password → reset-password → login con nueva contraseña.** *25/01/2026*
 
 ### **Estado**
+
 **Estado:** implementado y validado en el repositorio.

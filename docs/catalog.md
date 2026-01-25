@@ -170,4 +170,3 @@ Cada buque puede estar asociado a un país (bandera) y se utiliza como referenci
 * Respuestas estandarizadas y documentadas.
 * Migraciones Prisma aplicadas sin errores.
 * Pruebas manuales realizadas con Postman.
-
