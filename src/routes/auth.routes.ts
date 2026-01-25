@@ -10,6 +10,7 @@ import {
   changePasswordSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
+  verifyEmailRequestSchema,
 } from "../modules/auth/auth.schemas"
 import { sensitiveLimiter } from "../middlewares/rate-limit"
 
@@ -46,6 +47,15 @@ router.post(
   detectClientPlatform,
   validate({ body: resetPasswordSchema }),
   authController.resetPassword.bind(authController),
+)
+
+// ✅ request email verification (send link/token)
+router.post(
+  "/verify-email/request",
+  sensitiveLimiter,
+  detectClientPlatform,
+  validate({ body: verifyEmailRequestSchema }),
+  authController.verifyEmailRequest.bind(authController),
 )
 
 router.post(

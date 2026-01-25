@@ -11,6 +11,7 @@ import type {
   ChangePasswordRequest,
   ForgotPasswordRequest,
   ResetPasswordRequest,
+  VerifyEmailRequest,
 } from "./auth.schemas";
 import { verifyPassword } from "../../libs/password";
 import type { Platform } from "@prisma/client";
@@ -317,6 +318,39 @@ export class AuthController {
 
       // respuesta clara, sin filtrar detalles del token/user
       return res.json(ok({ message: "Password updated successfully" }));
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  // ✅ verify-email/request (no requiere auth)
+  async verifyEmailRequest(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!(req as any).clientPlatform) {
+        throw new BadRequestError("X-Client-Platform header is required");
+      }
+
+      const body = req.body as VerifyEmailRequest;
+
+      logger.info(
+        {
+          email: body.email,
+          platformHeader: req.get("X-Client-Platform"),
+          clientPlatform: (req as any).clientPlatform,
+          ip: req.ip,
+          userAgent: req.get("User-Agent"),
+        },
+        "[Auth/VerifyEmailRequest] incoming",
+      );
+
+      await authService.verifyEmailRequest(body.email);
+
+      // Respuesta "ciega" para evitar enumeración
+      return res.json(
+        ok({
+          message: "If the email exists, a verification message has been sent",
+        }),
+      );
     } catch (error) {
       return next(error);
     }

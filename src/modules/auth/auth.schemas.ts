@@ -32,6 +32,11 @@ export const resetPasswordSchema = z.object({
     ),
 });
 
+// ✅ NEW: request email verification link/token
+export const verifyEmailRequestSchema = z.object({
+  email: z.string().trim().toLowerCase().email("Invalid email format"),
+});
+
 export const registerSchema = z.object({
   email: z.string().email("Invalid email format"),
   password: z
@@ -151,6 +156,7 @@ export type LoginRequest = z.infer<typeof loginSchema>;
 export type RefreshRequest = z.infer<typeof refreshSchema>;
 export type ForgotPasswordRequest = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordRequest = z.infer<typeof resetPasswordSchema>;
+export type VerifyEmailRequest = z.infer<typeof verifyEmailRequestSchema>;
 export type RegisterRequest = z.infer<typeof registerSchema>;
 export type LogoutAllRequest = z.infer<typeof logoutAllSchema>;
 export type CreateUserRequest = z.infer<typeof createUserSchema>;

@@ -40,3 +40,20 @@ export function hashPasswordResetToken(token: string): string {
   const pepper = env.TOKEN_PEPPER || "default_token_pepper_change_in_production"
   return createHmac("sha256", pepper).update(token).digest("hex")
 }
+
+/**
+ * Generates a cryptographically secure one-time email verification token
+ */
+export function generateEmailVerifyToken(): string {
+  // hex para que sea URL-safe sin encoding raro, 64 chars
+  return randomBytes(32).toString("hex")
+}
+
+/**
+ * Hash email verify token for storage (never store token in plain text)
+ * Uses HMAC-SHA256 with TOKEN_PEPPER (mismo pepper, tokens distintos por contexto)
+ */
+export function hashEmailVerifyToken(token: string): string {
+  const pepper = env.TOKEN_PEPPER || "default_token_pepper_change_in_production"
+  return createHmac("sha256", pepper).update(token).digest("hex")
+}

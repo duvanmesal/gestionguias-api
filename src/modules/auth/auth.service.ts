@@ -6,6 +6,8 @@ import {
   hashRefreshToken,
   generatePasswordResetToken,
   hashPasswordResetToken,
+  generateEmailVerifyToken,
+  hashEmailVerifyToken,
 } from "../../libs/crypto";
 import {
   UnauthorizedError,
@@ -17,7 +19,7 @@ import { logger } from "../../libs/logger";
 import { parseTtlToSeconds } from "../../libs/time";
 import type { LoginRequest, RegisterRequest } from "./auth.schemas";
 import type { RolType, Platform } from "@prisma/client";
-import { sendPasswordResetEmail } from "../../libs/email";
+import { sendPasswordResetEmail, sendVerifyEmailEmail } from "../../libs/email";
 import { env } from "../../config/env";
 
 // TTLs leídos del .env (con fallback)
@@ -321,9 +323,7 @@ export class AuthService {
     logger.info({ userId, sessionId }, "Session revoked by user");
   }
 
-  async register(
-    data: RegisterRequest,
-  ): Promise<{
+  async register(data: RegisterRequest): Promise<{
     user: {
       id: string;
       email: string;
@@ -503,6 +503,65 @@ export class AuthService {
     logger.info(
       { userId: resolvedUserId },
       "[Auth/ResetPassword] password updated and sessions revoked",
+    );
+  }
+
+  // ✅ NEW: request email verification link/token
+  async verifyEmailRequest(email: string): Promise<void> {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const user = await prisma.usuario.findUnique({
+      where: { email: normalizedEmail },
+      select: { id: true, email: true, activo: true, emailVerifiedAt: true },
+    });
+
+    // Silencioso para evitar enumeración
+    if (!user || !user.activo) {
+      logger.info(
+        { email: normalizedEmail, found: !!user },
+        "[Auth/VerifyEmailRequest] no-op",
+      );
+      return;
+    }
+
+    // Si ya está verificado, también no-op (misma respuesta genérica)
+    if (user.emailVerifiedAt) {
+      logger.info(
+        { userId: user.id },
+        "[Auth/VerifyEmailRequest] already verified (no-op)",
+      );
+      return;
+    }
+
+    const ttlMinutes = env.EMAIL_VERIFY_TTL_MINUTES;
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
+
+    const token = generateEmailVerifyToken();
+    const tokenHash = hashEmailVerifyToken(token);
+
+    // Invalida tokens previos activos
+    await prisma.emailVerificationToken.updateMany({
+      where: { userId: user.id, usedAt: null, expiresAt: { gt: now } },
+      data: { usedAt: now },
+    });
+
+    // Crea token nuevo
+    await prisma.emailVerificationToken.create({
+      data: { userId: user.id, tokenHash, expiresAt },
+    });
+
+    const verifyUrl = `${env.APP_VERIFY_EMAIL_URL}?token=${encodeURIComponent(token)}`;
+
+    await sendVerifyEmailEmail({
+      to: user.email,
+      verifyUrl,
+      ttlMinutes,
+    });
+
+    logger.info(
+      { userId: user.id, expiresAt },
+      "[Auth/VerifyEmailRequest] verification email sent",
     );
   }
 

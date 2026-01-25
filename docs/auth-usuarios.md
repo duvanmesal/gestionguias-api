@@ -557,7 +557,153 @@ Permite **restablecer la contraseña** usando un **token de recuperación** prev
 
 ---
 
-## 1.12 Definition of Done
+## **1.12 Verificación y activación de cuenta (Verify Email)**
+
+Este módulo implementa un flujo común de **verificación de correo** para activar cuentas y confirmar propiedad del email, sin filtrar información sensible (anti-enumeración).
+
+Este mecanismo **ya se encuentra implementado** en el repositorio para el endpoint de solicitud (`request`). El endpoint de confirmación (`confirm`) queda planificado como siguiente paso.
+
+---
+
+### **1.12.1 Solicitud de verificación**
+
+#### POST `/auth/verify-email/request`
+
+Permite solicitar un enlace de verificación enviando únicamente el correo electrónico.
+
+* **Auth requerida:** ❌ No
+* **Headers obligatorios:**
+  `X-Client-Platform: WEB | MOBILE`
+* **Body:**
+
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+---
+
+### **Reglas de negocio**
+
+* El endpoint **siempre responde exitosamente** (respuesta “ciega”), exista o no el correo.
+* Si el email:
+
+  * **no existe**, o
+  * pertenece a un usuario **inactivo (`activo=false`)**
+
+  → **no se genera token ni se envía correo** (pero la respuesta sigue siendo genérica).
+* Si el usuario existe y está activo:
+
+  * Si **ya está verificado** (`emailVerifiedAt != null`) → **no-op** (misma respuesta genérica).
+  * Si **no está verificado**:
+
+    * Se genera un **token de verificación de un solo uso**.
+    * Se guarda **únicamente el hash del token** en base de datos (nunca el token plano).
+    * Se invalidan tokens previos de verificación activos no usados (`usedAt = now`).
+    * Se envía un correo con enlace de verificación:
+
+      `APP_VERIFY_EMAIL_URL?token=xxxxx`
+* El token:
+
+  * Tiene un **TTL configurable** (`EMAIL_VERIFY_TTL_MINUTES`, default 60).
+  * Puede usarse **una sola vez** (se marca `usedAt` al confirmarse).
+
+Este diseño evita **enumeración de usuarios** y ataques por inferencia.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "message": "If the email exists, a verification message has been sent"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+> ⚠️ La respuesta es **intencionalmente genérica** por motivos de seguridad.
+
+---
+
+### **Modelo de datos asociado (Prisma)**
+
+#### Usuario (nuevo campo)
+
+```prisma
+model Usuario {
+  // ...
+  emailVerifiedAt DateTime?
+  // ...
+}
+```
+
+#### Token de verificación (nuevo modelo)
+
+```prisma
+model EmailVerificationToken {
+  id        String   @id @default(cuid())
+
+  userId    String
+  user      Usuario  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([usedAt])
+  @@map("email_verification_tokens")
+}
+```
+
+---
+
+### **Consideraciones de seguridad**
+
+* Nunca se almacena el token en texto plano, solo `tokenHash`.
+* El hash del token se realiza con **HMAC + pepper (`TOKEN_PEPPER`)**.
+* Respuesta “ciega” (no revela si el email existe).
+* Rate limiting recomendado en `verify-email/request` si se considera endpoint sensible.
+* El enlace apunta al frontend:
+
+  * `APP_VERIFY_EMAIL_URL=http://localhost:3001/verify-email`
+  * `EMAIL_VERIFY_TTL_MINUTES=60`
+
+---
+
+### **Flujo resumido (request)**
+
+1. Cliente envía email a `/auth/verify-email/request`.
+2. Backend valida formato del email.
+3. Si el usuario existe, está activo y no está verificado:
+
+   * genera token
+   * guarda hash en DB
+   * invalida tokens previos
+   * envía correo con enlace
+4. Backend responde **200 OK** siempre.
+5. El frontend recibe el token desde el link para llamar luego a `POST /auth/verify-email/confirm`.
+
+---
+
+### **1.12.2 Confirmación de verificación (pendiente)**
+
+#### POST `/auth/verify-email/confirm`
+
+> Endpoint planificado para completar el flujo: validar token, marcar `emailVerifiedAt`, marcar `usedAt` del token e invalidar tokens activos restantes.
+
+---
+
+---
+
+## ✅ 1.12 Definition of Done (actualizado)
 
 * Login/Refresh/Logout/Logout-all/Me funcionando correctamente.
 * CRUD de usuarios con RBAC activo.
@@ -572,7 +718,12 @@ Permite **restablecer la contraseña** usando un **token de recuperación** prev
 * **Rutas protegidas con `X-Client-Platform` donde aplica (WEB/MOBILE).** *25/01/2026*
 * **Rate limiting aplicado a endpoints sensibles (`login`, `forgot-password`, `reset-password`, `change-password`).** *25/01/2026*
 * **Flujo completo probado: forgot-password → reset-password → login con nueva contraseña.** *25/01/2026*
+* **Verify Email Request implementado y validado (respuesta “ciega”, token 1-uso con TTL, hash en DB, invalidación de tokens previos, envío de correo con link).** *25/01/2026*
+* **Migración aplicada: `Usuario.emailVerifiedAt` + tabla `email_verification_tokens`.** *25/01/2026*
+* **Variables de entorno configuradas: `APP_VERIFY_EMAIL_URL`, `EMAIL_VERIFY_TTL_MINUTES`.** *25/01/2026*
+* **Pruebas en Postman: usuario activo/no activo/no existe/ya verificado; verificación de inserción e invalidación en `email_verification_tokens`.** *25/01/2026*
 
 ### **Estado**
 
-**Estado:** implementado y validado en el repositorio.
+**Estado:** implementado y validado en el repositorio (Verify Email Request).
+**Pendiente:** `POST /auth/verify-email/confirm` para completar activación.

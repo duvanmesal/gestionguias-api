@@ -35,14 +35,26 @@ const Env = z.object({
   PASSWORD_PEPPER: z.string().min(16).default(""),
   TOKEN_PEPPER: z.string().min(16).default(""),
 
-  // ✅ NEW: Password reset
-  APP_RESET_PASSWORD_URL: z.string().url().default("http://localhost:3001/reset-password"),
+  APP_RESET_PASSWORD_URL: z
+    .string()
+    .url()
+    .default("http://localhost:3001/reset-password"),
   PASSWORD_RESET_TTL_MINUTES: z.coerce.number().default(15),
 
+  APP_VERIFY_EMAIL_URL: z
+    .string()
+    .url()
+    .default("http://localhost:3001/verify-email"),
+  EMAIL_VERIFY_TTL_MINUTES: z.coerce.number().default(60),
+
   // CORS
-  CORS_ALLOWED_ORIGINS: z.string().default("http://localhost:3001,http://localhost:5173"),
+  CORS_ALLOWED_ORIGINS: z
+    .string()
+    .default("http://localhost:3001,http://localhost:5173"),
   CORS_ALLOW_CREDENTIALS: z.coerce.boolean().default(true),
 })
 
 export const env = Env.parse(process.env)
-export const corsOrigins = Env.shape.CORS_ALLOWED_ORIGINS.parse(process.env.CORS_ALLOWED_ORIGINS).split(",")
+export const corsOrigins = Env.shape.CORS_ALLOWED_ORIGINS.parse(
+  process.env.CORS_ALLOWED_ORIGINS,
+).split(",")
