@@ -37,6 +37,18 @@ export interface LoginResult {
     apellidos: string;
     rol: RolType;
     activo: boolean;
+
+    // ✅ claves para que el front no “invente” que falta verificación
+    emailVerifiedAt: string | null;
+
+    // (útiles para UI)
+    createdAt: string;
+    updatedAt: string;
+
+    // opcionales (quita si no existen en tu Prisma)
+    telefono?: string | null;
+    documentType?: string | null;
+    documentNumber?: string | null;
   };
   tokens: {
     accessToken: string;
@@ -152,6 +164,14 @@ export class AuthService {
         apellidos: user.apellidos,
         rol: user.rol,
         activo: user.activo,
+
+        emailVerifiedAt: user.emailVerifiedAt
+          ? user.emailVerifiedAt.toISOString()
+          : null,
+
+        // útiles para UI/logs
+        createdAt: user.createdAt.toISOString(),
+        updatedAt: user.updatedAt.toISOString(),
       },
       tokens: {
         accessToken,
@@ -378,10 +398,20 @@ export class AuthService {
         activo: true,
         createdAt: true,
         updatedAt: true,
+        emailVerifiedAt: true,
       },
     });
     if (!user) throw new NotFoundError("User not found");
-    return user;
+
+    // Si quieres, aquí también puedes normalizar fechas a ISO:
+    return {
+      ...user,
+      emailVerifiedAt: user.emailVerifiedAt
+        ? user.emailVerifiedAt.toISOString()
+        : null,
+      createdAt: user.createdAt.toISOString(),
+      updatedAt: user.updatedAt.toISOString(),
+    };
   }
 
   async forgotPassword(email: string): Promise<void> {
@@ -568,7 +598,10 @@ export class AuthService {
   // ✅ confirm email verification
   async verifyEmailConfirm(token: string): Promise<{ message: string }> {
     const now = new Date();
-    const tokenHash = hashEmailVerifyToken(token);
+    const raw = token.trim();
+    if (!raw) throw new BadRequestError("Invalid or expired token");
+
+    const tokenHash = hashEmailVerifyToken(raw);
 
     const record = await prisma.emailVerificationToken.findUnique({
       where: { tokenHash },
@@ -587,25 +620,20 @@ export class AuthService {
       },
     });
 
-    // Respuesta genérica (no filtra si existe/no existe)
     if (!record) {
       throw new BadRequestError("Invalid or expired token");
     }
 
-    // Token ya usado o expirado
     if (record.usedAt || record.expiresAt <= now) {
       throw new BadRequestError("Invalid or expired token");
     }
 
-    // Si el usuario no está activo, lo tratamos como inválido (misma respuesta genérica)
     if (!record.user || !record.user.activo) {
       throw new BadRequestError("Invalid or expired token");
     }
 
-    // Transacción: marca usuario verificado + marca token usado + invalida otros tokens activos
     await prisma.$transaction(async (tx) => {
-      // Si ya estaba verificado, lo dejamos idempotente:
-      if (!record.user.emailVerifiedAt) {
+      if (!record.user?.emailVerifiedAt) {
         await tx.usuario.update({
           where: { id: record.userId },
           data: { emailVerifiedAt: now },

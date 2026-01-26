@@ -16,7 +16,7 @@ const Env = z.object({
 
   REFRESH_TOKEN_PEPPER: z.string().min(16),
 
-  SEED_SUPERADMIN_EMAIL: z.string().email().default("duvandev@test.com"),
+  SEED_SUPERADMIN_EMAIL: z.string().email().default("duvanmesa2415@gmail.com"),
   SEED_SUPERADMIN_PASS: z.string().min(8).default("dev!123456"),
 
   // Email
