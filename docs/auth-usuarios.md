@@ -473,7 +473,9 @@ model PasswordResetToken {
 4. Backend responde **200 OK** siempre.
 5. El frontend redirige al flujo de **reset-password** usando el token.
 
-### **1.11.1 Restablecer contraseña (Reset Password)**
+---
+
+### **1.11 Restablecer contraseña (Reset Password)**
 
 #### POST `/auth/reset-password`
 
@@ -691,19 +693,99 @@ model EmailVerificationToken {
 4. Backend responde **200 OK** siempre.
 5. El frontend recibe el token desde el link para llamar luego a `POST /auth/verify-email/confirm`.
 
+Listo. Mimi te deja el bloque **1.12.2 (Confirmación)** ya redactado para pegarlo tal cual, y luego el **Definition of Done** actualizado con lo nuevo ✅
+
 ---
 
-### **1.12.2 Confirmación de verificación (pendiente)**
+## **1.12.2 Confirmación de verificación (implementado)**
 
 #### POST `/auth/verify-email/confirm`
 
-> Endpoint planificado para completar el flujo: validar token, marcar `emailVerifiedAt`, marcar `usedAt` del token e invalidar tokens activos restantes.
+Confirma la propiedad del correo electrónico consumiendo un **token de verificación** previamente generado por `POST /auth/verify-email/request`.
+Este endpoint completa el flujo marcando el usuario como verificado y evitando reuso del token.
+
+* **Auth requerida:** ❌ No
+
+* **Headers obligatorios:**
+  `X-Client-Platform: WEB | MOBILE`
+
+* **Body:**
+
+```json
+{
+  "token": "verif_...token_plano..."
+}
+```
 
 ---
 
+### **Reglas de negocio**
+
+* El token debe cumplir:
+
+  * existir en BD (por `tokenHash`)
+  * **no estar usado** (`usedAt = null`)
+  * **no estar expirado** (`expiresAt > now`)
+* El usuario asociado debe:
+
+  * existir
+  * estar **activo** (`activo = true`)
+* Si el usuario ya estaba verificado (`emailVerifiedAt != null`):
+
+  * el endpoint es **idempotente**: se marca el token como usado (si aplica) y responde OK
+  * (en cualquier caso **no filtra información sensible**)
+* Al confirmar:
+
+  * se actualiza `usuario.emailVerifiedAt = now`
+  * se marca el token como **usado** (`usedAt = now`)
+  * se invalidan otros tokens activos del mismo usuario (`usedAt = now`) para higiene
+* Todo ocurre de forma **atómica** (transacción) para evitar condiciones de carrera.
+
 ---
 
-## ✅ 1.12 Definition of Done (actualizado)
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "message": "Email verified successfully"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+* `400` → token inválido/expirado/usado, o usuario inactivo (se responde de forma genérica: `Invalid or expired token`).
+* `422` → validación fallida (body sin token, token demasiado corto, etc).
+
+---
+
+### **Consideraciones de seguridad**
+
+* El token **no se almacena en texto plano**, solo `tokenHash` usando HMAC + `TOKEN_PEPPER`.
+* El endpoint no revela si un correo existe.
+* Recomendado aplicar `sensitiveLimiter` para mitigar abuso.
+* El frontend recibe el token desde el link:
+
+  * `APP_VERIFY_EMAIL_URL?token=xxxxx`
+
+---
+
+### **Flujo resumido (confirm)**
+
+1. Cliente obtiene token desde el enlace del correo.
+2. Cliente llama `POST /auth/verify-email/confirm` con el token.
+3. Backend valida token (existencia/uso/expiración) y usuario activo.
+4. Backend marca `emailVerifiedAt` y consume token.
+5. Responde `200 OK`.
+
+---
+
+## ✅ 1.13 Definition of Done (actualizado)
 
 * Login/Refresh/Logout/Logout-all/Me funcionando correctamente.
 * CRUD de usuarios con RBAC activo.
@@ -722,8 +804,11 @@ model EmailVerificationToken {
 * **Migración aplicada: `Usuario.emailVerifiedAt` + tabla `email_verification_tokens`.** *25/01/2026*
 * **Variables de entorno configuradas: `APP_VERIFY_EMAIL_URL`, `EMAIL_VERIFY_TTL_MINUTES`.** *25/01/2026*
 * **Pruebas en Postman: usuario activo/no activo/no existe/ya verificado; verificación de inserción e invalidación en `email_verification_tokens`.** *25/01/2026*
+* **Verify Email Confirm implementado y validado (token 1-uso, expiración, consumo `usedAt`, marca `emailVerifiedAt`, invalidación de tokens restantes, transacción).** *26/01/2026*
+* **Pruebas en Postman: verify-email/request → verify-email/confirm (OK), confirm con token usado/expirado/inválido; verificación en DB (`emailVerifiedAt`, `usedAt`).** *26/01/2026*
+* **Rate limiting aplicado también a `verify-email/confirm` (endpoint sensible).** *26/01/2026*
 
 ### **Estado**
 
-**Estado:** implementado y validado en el repositorio (Verify Email Request).
-**Pendiente:** `POST /auth/verify-email/confirm` para completar activación.
+**Estado:** implementado y validado en el repositorio (Verify Email Request + Confirm).
+**Pendiente:** ninguno dentro del flujo verify-email (completo).

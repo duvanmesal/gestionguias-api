@@ -12,6 +12,7 @@ import type {
   ForgotPasswordRequest,
   ResetPasswordRequest,
   VerifyEmailRequest,
+  VerifyEmailConfirmRequest,
 } from "./auth.schemas";
 import { verifyPassword } from "../../libs/password";
 import type { Platform } from "@prisma/client";
@@ -355,6 +356,35 @@ export class AuthController {
       return next(error);
     }
   }
+
+  // ✅ verify-email/confirm (no requiere auth)
+  async verifyEmailConfirm(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!(req as any).clientPlatform) {
+        throw new BadRequestError("X-Client-Platform header is required");
+      }
+
+      const body = req.body as VerifyEmailConfirmRequest;
+
+      logger.info(
+        {
+          hasToken: !!body.token,
+          platformHeader: req.get("X-Client-Platform"),
+          clientPlatform: (req as any).clientPlatform,
+          ip: req.ip,
+          userAgent: req.get("User-Agent"),
+        },
+        "[Auth/VerifyEmailConfirm] incoming",
+      );
+
+      const result = await authService.verifyEmailConfirm(body.token);
+
+      return res.json(ok(result));
+    } catch (error) {
+      return next(error);
+    }
+  }
+
 
   async register(req: Request, res: Response, next: NextFunction) {
     try {

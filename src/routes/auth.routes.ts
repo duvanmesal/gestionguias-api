@@ -11,6 +11,7 @@ import {
   forgotPasswordSchema,
   resetPasswordSchema,
   verifyEmailRequestSchema,
+  verifyEmailConfirmSchema,
 } from "../modules/auth/auth.schemas"
 import { sensitiveLimiter } from "../middlewares/rate-limit"
 
@@ -56,6 +57,15 @@ router.post(
   detectClientPlatform,
   validate({ body: verifyEmailRequestSchema }),
   authController.verifyEmailRequest.bind(authController),
+)
+
+// ✅ confirm email verification (consume token)
+router.post(
+  "/verify-email/confirm",
+  sensitiveLimiter,
+  detectClientPlatform,
+  validate({ body: verifyEmailConfirmSchema }),
+  authController.verifyEmailConfirm.bind(authController),
 )
 
 router.post(

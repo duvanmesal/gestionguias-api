@@ -152,11 +152,18 @@ export const listUsersQuerySchema = z.object({
     .optional(),
 });
 
+export const verifyEmailConfirmSchema = z.object({
+  token: z.string().trim().min(10, "Invalid token"),
+});
+
 export type LoginRequest = z.infer<typeof loginSchema>;
 export type RefreshRequest = z.infer<typeof refreshSchema>;
 export type ForgotPasswordRequest = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordRequest = z.infer<typeof resetPasswordSchema>;
 export type VerifyEmailRequest = z.infer<typeof verifyEmailRequestSchema>;
+export type VerifyEmailConfirmRequest = z.infer<
+  typeof verifyEmailConfirmSchema
+>;
 export type RegisterRequest = z.infer<typeof registerSchema>;
 export type LogoutAllRequest = z.infer<typeof logoutAllSchema>;
 export type CreateUserRequest = z.infer<typeof createUserSchema>;

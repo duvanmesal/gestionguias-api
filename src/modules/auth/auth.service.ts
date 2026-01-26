@@ -506,7 +506,7 @@ export class AuthService {
     );
   }
 
-  // ✅ NEW: request email verification link/token
+  // ✅ request email verification link/token
   async verifyEmailRequest(email: string): Promise<void> {
     const normalizedEmail = email.trim().toLowerCase();
 
@@ -563,6 +563,77 @@ export class AuthService {
       { userId: user.id, expiresAt },
       "[Auth/VerifyEmailRequest] verification email sent",
     );
+  }
+
+  // ✅ confirm email verification
+  async verifyEmailConfirm(token: string): Promise<{ message: string }> {
+    const now = new Date();
+    const tokenHash = hashEmailVerifyToken(token);
+
+    const record = await prisma.emailVerificationToken.findUnique({
+      where: { tokenHash },
+      select: {
+        id: true,
+        userId: true,
+        expiresAt: true,
+        usedAt: true,
+        user: {
+          select: {
+            id: true,
+            activo: true,
+            emailVerifiedAt: true,
+          },
+        },
+      },
+    });
+
+    // Respuesta genérica (no filtra si existe/no existe)
+    if (!record) {
+      throw new BadRequestError("Invalid or expired token");
+    }
+
+    // Token ya usado o expirado
+    if (record.usedAt || record.expiresAt <= now) {
+      throw new BadRequestError("Invalid or expired token");
+    }
+
+    // Si el usuario no está activo, lo tratamos como inválido (misma respuesta genérica)
+    if (!record.user || !record.user.activo) {
+      throw new BadRequestError("Invalid or expired token");
+    }
+
+    // Transacción: marca usuario verificado + marca token usado + invalida otros tokens activos
+    await prisma.$transaction(async (tx) => {
+      // Si ya estaba verificado, lo dejamos idempotente:
+      if (!record.user.emailVerifiedAt) {
+        await tx.usuario.update({
+          where: { id: record.userId },
+          data: { emailVerifiedAt: now },
+        });
+      }
+
+      await tx.emailVerificationToken.update({
+        where: { id: record.id },
+        data: { usedAt: now },
+      });
+
+      await tx.emailVerificationToken.updateMany({
+        where: {
+          userId: record.userId,
+          usedAt: null,
+          expiresAt: { gt: now },
+          NOT: { id: record.id },
+        },
+        data: { usedAt: now },
+      });
+    });
+
+    logger.info(
+      { userId: record.userId },
+      "[Auth/VerifyEmailConfirm] email verified successfully",
+    );
+
+    return { message: "Email verified successfully" };
   }
 
   async changePassword(
