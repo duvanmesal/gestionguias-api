@@ -13,7 +13,7 @@ import type {
   ChangePasswordRequest,
 } from "../auth/auth.schemas";
 import type { CompleteProfileRequest, UpdateMeRequest } from "./user.schemas";
-import { RolType } from "@prisma/client";
+import { RolType, ProfileStatus } from "@prisma/client";
 
 export interface PaginationOptions {
   page?: number;
@@ -21,6 +21,17 @@ export interface PaginationOptions {
   search?: string;
   rol?: RolType;
   activo?: boolean;
+
+  // ✅ nuevos filtros
+  profileStatus?: ProfileStatus;
+  createdFrom?: Date;
+  createdTo?: Date;
+  updatedFrom?: Date;
+  updatedTo?: Date;
+
+  // ✅ ordenamiento
+  orderBy?: "createdAt" | "updatedAt" | "email";
+  orderDir?: "asc" | "desc";
 }
 
 export interface PaginatedResult<T> {
@@ -44,10 +55,12 @@ export class UserService {
 
     const page =
       Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+
     const pageSizeClampedBase =
       Number.isFinite(rawPageSize) && rawPageSize > 0
         ? Math.floor(rawPageSize)
         : 20;
+
     const pageSize = Math.min(
       Math.max(pageSizeClampedBase, MIN_PAGE_SIZE),
       MAX_PAGE_SIZE,
@@ -76,6 +89,31 @@ export class UserService {
       where.activo = options.activo;
     }
 
+    // ✅ profileStatus
+    if (options.profileStatus) {
+      where.profileStatus = options.profileStatus;
+    }
+
+    // ✅ createdAt range
+    if (options.createdFrom || options.createdTo) {
+      where.createdAt = {
+        ...(options.createdFrom ? { gte: options.createdFrom } : {}),
+        ...(options.createdTo ? { lte: options.createdTo } : {}),
+      };
+    }
+
+    // ✅ updatedAt range
+    if (options.updatedFrom || options.updatedTo) {
+      where.updatedAt = {
+        ...(options.updatedFrom ? { gte: options.updatedFrom } : {}),
+        ...(options.updatedTo ? { lte: options.updatedTo } : {}),
+      };
+    }
+
+    // ✅ ordenamiento configurable
+    const orderByField = options.orderBy ?? "createdAt";
+    const orderDir = options.orderDir ?? "desc";
+
     const [total, users] = await Promise.all([
       prisma.usuario.count({ where }),
       prisma.usuario.findMany({
@@ -91,7 +129,7 @@ export class UserService {
           createdAt: true,
           updatedAt: true,
         },
-        orderBy: [{ createdAt: "desc" }],
+        orderBy: [{ [orderByField]: orderDir }],
         skip,
         take,
       }),

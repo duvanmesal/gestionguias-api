@@ -8,20 +8,46 @@ import type {
   ChangePasswordRequest,
 } from "../auth/auth.schemas";
 import type { CompleteProfileRequest, UpdateMeRequest } from "./user.schemas";
-import type { RolType } from "@prisma/client";
+import type { RolType, ProfileStatus } from "@prisma/client";
 
 export class UserController {
   async list(req: Request, res: Response, next: NextFunction) {
     try {
-      const { page = "1", pageSize = "20", search, rol, activo } = req.query;
+      /**
+       * Con validate({ query: listUsersQuerySchema })
+       * lo ideal es que esto YA venga parseado:
+       * - page/pageSize => number
+       * - activo => boolean | undefined
+       * - createdFrom/... => Date | undefined
+       */
+      const {
+        page,
+        pageSize,
+        search,
+        rol,
+        activo,
+        profileStatus,
+        createdFrom,
+        createdTo,
+        updatedFrom,
+        updatedTo,
+        orderBy,
+        orderDir,
+      } = req.query as any;
 
       const options = {
-        page: Number.parseInt(page as string, 10),
-        pageSize: Number.parseInt(pageSize as string, 10),
-        search: search as string,
+        page,
+        pageSize,
+        search,
         rol: rol as RolType,
-        activo:
-          activo === "true" ? true : activo === "false" ? false : undefined,
+        activo: typeof activo === "boolean" ? activo : undefined,
+        profileStatus: profileStatus as ProfileStatus,
+        createdFrom: createdFrom as Date | undefined,
+        createdTo: createdTo as Date | undefined,
+        updatedFrom: updatedFrom as Date | undefined,
+        updatedTo: updatedTo as Date | undefined,
+        orderBy: orderBy as "createdAt" | "updatedAt" | "email" | undefined,
+        orderDir: orderDir as "asc" | "desc" | undefined,
       };
 
       const result = await userService.list(options);

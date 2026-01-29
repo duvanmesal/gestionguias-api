@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RolType } from "@prisma/client";
+import { RolType, ProfileStatus } from "@prisma/client";
 
 export const loginSchema = z.object({
   email: z.string().email("Invalid email format"),
@@ -119,38 +119,40 @@ export const changePasswordSchema = z
     }
   });
 
-export const listUsersQuerySchema = z.object({
-  page: z
-    .string()
-    .transform((v) => parseInt(v))
-    .refine((n) => !isNaN(n) && n > 0, "page must be a positive integer")
-    .optional()
-    .default("1"),
+export const listUsersQuerySchema = z
+  .object({
+    page: z.coerce.number().int().positive().default(1),
+    pageSize: z.coerce.number().int().min(1).max(100).default(20),
 
-  pageSize: z
-    .string()
-    .transform((v) => parseInt(v))
-    .refine(
-      (n) => !isNaN(n) && n >= 1 && n <= 100,
-      "pageSize must be between 1 and 100",
-    )
-    .optional()
-    .default("20"),
+    search: z.string().trim().optional(),
+    rol: z.nativeEnum(RolType).optional(),
 
-  search: z.string().trim().optional(),
-  rol: z.nativeEnum(RolType).optional(),
+    activo: z
+      .union([z.literal("true"), z.literal("false"), z.boolean()])
+      .transform((v) => (v === true || v === "true" ? true : false))
+      .optional(),
 
-  activo: z
-    .union([z.string(), z.boolean()])
-    .transform((v) =>
-      v === "true" || v === true
-        ? true
-        : v === "false" || v === false
-          ? false
-          : undefined,
-    )
-    .optional(),
-});
+    // profileStatus
+    profileStatus: z.nativeEnum(ProfileStatus).optional(),
+
+    // rangos de fechas (ISO o YYYY-MM-DD)
+    createdFrom: z.coerce.date().optional(),
+    createdTo: z.coerce.date().optional(),
+    updatedFrom: z.coerce.date().optional(),
+    updatedTo: z.coerce.date().optional(),
+
+    // ordenamiento
+    orderBy: z.enum(["createdAt", "updatedAt", "email"]).optional(),
+    orderDir: z.enum(["asc", "desc"]).optional(),
+  })
+  .refine(
+    (q) => !(q.createdFrom && q.createdTo && q.createdFrom > q.createdTo),
+    { message: "createdFrom must be <= createdTo", path: ["createdFrom"] },
+  )
+  .refine(
+    (q) => !(q.updatedFrom && q.updatedTo && q.updatedFrom > q.updatedTo),
+    { message: "updatedFrom must be <= updatedTo", path: ["updatedFrom"] },
+  );
 
 export const verifyEmailConfirmSchema = z.object({
   token: z.string().trim().min(10, "Invalid token"),

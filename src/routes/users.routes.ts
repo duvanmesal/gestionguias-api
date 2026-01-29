@@ -9,7 +9,10 @@ import {
   changePasswordSchema,
   listUsersQuerySchema,
 } from "../modules/auth/auth.schemas";
-import { completeProfileSchema, updateMeSchema } from "../modules/users/user.schemas";
+import {
+  completeProfileSchema,
+  updateMeSchema,
+} from "../modules/users/user.schemas";
 import { RolType } from "@prisma/client";
 
 const router = Router();
@@ -17,62 +20,74 @@ const router = Router();
 // All routes require authentication
 router.use(requireAuth);
 
+// --- ME endpoints ---
 router.patch(
   "/me/profile",
   validate({ body: completeProfileSchema }),
-  userController.completeProfile.bind(userController)
+  userController.completeProfile.bind(userController),
 );
 
 router.patch(
   "/me",
   validate({ body: updateMeSchema }),
-  userController.updateMe.bind(userController)
+  userController.updateMe.bind(userController),
 );
 
-// List users - only SUPER_ADMIN
+// --- LIST & SEARCH (SUPER_ADMIN) ---
+// ⚠️ Deben ir ANTES de "/:id"
+router.get(
+  "/search",
+  requireSuperAdmin,
+  validate({ query: listUsersQuerySchema }),
+  userController.list.bind(userController),
+);
+
 router.get(
   "/",
   requireSuperAdmin,
   validate({ query: listUsersQuerySchema }),
-  userController.list.bind(userController)
+  userController.list.bind(userController),
 );
 
-// Create user - only SUPER_ADMIN
+// --- CREATE (SUPER_ADMIN) ---
 router.post(
   "/",
   requireSuperAdmin,
   validate({ body: createUserSchema }),
-  userController.create.bind(userController)
+  userController.create.bind(userController),
 );
 
-// Get user - SUPER_ADMIN or owner
-router.get(
-  "/:id",
-  requireOwnershipOrRole([RolType.SUPER_ADMIN]),
-  userController.get.bind(userController)
+// --- ID routes ---
+// ✅ Poner rutas más específicas ANTES de "/:id"
+
+// Change password - owner only
+router.patch(
+  "/:id([0-9a-fA-F-]{36})/password",
+  requireOwnershipOrRole([]),
+  validate({ body: changePasswordSchema }),
+  userController.changePassword.bind(userController),
 );
 
 // Update user - SUPER_ADMIN or owner (with restrictions)
 router.patch(
-  "/:id",
+  "/:id([0-9a-fA-F-]{36})",
   requireOwnershipOrRole([RolType.SUPER_ADMIN]),
   validate({ body: updateUserSchema }),
-  userController.update.bind(userController)
+  userController.update.bind(userController),
 );
 
-// Change password - owner only
-router.patch(
-  "/:id/password",
-  requireOwnershipOrRole([]),
-  validate({ body: changePasswordSchema }),
-  userController.changePassword.bind(userController)
+// Get user - SUPER_ADMIN or owner
+router.get(
+  "/:id([0-9a-fA-F-]{36})",
+  requireOwnershipOrRole([RolType.SUPER_ADMIN]),
+  userController.get.bind(userController),
 );
 
 // Deactivate user - only SUPER_ADMIN
 router.delete(
-  "/:id",
+  "/:id([0-9a-fA-F-]{36})",
   requireSuperAdmin,
-  userController.deactivate.bind(userController)
+  userController.deactivate.bind(userController),
 );
 
 export { router as userRoutes };

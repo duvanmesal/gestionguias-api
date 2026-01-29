@@ -785,14 +785,305 @@ Este endpoint completa el flujo marcando el usuario como verificado y evitando r
 
 ---
 
-## ✅ 1.13 Definition of Done (actualizado)
+# **1.13 Perfil y settings de usuario (implementado)**
 
-* Login/Refresh/Logout/Logout-all/Me funcionando correctamente.
+Este bloque agrupa los endpoints orientados a la **gestión del perfil del usuario autenticado**, evitando el uso de identificadores explícitos (`:id`) desde el frontend y simplificando los flujos de edición de cuenta.
+
+Estos endpoints **ya se encuentran implementados** en el repositorio.
+
+---
+
+## **1.13.1 Actualizar datos básicos del perfil**
+
+#### PATCH `/users/me`
+
+Permite al usuario autenticado **actualizar sus propios datos básicos** sin necesidad de enviar su identificador, usando el contexto del access token.
+
+* **Auth requerida:**
+  `Authorization: Bearer <accessToken>`
+
+* **Headers obligatorios:**
+  Ninguno adicional (❌ `X-Client-Platform` **no aplica** en este endpoint)
+
+* **Body (al menos un campo):**
+
+```json
+{
+  "nombres": "Duvan",
+  "apellidos": "Mesa",
+  "telefono": "+57 300 123 4567"
+}
+```
+
+Todos los campos son **opcionales**, pero el body **no puede estar vacío**.
+
+---
+
+### **Reglas de negocio**
+
+* El usuario **solo puede actualizar su propia información**.
+
+* El identificador del usuario se obtiene desde el access token (`req.user.userId`).
+
+* Campos permitidos:
+
+  * `nombres`
+  * `apellidos`
+  * `telefono`
+
+* Campos **no permitidos** (ignorados o rechazados por validación):
+
+  * `email`
+  * `rol`
+  * `activo`
+  * `profileStatus`
+  * cualquier campo sensible o administrativo
+
+* El endpoint es independiente del rol (`SUPER_ADMIN`, `SUPERVISOR`, `GUIA`).
+
+* Si no se envía ningún campo válido → **error de validación**.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "id": "cus_123",
+    "email": "user@example.com",
+    "nombres": "Duvan",
+    "apellidos": "Mesa",
+    "telefono": "+57 300 123 4567",
+    "rol": "GUIA",
+    "activo": true,
+    "profileStatus": "COMPLETE",
+    "createdAt": "2026-01-20T10:00:00Z",
+    "updatedAt": "2026-01-26T14:30:00Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+* `400` → body vacío o sin campos permitidos.
+* `401` → access token inválido o ausente.
+* `404` → usuario no encontrado (caso excepcional).
+
+---
+
+### **Consideraciones de diseño**
+
+* El endpoint evita el uso de `:id` para:
+
+  * reducir acoplamiento del frontend
+  * prevenir errores de autorización
+* La validación estricta se realiza con `Zod`.
+* Los cambios quedan registrados en logs para auditoría.
+* Pensado para pantallas de **“Editar perfil” / “Settings”** del usuario.
+
+---
+
+## **Relación con otros endpoints**
+
+| Endpoint                  | Uso principal                             |
+| ------------------------- | ----------------------------------------- |
+| `PATCH /users/me`         | Edición rápida de datos básicos           |
+| `PATCH /users/me/profile` | Completar perfil obligatorio (onboarding) |
+| `PATCH /users/:id`        | Gestión administrativa (RBAC)             |
+
+---
+
+# **1.14 Búsqueda y filtros de usuarios (implementado)**
+
+Este endpoint permite **listar, buscar y filtrar usuarios** de forma avanzada, pensado para **escalar** cuando el sistema tenga cientos o miles de registros.
+
+Se utiliza tanto para **pantallas administrativas** como para futuros casos de exportación, dashboards o reportes.
+
+---
+
+## **1.14.1 Listado y búsqueda de usuarios**
+
+#### GET `/users/search`
+
+Permite obtener un listado paginado de usuarios aplicando **múltiples filtros combinables**, búsqueda textual, rangos de fechas y ordenamiento.
+
+> Este endpoint es un **alias explícito** del listado administrativo de usuarios (`GET /users`), con el mismo comportamiento.
+
+---
+
+### **Auth requerida**
+
+`Authorization: Bearer <accessToken>`
+
+* **Roles permitidos:**
+  `SUPER_ADMIN`
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Query params disponibles**
+
+Todos los parámetros son **opcionales** y pueden combinarse libremente.
+
+| Parámetro       | Tipo    | Descripción                                                      |
+| --------------- | ------- | ---------------------------------------------------------------- |
+| `page`          | number  | Página a consultar (default: `1`)                                |
+| `pageSize`      | number  | Tamaño de página (1–100, default: `20`)                          |
+| `search`        | string  | Búsqueda por `nombres`, `apellidos` o `email` (case-insensitive) |
+| `rol`           | enum    | Rol del usuario (`SUPER_ADMIN`, `SUPERVISOR`, `GUIA`)            |
+| `activo`        | boolean | Estado del usuario (`true` / `false`)                            |
+| `profileStatus` | enum    | Estado del perfil (`INCOMPLETE`, `COMPLETE`)                     |
+| `createdFrom`   | date    | Fecha mínima de creación (`createdAt >=`)                        |
+| `createdTo`     | date    | Fecha máxima de creación (`createdAt <=`)                        |
+| `updatedFrom`   | date    | Fecha mínima de actualización (`updatedAt >=`)                   |
+| `updatedTo`     | date    | Fecha máxima de actualización (`updatedAt <=`)                   |
+| `orderBy`       | enum    | Campo de orden (`createdAt`, `updatedAt`, `email`)               |
+| `orderDir`      | enum    | Dirección de orden (`asc`, `desc`)                               |
+
+📌 Las fechas aceptan formato `YYYY-MM-DD` o ISO completo.
+
+---
+
+### **Ejemplos de uso**
+
+**Buscar guías activos**
+
+```
+GET /users/search?rol=GUIA&activo=true
+```
+
+**Buscar por texto**
+
+```
+GET /users/search?search=ana
+```
+
+**Filtrar por rango de fechas**
+
+```
+GET /users/search?createdFrom=2026-01-01&createdTo=2026-01-31
+```
+
+**Ordenar por email**
+
+```
+GET /users/search?orderBy=email&orderDir=asc
+```
+
+**Combinación avanzada**
+
+```
+GET /users/search?page=1&pageSize=10&rol=GUIA&activo=true&profileStatus=COMPLETE&orderBy=createdAt&orderDir=desc
+```
+
+---
+
+### **Reglas de negocio**
+
+* El endpoint:
+
+  * solo es accesible por `SUPER_ADMIN`
+  * **no utiliza body** (todos los filtros van por query params)
+* Los filtros se aplican **solo si están presentes**.
+* Los filtros pueden combinarse sin restricciones.
+* La búsqueda textual (`search`) es:
+
+  * case-insensitive
+  * aplicada sobre `nombres`, `apellidos` y `email`
+* La paginación es **obligatoria internamente**, aunque el cliente no envíe parámetros.
+* Los rangos de fechas:
+
+  * validan coherencia (`from <= to`)
+  * se aplican sobre `createdAt` y `updatedAt`
+* El ordenamiento:
+
+  * solo permite campos explícitos (whitelist)
+  * evita SQL/ORM injection por diseño
+
+---
+
+### **Validación**
+
+* Validación estricta con **Zod** sobre `req.query`.
+* Valores inválidos producen error `400`:
+
+  * fechas inválidas
+  * enums fuera de rango
+  * `pageSize` fuera de límites
+  * booleanos no permitidos (ej: `activo=banana`)
+* Los parámetros válidos son **coercidos a tipos reales** (`number`, `boolean`, `Date`) antes de llegar al service.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": [
+    {
+      "id": "cus_123",
+      "email": "guia1@test.com",
+      "nombres": "Carlos",
+      "apellidos": "Rodríguez",
+      "rol": "GUIA",
+      "activo": true,
+      "profileStatus": "COMPLETE",
+      "createdAt": "2026-01-26T20:40:07.423Z",
+      "updatedAt": "2026-01-26T20:40:07.423Z"
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "pageSize": 20,
+    "total": 2,
+    "totalPages": 1
+  },
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                                |
+| ------ | ------------------------------------- |
+| `401`  | Token inválido o ausente              |
+| `403`  | Rol sin permisos (`no SUPER_ADMIN`)   |
+| `400`  | Parámetros inválidos (validación Zod) |
+
+---
+
+### **Consideraciones de diseño**
+
+* El endpoint está preparado para:
+
+  * crecimiento del número de usuarios
+  * filtros compuestos
+  * futuras extensiones (export, dashboards)
+* El filtrado se realiza en la base de datos (Prisma).
+* Pensado para uso administrativo, no público.
+* Compatible con cache HTTP si se requiere a futuro.
+
+---
+
+# ✅ **1.15 Definition of Done (actualizado)**
+
+* Login / Refresh / Logout / Logout-all funcionando correctamente.
 * CRUD de usuarios con RBAC activo.
 * Seeds iniciales ejecutados.
 * Tokens gestionados con rotación, hash y detección de reuso.
 * Validaciones estrictas con Zod.
-* Pruebas en Postman cubriendo casos correctos y de error.
 * Logs mostrando entradas/salidas de forma consistente.
 * **Forgot Password implementado y validado (email “ciego”, token 1-uso con TTL, hash en DB, invalidación de tokens previos).** *25/01/2026*
 * **Reset Password implementado y validado (token 1-uso, expiración, cambio de hash, invalidación de tokens activos, revocación de sesiones).** *25/01/2026*
@@ -803,12 +1094,7 @@ Este endpoint completa el flujo marcando el usuario como verificado y evitando r
 * **Verify Email Request implementado y validado (respuesta “ciega”, token 1-uso con TTL, hash en DB, invalidación de tokens previos, envío de correo con link).** *25/01/2026*
 * **Migración aplicada: `Usuario.emailVerifiedAt` + tabla `email_verification_tokens`.** *25/01/2026*
 * **Variables de entorno configuradas: `APP_VERIFY_EMAIL_URL`, `EMAIL_VERIFY_TTL_MINUTES`.** *25/01/2026*
-* **Pruebas en Postman: usuario activo/no activo/no existe/ya verificado; verificación de inserción e invalidación en `email_verification_tokens`.** *25/01/2026*
 * **Verify Email Confirm implementado y validado (token 1-uso, expiración, consumo `usedAt`, marca `emailVerifiedAt`, invalidación de tokens restantes, transacción).** *26/01/2026*
-* **Pruebas en Postman: verify-email/request → verify-email/confirm (OK), confirm con token usado/expirado/inválido; verificación en DB (`emailVerifiedAt`, `usedAt`).** *26/01/2026*
-* **Rate limiting aplicado también a `verify-email/confirm` (endpoint sensible).** *26/01/2026*
-
-### **Estado**
-
-**Estado:** implementado y validado en el repositorio (Verify Email Request + Confirm).
-**Pendiente:** ninguno dentro del flujo verify-email (completo).
+* **PATCH `/users/me` implementado y validado (edición de perfil propio sin `:id`, validación estricta).** *29/01/2026*
+* **Búsqueda y filtros de usuarios implementado (`GET /users` y `GET /users/search`) con paginación, búsqueda, filtros por rol/estado/perfil, rangos de fechas y ordenamiento.** *29/01/2026*
+* **Pruebas en Postman cubriendo casos válidos, combinados y de error para filtros administrativos.** *29/01/2026*
