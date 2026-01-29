@@ -22,4 +22,22 @@ export const completeProfileSchema = z.object({
     .transform((val) => val.replace(/[\s\-.]/g, "").toUpperCase()), // Normalize: remove spaces, dashes, dots
 })
 
+export const updateMeSchema = z
+  .object({
+    nombres: z.string().min(1).max(100).trim().optional(),
+    apellidos: z.string().min(1).max(100).trim().optional(),
+    telefono: z
+      .string()
+      .min(7, "Phone number must be at least 7 characters")
+      .max(20, "Phone number too long")
+      .regex(/^[0-9+\-\s()]+$/, "Invalid phone number format")
+      .trim()
+      .optional(),
+  })
+  .refine(
+    (d) => d.nombres !== undefined || d.apellidos !== undefined || d.telefono !== undefined,
+    { message: "At least one field is required" }
+  )
+
+export type UpdateMeRequest = z.infer<typeof updateMeSchema>
 export type CompleteProfileRequest = z.infer<typeof completeProfileSchema>

@@ -9,7 +9,7 @@ import {
   changePasswordSchema,
   listUsersQuerySchema,
 } from "../modules/auth/auth.schemas";
-import { completeProfileSchema } from "../modules/users/user.schemas";
+import { completeProfileSchema, updateMeSchema } from "../modules/users/user.schemas";
 import { RolType } from "@prisma/client";
 
 const router = Router();
@@ -21,6 +21,12 @@ router.patch(
   "/me/profile",
   validate({ body: completeProfileSchema }),
   userController.completeProfile.bind(userController)
+);
+
+router.patch(
+  "/me",
+  validate({ body: updateMeSchema }),
+  userController.updateMe.bind(userController)
 );
 
 // List users - only SUPER_ADMIN
