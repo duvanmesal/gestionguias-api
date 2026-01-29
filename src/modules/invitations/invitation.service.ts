@@ -205,6 +205,27 @@ export class InvitationService {
     })
   }
 
+  /**
+   * Obtiene la última invitación por email (la más reciente).
+   * Útil para no paginar toda la lista.
+   */
+  async getLastInvitationByEmail(emailRaw: string) {
+    const email = emailRaw.trim().toLowerCase()
+
+    const invitation = await prisma.invitation.findFirst({
+      where: { email },
+      include: {
+        inviter: { select: { id: true, email: true, nombres: true, apellidos: true } },
+        user: { select: { id: true, email: true, profileStatus: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    })
+
+    if (!invitation) throw new NotFoundError("Invitation not found for this email")
+
+    return invitation
+  }
+
   async expireOldInvitations(): Promise<number> {
     const result = await prisma.invitation.updateMany({
       where: { status: "PENDING", expiresAt: { lte: new Date() } },
@@ -296,6 +317,76 @@ export class InvitationService {
     logger.info(
       { invitationId, email, resenderId, userId: user.id, expiresAt },
       "[Invite] resent with new temp password and user upserted",
+    )
+  }
+
+  /**
+   * Reenvía la invitación usando email (sin invitationId).
+   * Regla: toma la invitación más reciente para ese email.
+   */
+  async resendInvitationByEmail(emailRaw: string, resenderId: string): Promise<void> {
+    const email = emailRaw.trim().toLowerCase()
+
+    const invitation = await prisma.invitation.findFirst({
+      where: { email },
+      orderBy: { createdAt: "desc" },
+    })
+
+    if (!invitation) throw new NotFoundError("Invitation not found for this email")
+    if (invitation.status === "USED") throw new BadRequestError("Cannot resend a used invitation")
+
+    const tempPassword = generateTempPassword()
+    const tempPasswordHash = await hashPassword(tempPassword)
+    const token = generateInvitationToken()
+    const tokenHash = hashToken(token)
+    const expiresAt = new Date(Date.now() + INVITE_TTL_HOURS * 60 * 60 * 1000)
+
+    // Upsert usuario (con nombres/apellidos obligatorios)
+    const user = await prisma.usuario.upsert({
+      where: { email },
+      create: {
+        email,
+        rol: invitation.role,
+        activo: true,
+        passwordHash: tempPasswordHash,
+        nombres: "Invitado",
+        apellidos: "Pendiente",
+      },
+      update: {
+        passwordHash: tempPasswordHash,
+        activo: true,
+      },
+      select: { id: true, email: true },
+    })
+
+    // Actualiza ESA invitación (la más reciente)
+    await prisma.invitation.update({
+      where: { id: invitation.id },
+      data: {
+        tempPasswordHash,
+        tokenHash,
+        expiresAt,
+        status: "PENDING",
+        usedAt: null,
+        ...(invitation.userId ? {} : { userId: user.id }),
+      },
+    })
+
+    const resender = await prisma.usuario.findUnique({
+      where: { id: resenderId },
+      select: { nombres: true, apellidos: true },
+    })
+
+    await sendInvitationEmail({
+      email,
+      tempPassword,
+      inviterName: resender ? `${resender.nombres} ${resender.apellidos}` : undefined,
+      expiresInHours: INVITE_TTL_HOURS,
+    })
+
+    logger.info(
+      { invitationId: invitation.id, email, resenderId, userId: user.id, expiresAt },
+      "[Invite] resent by email with new temp password and user upserted",
     )
   }
 }

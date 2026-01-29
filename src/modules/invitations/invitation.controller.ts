@@ -2,7 +2,11 @@ import type { Request, Response, NextFunction } from "express"
 import { invitationService } from "./invitation.service"
 import { ok, created } from "../../libs/http"
 import { logger } from "../../libs/logger"
-import type { CreateInvitationRequest } from "./invitation.schemas"
+import type {
+  CreateInvitationRequest,
+  ResendByEmailRequest,
+  GetInvitationByEmailParams,
+} from "./invitation.schemas"
 import type { InvitationStatus } from "@prisma/client"
 
 export class InvitationController {
@@ -11,7 +15,11 @@ export class InvitationController {
       if (!req.user) return res.status(401).json({ error: "Unauthorized" })
 
       const data = req.body as CreateInvitationRequest
-      const result = await invitationService.createInvitation(data.email, data.role, req.user.userId)
+      const result = await invitationService.createInvitation(
+        data.email,
+        data.role,
+        req.user.userId,
+      )
 
       logger.info(
         {
@@ -67,6 +75,40 @@ export class InvitationController {
       await invitationService.resendInvitation(invitationId, req.user.userId)
 
       return res.status(204).send()
+    } catch (error) {
+      return next(error)
+    }
+  }
+
+  /**
+   * POST /invitations/resend-by-email
+   * Body: { email }
+   */
+  async resendByEmail(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" })
+
+      const data = req.body as ResendByEmailRequest
+      await invitationService.resendInvitationByEmail(data.email, req.user.userId)
+
+      return res.status(204).send()
+    } catch (error) {
+      return next(error)
+    }
+  }
+
+  /**
+   * GET /invitations/by-email/:email
+   * Retorna la última invitación para ese email (más reciente).
+   */
+  async getLastByEmail(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" })
+
+      const { email } = req.params as unknown as GetInvitationByEmailParams
+      const invitation = await invitationService.getLastInvitationByEmail(email)
+
+      return res.json(ok(invitation))
     } catch (error) {
       return next(error)
     }

@@ -1,3 +1,7 @@
+# Mailing (Invitaciones y flujos por Email) — **implementado**
+
+---
+
 # 1) Objetivo y alcance
 
 * **Sustituir registro abierto** por **alta vía invitación** emitida por un rol autorizado (p. ej., `SUPER_ADMIN`).
@@ -5,7 +9,7 @@
 * **Primer ingreso** siempre en `profileStatus = INCOMPLETE`; se redirige a **/onboarding** para completar datos.
 * Si **no completa** y cierra sesión/pestaña, tiene **24 h** para volver; luego **expira** y requiere **nueva invitación**.
 * Los **links/credenciales** de invitación **expiran** a las **24 h**.
-* Todo con **envelope de respuesta** y **logging estructurado** (pino) iguales al resto de la API. 
+* Todo con **envelope de respuesta** y **logging estructurado** (pino) iguales al resto de la API.
 
 ---
 
@@ -19,7 +23,7 @@ Añade los campos de estado de perfil:
 * `profileCompletedAt` `DateTime?` (marca de tiempo al completar)
 * (Opcional) `invitedAt` `DateTime?` para auditoría
 
-> Mantienes tu esquema y RBAC existentes (`SUPER_ADMIN`, `SUPERVISOR`, `GUIA`), tokens de acceso **JWT** + refresh tokens rotados, y CRUD de usuarios. 
+> Mantienes tu esquema y RBAC existentes (`SUPER_ADMIN`, `SUPERVISOR`, `GUIA`), tokens de acceso **JWT** + refresh tokens rotados, y CRUD de usuarios.
 
 ## 2.2 Invitation (tabla nueva)
 
@@ -38,7 +42,7 @@ Añade los campos de estado de perfil:
 >
 > * Guarda **hashes** (token y temp password), nunca valores en claro.
 > * Puedes **pre-crear** el `Usuario` con `profileStatus=INCOMPLETE` y `activo=true` (o `false` si prefieres que “nazca” al primer login).
-> * Indexa `expiresAt` y `status` para validaciones rápidas. 
+> * Indexa `expiresAt` y `status` para validaciones rápidas.
 
 ---
 
@@ -57,43 +61,437 @@ Añade los campos de estado de perfil:
 
 # 4) Endpoints (contratos y expectativas)
 
-> Mantén el **envelope `{data, meta, error}`** y códigos coherentes con tu handler de errores/validación Zod. 
+> Mantén el **envelope `{data, meta, error}`** y códigos coherentes con tu handler de errores/validación Zod.
 
-## 4.1 POST `/invitations` (solo `SUPER_ADMIN`)
+---
 
-**Crea y envía** la invitación:
+## **4.1 Crear invitación (invite-or-resend) (implementado)**
 
-* **Body**: `{ email, rol }`
-* Genera `tokenOpaco` (para link) y `tempPassword` (para primer login). Guarda **hashes** y `expiresAt = now + 24h`.
-* **Envía email** (HTML + botón “Ir al Login” → URL del Front).
-* **Respuesta**: `{ data: { invitationId, expiresAt }, ... }`
+#### POST `/invitations`
 
-## 4.2 POST `/auth/login`
+Crea una invitación para un email o **reutiliza** una existente, regenerando credenciales temporales y reenviando el correo.
 
-Extiende el login para aceptar **contraseña temporal**:
+* **Auth requerida:**
+  `Authorization: Bearer <accessToken>`
 
-* Si el usuario **no existe** y `Invitation` válida → **(opción A)** crea el usuario en ese momento con `profileStatus=INCOMPLETE` y `passwordHash = hash(tempPassword)`.
-* Si el usuario **existe** y está en `INCOMPLETE` y la invitación sigue **vigente** → permite login con **tempPassword**.
-* En ambos casos: emite **access** + **refresh** (rotación), `me.profileStatus` va en el JWT/response para que el Front **redirija a /onboarding**. 
+* **Roles permitidos:**
+  `SUPER_ADMIN`
 
-## 4.3 GET `/auth/me`
+* **Headers obligatorios:**
+  Ninguno adicional
 
-Devuelve el usuario autenticado (incluye `profileStatus`), igual que en tu diseño base. 
+* **Body:**
 
-## 4.4 PATCH `/users/me/profile`
+```json
+{
+  "email": "user@example.com",
+  "role": "GUIA"
+}
+```
 
-**Completa** el perfil (Zod valida). Si ok → `profileStatus=COMPLETE` + `profileCompletedAt=now()`. A partir de aquí se accede al resto del sistema.
+---
 
-## 4.5 (Opcional) GET `/invitations/:token`
+### **Reglas de negocio**
 
-Solo **valida** visualmente si el token sigue vigente (útil si quieres mostrar “esta invitación está OK, presiona el botón para ir al login”). El backend **nunca** devuelve el token en claro; valida comparando **hash**.
+* El endpoint normaliza el email (`trim` + `toLowerCase()`).
+* Si existe un usuario con ese email y `profileStatus = COMPLETE`:
+
+  * retorna conflicto (`User with this email already exists`).
+* Si existe una invitación **activa** (`status=PENDING` y `expiresAt > now`):
+
+  * retorna conflicto (`An active invitation already exists for this email`).
+* Si el usuario no existe o está `INCOMPLETE`:
+
+  * se crea/actualiza usuario con password temporal (hash) y `activo=true`.
+* Se crea o actualiza la invitación:
+
+  * se regeneran: `tempPassword`, `token`, `expiresAt`
+  * queda en estado `PENDING`, `usedAt=null`.
+* Si el envío de email falla:
+
+  * se hace rollback mínimo marcando invitación como `EXPIRED`.
+
+---
+
+### **Respuesta 201 (CREATED)**
+
+```json
+{
+  "data": {
+    "action": "CREATED",
+    "invitation": {
+      "id": "inv_123",
+      "email": "user@example.com",
+      "role": "GUIA",
+      "expiresAt": "2026-01-30T20:00:00.000Z",
+      "status": "PENDING"
+    }
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Respuesta 200 (RESENT)**
+
+```json
+{
+  "data": {
+    "action": "RESENT",
+    "invitation": {
+      "id": "inv_123",
+      "email": "user@example.com",
+      "role": "GUIA",
+      "expiresAt": "2026-01-30T20:00:00.000Z",
+      "status": "PENDING"
+    }
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+> En `NODE_ENV=development` el backend puede incluir `tempPassword` en el response para testing.
+
+---
+
+### **Errores posibles**
+
+* `401` → token inválido o ausente.
+* `403` → rol sin permisos (`no SUPER_ADMIN`).
+* `409` → usuario existe y está `COMPLETE`.
+* `409` → ya existe invitación activa vigente (PENDING no expirada).
+* `422` → validación fallida (email inválido, role inválido).
+
+---
+
+### **Consideraciones de seguridad**
+
+* Password temporal y token se almacenan como **hashes**, nunca en texto plano.
+* Recomendado aplicar rate limit por IP y por email destino.
+* No se debe filtrar información sensible sobre existencia de usuarios (este endpoint es admin-only, pero se mantiene higiene).
+
+---
+
+### **Flujo resumido (crear invitación)**
+
+1. Admin llama `POST /invitations`.
+2. Backend valida usuario/invitación activa.
+3. Genera `tempPassword` + `token` + `expiresAt`.
+4. Upsert de usuario + create/update de invitación (PENDING).
+5. Envía correo.
+6. Responde 201 o 200 según corresponda.
+
+---
+
+## **4.2 Listar invitaciones (implementado)**
+
+#### GET `/invitations`
+
+Lista invitaciones con filtros opcionales (status/email). Pensado para uso administrativo.
+
+* **Auth requerida:**
+  `Authorization: Bearer <accessToken>`
+
+* **Roles permitidos:**
+  `SUPER_ADMIN`
+
+* **Headers obligatorios:**
+  Ninguno adicional
+
+* **Query params (opcionales):**
+
+| Parámetro | Tipo   | Descripción                         |
+| --------- | ------ | ----------------------------------- |
+| `status`  | enum   | `PENDING` | `USED` | `EXPIRED`      |
+| `email`   | string | Filtra por email (case-insensitive) |
+
+Ejemplo:
+
+```
+GET /invitations?status=PENDING&email=user@example.com
+```
+
+---
+
+### **Reglas de negocio**
+
+* Devuelve los elementos ordenados por `createdAt desc`.
+* El filtro `email` se normaliza a lowercase.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": [
+    {
+      "id": "inv_123",
+      "email": "user@example.com",
+      "role": "GUIA",
+      "status": "PENDING",
+      "expiresAt": "2026-01-30T20:00:00.000Z",
+      "inviter": {
+        "id": "usr_admin",
+        "email": "admin@corp.com",
+        "nombres": "Admin",
+        "apellidos": "Principal"
+      },
+      "user": {
+        "id": "usr_456",
+        "email": "user@example.com",
+        "profileStatus": "INCOMPLETE"
+      }
+    }
+  ],
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+* `401` → token inválido o ausente.
+* `403` → rol sin permisos.
+* `400` → query inválida (si se valida con Zod a futuro).
+
+---
+
+## **4.3 Reenviar invitación por ID (implementado)**
+
+#### POST `/invitations/:invitationId/resend`
+
+Reenvía una invitación existente identificada por `invitationId`, regenerando credenciales y enviando nuevamente el correo.
+
+* **Auth requerida:**
+  `Authorization: Bearer <accessToken>`
+
+* **Roles permitidos:**
+  `SUPER_ADMIN`
+
+* **Headers obligatorios:**
+  Ninguno adicional
+
+* **Params:**
+
+```
+invitationId: cuid
+```
+
+---
+
+### **Reglas de negocio**
+
+* Si no existe invitación → `404`.
+* Si está `USED` → `400` (no se puede reenviar una invitación consumida).
+* Se regeneran:
+
+  * `tempPassword`
+  * `token`
+  * `expiresAt`
+* Se actualiza la invitación a:
+
+  * `status=PENDING`
+  * `usedAt=null`
+* Se crea/actualiza usuario y se enlaza `userId` en la invitación si faltaba.
+
+---
+
+### **Respuesta 204**
+
+```
+(no content)
+```
+
+---
+
+### **Errores posibles**
+
+* `401` → token inválido o ausente.
+* `403` → rol sin permisos.
+* `404` → invitación no encontrada.
+* `400` → invitación usada (no reenviable).
+* `422` → `invitationId` inválido (validación Zod).
+
+---
+
+### **Consideraciones de seguridad**
+
+* Recomendado rate limiting.
+* No devolver credenciales temporales por API.
+
+---
+
+## **4.4 Reenviar invitación por email (implementado)**
+
+#### POST `/invitations/resend-by-email`
+
+Reenvía la invitación **más reciente** asociada a un email **sin necesidad de invitationId**, útil para escalar soporte/backoffice.
+
+* **Auth requerida:**
+  `Authorization: Bearer <accessToken>`
+
+* **Roles permitidos:**
+  `SUPER_ADMIN`
+
+* **Headers obligatorios:**
+  Ninguno adicional
+
+* **Body:**
+
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+---
+
+### **Reglas de negocio**
+
+* Se busca la invitación más reciente por `createdAt desc`.
+* Si no existe invitación para ese email → `404`.
+* Si la invitación más reciente está `USED` → `400`.
+* Se regeneran credenciales temporales y expiración.
+* Se marca invitación como `PENDING` y `usedAt=null`.
+* Se crea/actualiza usuario y se enlaza `userId` si aplica.
+
+---
+
+### **Respuesta 204**
+
+```
+(no content)
+```
+
+---
+
+### **Errores posibles**
+
+* `401` → token inválido o ausente.
+* `403` → rol sin permisos.
+* `404` → no existe invitación para el email.
+* `400` → invitación usada (no reenviable).
+* `422` → email inválido (validación Zod).
+
+---
+
+### **Consideraciones de seguridad**
+
+* Evita exponer `invitationId`.
+* Recomendado rate limit por IP/email para evitar abuso.
+
+---
+
+### **Flujo resumido (resend-by-email)**
+
+1. Admin envía `{email}`.
+2. Backend toma la última invitación.
+3. Regenera credenciales + TTL.
+4. Envía email.
+5. Responde `204`.
+
+---
+
+## **4.5 Obtener última invitación por email (implementado)**
+
+#### GET `/invitations/by-email/:email`
+
+Obtiene la **última invitación** asociada a un email, evitando paginar listas completas.
+
+* **Auth requerida:**
+  `Authorization: Bearer <accessToken>`
+
+* **Roles permitidos:**
+  `SUPER_ADMIN`
+
+* **Headers obligatorios:**
+  Ninguno adicional
+
+* **Params:**
+
+```
+email: string (email válido)
+```
+
+Ejemplo:
+
+```
+GET /invitations/by-email/user@example.com
+```
+
+> Si el cliente requiere encoding:
+> `user%40example.com`
+
+---
+
+### **Reglas de negocio**
+
+* Devuelve la invitación más reciente (`createdAt desc`).
+* No modifica estado.
+* Incluye `inviter` y `user` asociados (si existen).
+* Si no hay ninguna invitación para el email → `404`.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "id": "inv_123",
+    "email": "user@example.com",
+    "role": "GUIA",
+    "status": "PENDING",
+    "expiresAt": "2026-01-30T20:00:00.000Z",
+    "createdAt": "2026-01-29T18:10:00.000Z",
+    "inviter": {
+      "id": "usr_admin",
+      "email": "admin@corp.com",
+      "nombres": "Admin",
+      "apellidos": "Principal"
+    },
+    "user": {
+      "id": "usr_456",
+      "email": "user@example.com",
+      "profileStatus": "INCOMPLETE"
+    }
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+* `401` → token inválido o ausente.
+* `403` → rol sin permisos.
+* `404` → no existe invitación para ese email.
+* `422` → email inválido (params Zod).
+
+---
+
+### **Consideraciones de diseño**
+
+* Endpoint explícito para evitar:
+
+  * paginar grandes listados
+  * filtrar client-side
+* Diseñado para panel administrativo y soporte.
 
 ---
 
 # 5) Middleware de negocio
 
-* **`requireAuth`**: igual que hoy para JWT access. 
-* **`requireRoles`**: idem para RBAC. 
+* **`requireAuth`**: igual que hoy para JWT access.
+* **`requireRoles`**: idem para RBAC.
 * **`requireCompletedProfile`** (nuevo):
 
   * Si `req.user.profileStatus === "INCOMPLETE"`, responde `409`/`423` con código `PROFILE_INCOMPLETE` para que el Front redirija a **/onboarding**.
@@ -109,7 +507,7 @@ Solo **valida** visualmente si el token sigue vigente (útil si quieres mostrar 
 * **Prod**: usa proveedor SMTP confiable (SES, SendGrid, Mailersend, etc.).
 * Config por **ENV** (valídalo con Zod):
 
-  * `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`, `APP_LOGIN_URL` (para el botón), `INVITE_TTL_HOURS=24`. 
+  * `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`, `APP_LOGIN_URL` (para el botón), `INVITE_TTL_HOURS=24`.
 
 ## 6.2 Template (HTML)
 
@@ -122,9 +520,9 @@ Solo **valida** visualmente si el token sigue vigente (útil si quieres mostrar 
 
 # 7) Seguridad y anti-abuso
 
-* **Hash** de `token` y `tempPassword` (usa pepper en ENV). **Nunca** almacenes valores en claro. 
-* **Rate-limit** en `/auth/login` y `/invitations` (por IP y por email destino). 
-* **Revocación**: si se detecta re-uso de refresh, revoca la cadena (ya contemplado). 
+* **Hash** de `token` y `tempPassword` (usa pepper en ENV). **Nunca** almacenes valores en claro.
+* **Rate-limit** en `/auth/login` y `/invitations` (por IP y por email destino).
+* **Revocación**: si se detecta re-uso de refresh, revoca la cadena (ya contemplado).
 * **TTL** estricto (24 h) y **clock skew** (ej. tolerancia ±2 min).
 * **Auditoría** mínima: `invite_created`, `invite_emailed`, `invite_used`, `invite_expired`, `profile_completed`.
 
@@ -141,15 +539,15 @@ Usa tu logger **pino**/pino-http para logs **estructurados** (nivel `info`/`warn
 * `profile_completed`: `{userId, at}`
 * `invite_expired`: `{invitationId}` (por job o al validar)
 
-Estos conviven con tu **request logger** y **envelope de errores** ya definidos. 
+Estos conviven con tu **request logger** y **envelope de errores** ya definidos.
 
 ---
 
 # 9) Docker / ENV / Compose
 
-* **API**: añade variables SMTP/APP y `INVITE_TTL_HOURS`. Valídalas con Zod en tu `env.ts`. 
+* **API**: añade variables SMTP/APP y `INVITE_TTL_HOURS`. Valídalas con Zod en tu `env.ts`.
 * **Compose (dev)**: servicio `mailpit`; API depende de él.
-* **CI/CD**: no cambian pasos core; recuerda correr **migraciones Prisma** antes de levantar contenedores. 
+* **CI/CD**: no cambian pasos core; recuerda correr **migraciones Prisma** antes de levantar contenedores.
 
 ---
 
@@ -159,7 +557,7 @@ Estos conviven con tu **request logger** y **envelope de errores** ya definidos.
 2. Invitado abre email → **Login** con **email + temp password** (vigente).
 3. Backend valida invitación → **emite tokens** → responde `me.profileStatus="INCOMPLETE"`.
 4. Front redirige a **/onboarding** → usuario completa perfil → `PATCH /users/me/profile` → `COMPLETE`.
-5. Desde ahora, **tiene acceso total** (según **RBAC** y middlewares). 
+5. Desde ahora, **tiene acceso total** (según **RBAC** y middlewares).
 
 ---
 
