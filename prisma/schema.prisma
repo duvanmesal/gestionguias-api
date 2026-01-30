@@ -53,6 +53,21 @@ enum InvitationStatus {
   EXPIRED
 }
 
+// NUEVO: estado operativo real de una recalada (independiente de StatusType)
+enum RecaladaOperativeStatus {
+  SCHEDULED
+  ARRIVED
+  DEPARTED
+  CANCELED
+}
+
+// Opcional pero útil para futuro: origen/forma de creación
+enum RecaladaSource {
+  MANUAL
+  IMPORT
+  API
+}
+
 model Usuario {
   id           String  @id @default(cuid())
   email        String  @unique
@@ -256,14 +271,38 @@ model Buque {
 }
 
 model Recalada {
-  id            Int        @id @default(autoincrement())
+  id            Int                    @id @default(autoincrement())
   buqueId       Int
   paisOrigenId  Int
   supervisorId  String
+
+  // Identidad operativa (soporte/imports/búsqueda)
+  codigoRecalada String               @unique
+
+  // Fechas programadas (agenda)
   fechaLlegada  DateTime
   fechaSalida   DateTime?
-  observaciones String?
-  status        StatusType @default(ACTIVO)
+
+  // Fechas reales (operación)
+  arrivedAt     DateTime?
+  departedAt    DateTime?
+
+  // Estado del registro (soft enable/disable) + estado operativo real
+  status            StatusType               @default(ACTIVO)
+  operationalStatus RecaladaOperativeStatus  @default(SCHEDULED)
+
+  // Datos operativos (UI feliz)
+  terminal            String?
+  muelle              String?
+  pasajerosEstimados   Int?
+  tripulacionEstimada  Int?
+  observaciones        String?
+  fuente               RecaladaSource        @default(MANUAL)
+
+  // Auditoría de cancelación
+  canceledAt     DateTime?
+  cancelReason   String?
+
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
@@ -272,6 +311,11 @@ model Recalada {
   supervisor Supervisor @relation(fields: [supervisorId], references: [id])
   atenciones Atencion[]
 
+  // Índices para filtros típicos (calendario/listados)
+  @@index([fechaLlegada])
+  @@index([buqueId, fechaLlegada])
+  @@index([operationalStatus, fechaLlegada])
+  @@index([paisOrigenId, fechaLlegada])
   @@map("recaladas")
 }
 
@@ -291,6 +335,9 @@ model Atencion {
   supervisor Supervisor @relation(fields: [supervisorId], references: [id])
   turnos     Turno[]
 
+  @@index([recaladaId])
+  @@index([supervisorId])
+  @@index([status])
   @@map("atenciones")
 }
 
@@ -310,5 +357,8 @@ model Turno {
   guia     Guia?    @relation(fields: [guiaId], references: [id])
 
   @@unique([atencionId, numero])
+  @@index([atencionId])
+  @@index([guiaId])
+  @@index([status])
   @@map("turnos")
 }

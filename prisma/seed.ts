@@ -2,7 +2,13 @@
 import "dotenv/config"
 const env: Record<string, string | undefined> = (globalThis as any)?.process?.env ?? {}
 
-import { PrismaClient, RolType, ProfileStatus } from "@prisma/client"
+import {
+  PrismaClient,
+  RolType,
+  ProfileStatus,
+  RecaladaOperativeStatus,
+  RecaladaSource,
+} from "@prisma/client"
 import { hash as argonHash, argon2id } from "argon2"
 
 const prisma = new PrismaClient()
@@ -26,12 +32,38 @@ async function resolvePaisIdOrThrow(codigoPais: string) {
   return pais.id
 }
 
+async function resolveBuqueIdOrThrow(nombreBuque: string) {
+  const buque = await prisma.buque.findUnique({ where: { nombre: nombreBuque } })
+  if (!buque) throw new Error(`No existe buque con nombre=${nombreBuque}`)
+  return buque.id
+}
+
+async function resolveSupervisorIdOrThrow(emailSupervisor: string) {
+  const user = await prisma.usuario.findUnique({ where: { email: emailSupervisor } })
+  if (!user) throw new Error(`No existe usuario con email=${emailSupervisor}`)
+  const sup = await prisma.supervisor.findUnique({ where: { usuarioId: user.id } })
+  if (!sup) throw new Error(`No existe supervisor para usuarioId=${user.id} (email=${emailSupervisor})`)
+  return sup.id
+}
+
+// Genera código estilo RA-YYYY-000123 (determinístico)
+function buildCodigoRecalada(fechaLlegada: Date, id: number) {
+  const year = fechaLlegada.getUTCFullYear()
+  const seq = String(id).padStart(6, "0")
+  return `RA-${year}-${seq}`
+}
+
+// Crea un código temporal ÚNICO (para cumplir @unique en insert)
+function tempCodigoRecalada() {
+  return `TEMP-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
 async function main() {
   console.log("🌱 Starting database seeding...")
 
   const SUPER_EMAIL = env.SEED_SUPERADMIN_EMAIL ?? "duvandev@test.com"
-  const SUPER_PASS  = env.SEED_SUPERADMIN_PASS  ?? "Dev!123456"
-  const NODE_ENV    = env.NODE_ENV ?? "development"
+  const SUPER_PASS = env.SEED_SUPERADMIN_PASS ?? "Dev!123456"
+  const NODE_ENV = env.NODE_ENV ?? "development"
 
   await upsertSuperAdmin(SUPER_EMAIL, SUPER_PASS)
   await upsertCountries()
@@ -42,6 +74,9 @@ async function main() {
 
   if (NODE_ENV === "development") {
     await upsertTestUsers()
+
+    // ✅ Datos dev para Recaladas (para probar el módulo)
+    await upsertDevRecaladas()
   }
 
   console.log("✅ Database seeding completed!")
@@ -77,11 +112,11 @@ async function upsertSuperAdmin(email: string, password: string) {
 async function upsertCountries() {
   // ISO-2 para mantener consistencia con tus datos
   const countries = [
-    { nombre: "Colombia",        codigo: "CO" },
-    { nombre: "Estados Unidos",  codigo: "US" },
-    { nombre: "España",          codigo: "ES" },
-    { nombre: "Italia",          codigo: "IT" },
-    { nombre: "Brasil",          codigo: "BR" },
+    { nombre: "Colombia", codigo: "CO" },
+    { nombre: "Estados Unidos", codigo: "US" },
+    { nombre: "España", codigo: "ES" },
+    { nombre: "Italia", codigo: "IT" },
+    { nombre: "Brasil", codigo: "BR" },
   ]
 
   for (const c of countries) {
@@ -97,9 +132,9 @@ async function upsertCountries() {
 async function upsertShips() {
   // Añadimos codigoPais para resolver paisId en create/update
   const ships = [
-    { nombre: "Wonder of the Seas", naviera: "Royal Caribbean",         capacidad: 7084, codigoPais: "US" },
-    { nombre: "MSC Meraviglia",     naviera: "MSC Cruises",             capacidad: 5714, codigoPais: "IT" },
-    { nombre: "Norwegian Epic",     naviera: "Norwegian Cruise Line",   capacidad: 5183, codigoPais: "US" },
+    { nombre: "Wonder of the Seas", naviera: "Royal Caribbean", capacidad: 7084, codigoPais: "US" },
+    { nombre: "MSC Meraviglia", naviera: "MSC Cruises", capacidad: 5714, codigoPais: "IT" },
+    { nombre: "Norwegian Epic", naviera: "Norwegian Cruise Line", capacidad: 5183, codigoPais: "US" },
   ]
 
   for (const s of ships) {
@@ -150,7 +185,10 @@ async function fixShipsPaisIdIfNull() {
       const best = bestByBuque[b.id]
       if (best?.paisOrigenId) {
         // Validar que el país exista (debería)
-        const exists = await tx.pais.findUnique({ where: { id: best.paisOrigenId }, select: { id: true } })
+        const exists = await tx.pais.findUnique({
+          where: { id: best.paisOrigenId },
+          select: { id: true },
+        })
         if (exists) {
           await tx.buque.update({ where: { id: b.id }, data: { paisId: best.paisOrigenId } })
           inferred++
@@ -160,7 +198,7 @@ async function fixShipsPaisIdIfNull() {
   })
   if (inferred > 0) console.log(`🔎 Inferred paisId from recaladas for ${inferred} ship(s)`)
 
-  // 2) Asignar país por defecto si aún quedan NULL (evitar bloquear migración NOT NULL)
+  // 2) Asignar país por defecto si aún quedan NULL
   const remaining = await prisma.buque.count({ where: { paisId: null } })
   if (remaining > 0) {
     const defaultPais = await prisma.pais.findUnique({ where: { codigo: "CO" } })
@@ -184,9 +222,9 @@ async function fixShipsPaisIdIfNull() {
 
 async function upsertTestUsers() {
   const users = [
-    { email: "supervisor@test.com", password: "Test123!", nombres: "María",  apellidos: "González",  rol: RolType.SUPERVISOR },
-    { email: "guia1@test.com",     password: "Test123!", nombres: "Carlos", apellidos: "Rodríguez", rol: RolType.GUIA },
-    { email: "guia2@test.com",     password: "Test123!", nombres: "Ana",    apellidos: "Martínez",  rol: RolType.GUIA },
+    { email: "supervisor@test.com", password: "Test123!", nombres: "María", apellidos: "González", rol: RolType.SUPERVISOR },
+    { email: "guia1@test.com", password: "Test123!", nombres: "Carlos", apellidos: "Rodríguez", rol: RolType.GUIA },
+    { email: "guia2@test.com", password: "Test123!", nombres: "Ana", apellidos: "Martínez", rol: RolType.GUIA },
   ]
 
   for (const u of users) {
@@ -220,6 +258,7 @@ async function upsertTestUsers() {
         create: { usuarioId: user.id, telefono: "+57 300 123 4567" },
       })
     }
+
     if (u.rol === RolType.GUIA) {
       await prisma.guia.upsert({
         where: { usuarioId: user.id },
@@ -239,6 +278,76 @@ async function upsertTestUsers() {
   }
 
   console.log("🧪 Test users upserted")
+}
+
+// ✅ NUEVO: Recaladas de ejemplo (DEV) con codigoRecalada y operationalStatus
+async function upsertDevRecaladas() {
+  const supervisorId = await resolveSupervisorIdOrThrow("supervisor@test.com")
+
+  const buque1 = await resolveBuqueIdOrThrow("Wonder of the Seas")
+  const buque2 = await resolveBuqueIdOrThrow("MSC Meraviglia")
+
+  const paisUS = await resolvePaisIdOrThrow("US")
+  const paisIT = await resolvePaisIdOrThrow("IT")
+
+  const now = new Date()
+
+  const in2Days = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000)
+  const in3Days = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000)
+
+  const in7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
+  const in8Days = new Date(now.getTime() + 8 * 24 * 60 * 60 * 1000)
+
+  const r1 = await prisma.recalada.create({
+    data: {
+      buqueId: buque1,
+      paisOrigenId: paisUS,
+      supervisorId,
+      codigoRecalada: tempCodigoRecalada(), // ✅ único en el insert
+      fechaLlegada: in2Days,
+      fechaSalida: in3Days,
+      status: "ACTIVO",
+      operationalStatus: RecaladaOperativeStatus.SCHEDULED,
+      fuente: RecaladaSource.MANUAL,
+      terminal: "Terminal de Cruceros",
+      muelle: "Muelle 1",
+      pasajerosEstimados: 5000,
+      tripulacionEstimada: 1800,
+      observaciones: "Recalada de prueba (programada).",
+    },
+  })
+
+  const r2 = await prisma.recalada.create({
+    data: {
+      buqueId: buque2,
+      paisOrigenId: paisIT,
+      supervisorId,
+      codigoRecalada: tempCodigoRecalada(), // ✅ único en el insert
+      fechaLlegada: in7Days,
+      fechaSalida: in8Days,
+      status: "ACTIVO",
+      operationalStatus: RecaladaOperativeStatus.SCHEDULED,
+      fuente: RecaladaSource.MANUAL,
+      terminal: "Terminal de Cruceros",
+      muelle: "Muelle 2",
+      pasajerosEstimados: 4200,
+      tripulacionEstimada: 1500,
+      observaciones: "Otra recalada dev.",
+    },
+  })
+
+  // Backfill determinístico: RA-YYYY-000123
+  await prisma.recalada.update({
+    where: { id: r1.id },
+    data: { codigoRecalada: buildCodigoRecalada(r1.fechaLlegada, r1.id) },
+  })
+
+  await prisma.recalada.update({
+    where: { id: r2.id },
+    data: { codigoRecalada: buildCodigoRecalada(r2.fechaLlegada, r2.id) },
+  })
+
+  console.log("🧭 Dev Recaladas created (2) with codigoRecalada")
 }
 
 main()
