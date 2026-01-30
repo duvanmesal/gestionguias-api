@@ -8,6 +8,9 @@ import { emailRoutes } from "./email.routes";
 import paisRoutes from "./pais.routes";
 import buqueRoutes from "./buque.routes";
 
+// 🔹 Recaladas (módulo base)
+import recaladasRoutes from "./recaladas.routes";
+
 const router = Router();
 
 // API v1 routes
@@ -21,6 +24,9 @@ v1Router.use("/emails", emailRoutes);
 // 🔹 Nuevas rutas de catálogos
 v1Router.use("/paises", paisRoutes);
 v1Router.use("/buques", buqueRoutes);
+
+// 🔹 Recaladas
+v1Router.use("/recaladas", recaladasRoutes);
 
 // Mount versioned routes
 router.use("/", v1Router);
@@ -39,6 +45,7 @@ router.get("/", (_req, res) => {
         emails: `${process.env.API_PREFIX ?? "/api"}/emails`,
         paises: `${process.env.API_PREFIX ?? "/api"}/paises`,
         buques: `${process.env.API_PREFIX ?? "/api"}/buques`,
+        recaladas: `${process.env.API_PREFIX ?? "/api"}/recaladas`,
         health: "/health",
       },
     },

@@ -191,3 +191,221 @@ Se validó correctamente que:
 Esta fase cierra la **Fase 1: Prisma + Seeds** del módulo Recaladas.
 
 ---
+
+# 🛳️ **2. Endpoints del módulo Recaladas**
+
+## **2.1 Creación de recalada (agenda madre)**
+
+#### POST `/recaladas`
+
+Permite **crear una recalada** que actúa como el **evento madre** del sistema operativo.
+Desde esta entidad se derivan posteriormente **Atenciones** y **Turnos**.
+
+La creación de una recalada **no representa una llegada real**, sino una **programación operativa inicial**.
+
+---
+
+### **Auth requerida**
+
+`Authorization: Bearer <accessToken>`
+
+* **Roles permitidos:**
+
+  * `SUPER_ADMIN`
+  * `SUPERVISOR`
+
+---
+
+### **Headers obligatorios**
+
+| Header              | Valor              |
+| ------------------- | ------------------ |
+| `Content-Type`      | `application/json` |
+| `X-Client-Platform` | `WEB` / `MOBILE`   |
+
+---
+
+### **Body**
+
+#### **Campos obligatorios**
+
+| Campo          | Tipo           | Descripción                      |
+| -------------- | -------------- | -------------------------------- |
+| `buqueId`      | number         | Identificador del buque asociado |
+| `paisOrigenId` | number         | País de origen del buque         |
+| `fechaLlegada` | datetime (ISO) | Fecha programada de llegada      |
+
+---
+
+#### **Campos opcionales**
+
+| Campo                 | Tipo           | Descripción                                     |
+| --------------------- | -------------- | ----------------------------------------------- |
+| `fechaSalida`         | datetime (ISO) | Fecha programada de salida                      |
+| `terminal`            | string         | Terminal portuaria                              |
+| `muelle`              | string         | Muelle asignado                                 |
+| `pasajerosEstimados`  | number         | Número estimado de pasajeros                    |
+| `tripulacionEstimada` | number         | Número estimado de tripulación                  |
+| `observaciones`       | string         | Comentarios operativos                          |
+| `fuente`              | enum           | Origen del registro (`MANUAL`, `IMPORT`, `API`) |
+
+---
+
+### **Ejemplo de request mínimo**
+
+```json
+{
+  "buqueId": 1,
+  "paisOrigenId": 1,
+  "fechaLlegada": "2026-02-01T10:00:00.000Z"
+}
+```
+
+---
+
+### **Ejemplo de request completo**
+
+```json
+{
+  "buqueId": 1,
+  "paisOrigenId": 1,
+  "fechaLlegada": "2026-02-01T10:00:00.000Z",
+  "fechaSalida": "2026-02-01T18:00:00.000Z",
+  "terminal": "Terminal Internacional",
+  "muelle": "Muelle Norte",
+  "pasajerosEstimados": 2400,
+  "tripulacionEstimada": 1100,
+  "observaciones": "Arribo sujeto a condiciones climáticas",
+  "fuente": "MANUAL"
+}
+```
+
+---
+
+### **Reglas de negocio**
+
+* La recalada:
+
+  * **siempre inicia** con:
+
+    * `operationalStatus = SCHEDULED`
+    * `status = ACTIVO`
+* `codigoRecalada`:
+
+  * se genera automáticamente
+  * es único y definitivo
+  * formato: `RA-YYYY-000123`
+* `fechaSalida`:
+
+  * es opcional
+  * si existe, debe ser **mayor o igual** a `fechaLlegada`
+* El `supervisorId`:
+
+  * se resuelve automáticamente desde el usuario autenticado
+  * si el usuario no tiene supervisor asociado, se crea uno
+* No se crean:
+
+  * atenciones
+  * turnos
+  * registros operativos reales (`arrivedAt`, `departedAt`)
+
+Este endpoint **solo agenda**, no ejecuta operación real.
+
+---
+
+### **Validación**
+
+* Validación estricta con **Zod** sobre `req.body`.
+* Conversión automática de tipos:
+
+  * fechas → `Date`
+  * números → `number`
+* Errores de validación producen respuesta `400`.
+
+---
+
+### **Respuesta 201**
+
+```json
+{
+  "data": {
+    "id": 15,
+    "codigoRecalada": "RA-2026-000015",
+    "fechaLlegada": "2026-02-01T10:00:00.000Z",
+    "fechaSalida": "2026-02-01T18:00:00.000Z",
+    "status": "ACTIVO",
+    "operationalStatus": "SCHEDULED",
+    "terminal": "Terminal Internacional",
+    "muelle": "Muelle Norte",
+    "pasajerosEstimados": 2400,
+    "tripulacionEstimada": 1100,
+    "observaciones": "Arribo sujeto a condiciones climáticas",
+    "fuente": "MANUAL",
+    "buque": {
+      "id": 1,
+      "nombre": "MSC Seaside"
+    },
+    "paisOrigen": {
+      "id": 1,
+      "codigo": "IT",
+      "nombre": "Italia"
+    },
+    "supervisor": {
+      "id": 3,
+      "usuario": {
+        "id": "u-123",
+        "email": "supervisor@gestionguias.com"
+      }
+    },
+    "createdAt": "2026-02-01T08:30:00.000Z",
+    "updatedAt": "2026-02-01T08:30:00.000Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                    |
+| ------ | ------------------------- |
+| `401`  | Token inválido o ausente  |
+| `403`  | Rol sin permisos          |
+| `400`  | Error de validación (Zod) |
+| `404`  | Buque o país no existe    |
+
+---
+
+### **Consideraciones de diseño**
+
+* Este endpoint:
+
+  * define la **base del módulo Recaladas**
+  * no depende de Atenciones ni Turnos
+* Diseñado para:
+
+  * planificación anticipada
+  * importaciones futuras
+  * operación real desacoplada
+* Compatible con:
+
+  * auditoría
+  * trazabilidad completa
+  * expansión de estados operativos
+
+---
+
+## 🔚 Cierre de fase
+
+Con este endpoint se completa la **Fase 2: Lógica de negocio base del módulo Recaladas**.
+
+El sistema ya permite:
+
+✅ Crear eventos operativos trazables
+✅ Asociar buques, países y supervisores
+✅ Preparar la agenda para atenciones y turnos
+✅ Mantener separación estricta entre planificación y operación real
+
+---
