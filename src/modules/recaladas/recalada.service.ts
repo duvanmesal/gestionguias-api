@@ -1,7 +1,13 @@
 import { prisma } from "../../prisma/client";
 import { BadRequestError, NotFoundError } from "../../libs/errors";
 import { logger } from "../../libs/logger";
-import type { RecaladaSource, StatusType } from "@prisma/client";
+import type {
+  RecaladaSource,
+  StatusType,
+  RecaladaOperativeStatus,
+  Prisma,
+} from "@prisma/client";
+import type { ListRecaladasQuery } from "./recalada.schemas";
 
 /**
  * Genera código final estilo RA-YYYY-000123 usando el ID autoincremental.
@@ -38,6 +44,30 @@ export type CreateRecaladaInput = {
   // opcional (si lo quieres permitir desde el inicio)
   status?: StatusType;
 };
+
+export type ListRecaladasResult = {
+  items: any[];
+  meta: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPrevPage: boolean;
+    from?: string;
+    to?: string;
+    q?: string;
+    filters: {
+      operationalStatus?: RecaladaOperativeStatus;
+      buqueId?: number;
+      paisOrigenId?: number;
+    };
+  };
+};
+
+function toISO(d?: Date) {
+  return d ? d.toISOString() : undefined;
+}
 
 export class RecaladaService {
   /**
@@ -175,5 +205,148 @@ export class RecaladaService {
     );
 
     return created;
+  }
+
+  /**
+   * Lista recaladas (agenda) con filtros + paginación + búsqueda.
+   * Semántica de agenda: solapamiento de rango
+   * - Si from/to vienen:
+   *   - Incluye recaladas con fechaLlegada <= to y (fechaSalida >= from o fechaSalida is null y fechaLlegada >= from)
+   * - Si no viene rango: lista por filtros sin condición temporal (útil para debug/admin)
+   */
+  static async list(query: ListRecaladasQuery): Promise<ListRecaladasResult> {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+
+    const skip = (page - 1) * pageSize;
+    const take = pageSize;
+
+    const where: Prisma.RecaladaWhereInput = {};
+
+    // Vamos acumulando filtros en un AND[] local para evitar el lío de tipos Prisma
+    const AND: Prisma.RecaladaWhereInput[] = [];
+
+    // Filtros simples
+    if (query.operationalStatus)
+      AND.push({ operationalStatus: query.operationalStatus });
+    if (query.buqueId) AND.push({ buqueId: query.buqueId });
+    if (query.paisOrigenId) AND.push({ paisOrigenId: query.paisOrigenId });
+
+    // Rango agenda (solapamiento)
+    if (query.from || query.to) {
+      const from = query.from;
+      const to = query.to;
+
+      if (to) {
+        // evento empieza antes de cerrar la ventana
+        AND.push({ fechaLlegada: { lte: to } });
+      }
+
+      if (from) {
+        // evento termina después de abrir la ventana
+        AND.push({
+          OR: [
+            { fechaSalida: { gte: from } },
+            { fechaSalida: null, fechaLlegada: { gte: from } },
+          ],
+        });
+      }
+    }
+
+    // Búsqueda q: codigoRecalada, observaciones, buque.nombre
+    if (query.q) {
+      const q = query.q.trim();
+      AND.push({
+        OR: [
+          { codigoRecalada: { contains: q, mode: "insensitive" } },
+          { observaciones: { contains: q, mode: "insensitive" } },
+          { buque: { nombre: { contains: q, mode: "insensitive" } } },
+        ],
+      });
+    }
+
+    // Solo asigna AND si hay condiciones
+    if (AND.length > 0) where.AND = AND;
+
+    const [total, items] = await Promise.all([
+      prisma.recalada.count({ where }),
+      prisma.recalada.findMany({
+        where,
+        orderBy: { fechaLlegada: "asc" },
+        skip,
+        take,
+        select: {
+          id: true,
+          codigoRecalada: true,
+
+          fechaLlegada: true,
+          fechaSalida: true,
+
+          status: true,
+          operationalStatus: true,
+
+          terminal: true,
+          muelle: true,
+          pasajerosEstimados: true,
+          tripulacionEstimada: true,
+          observaciones: true,
+          fuente: true,
+
+          createdAt: true,
+          updatedAt: true,
+
+          buque: { select: { id: true, nombre: true } },
+          paisOrigen: { select: { id: true, codigo: true, nombre: true } },
+          supervisor: {
+            select: {
+              id: true,
+              usuario: {
+                select: {
+                  id: true,
+                  email: true,
+                  nombres: true,
+                  apellidos: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const meta = {
+      page,
+      pageSize,
+      total,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+      from: toISO(query.from),
+      to: toISO(query.to),
+      q: query.q,
+      filters: {
+        operationalStatus: query.operationalStatus,
+        buqueId: query.buqueId,
+        paisOrigenId: query.paisOrigenId,
+      },
+    };
+
+    logger.info(
+      {
+        page,
+        pageSize,
+        total,
+        from: meta.from,
+        to: meta.to,
+        q: query.q,
+        operationalStatus: query.operationalStatus,
+        buqueId: query.buqueId,
+        paisOrigenId: query.paisOrigenId,
+      },
+      "[Recaladas] list",
+    );
+
+    return { items, meta };
   }
 }

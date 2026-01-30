@@ -397,15 +397,241 @@ Este endpoint **solo agenda**, no ejecuta operación real.
 
 ---
 
-## 🔚 Cierre de fase
+## **2.2 Listado de recaladas (vista agenda)**
 
-Con este endpoint se completa la **Fase 2: Lógica de negocio base del módulo Recaladas**.
+#### **GET `/recaladas`**
 
-El sistema ya permite:
+Permite **listar recaladas** aplicando filtros avanzados, pensado como la **vista principal de agenda** del sistema.
 
-✅ Crear eventos operativos trazables
-✅ Asociar buques, países y supervisores
-✅ Preparar la agenda para atenciones y turnos
-✅ Mantener separación estricta entre planificación y operación real
+Este endpoint es utilizado por:
+
+* **Supervisores** → planificación semanal/mensual de recaladas.
+* **Guías** → visualización del “calendario operativo” para asignaciones futuras.
+* **Administradores** → control global y auditoría.
+
+No modifica estado ni ejecuta operación real, **solo consulta información**.
+
+---
+
+### **Auth requerida**
+
+`Authorization: Bearer <accessToken>`
+
+* **Roles permitidos:**
+
+  * `SUPER_ADMIN`
+  * `SUPERVISOR`
+  * `GUIA`
+
+---
+
+### **Headers obligatorios**
+
+| Header              | Valor            |
+| ------------------- | ---------------- |
+| `Authorization`     | `Bearer <token>` |
+| `X-Client-Platform` | `WEB` / `MOBILE` |
+
+---
+
+### **Query params**
+
+#### **Filtros de agenda (recomendados)**
+
+| Parámetro | Tipo           | Descripción                      |
+| --------- | -------------- | -------------------------------- |
+| `from`    | datetime (ISO) | Fecha inicio del rango de agenda |
+| `to`      | datetime (ISO) | Fecha fin del rango de agenda    |
+
+> El sistema aplica **lógica de solapamiento**:
+>
+> * Una recalada se incluye si su intervalo `[fechaLlegada, fechaSalida]`
+>   **intersecta** con `[from, to]`.
+> * Si `fechaSalida` es `null`, se trata como un evento puntual.
+
+---
+
+#### **Filtros operativos**
+
+| Parámetro           | Tipo   | Descripción                                    |
+| ------------------- | ------ | ---------------------------------------------- |
+| `operationalStatus` | enum   | Estado operativo (`SCHEDULED`, `ARRIVED`, etc) |
+| `buqueId`           | number | Filtra por buque                               |
+| `paisOrigenId`      | number | Filtra por país de origen                      |
+
+---
+
+#### **Búsqueda libre**
+
+| Parámetro | Tipo   | Descripción                                                               |
+| --------- | ------ | ------------------------------------------------------------------------- |
+| `q`       | string | Búsqueda textual sobre `codigoRecalada`, `buque.nombre` y `observaciones` |
+
+* Si el valor de `q` tiene formato `RA-YYYY-000123`, la búsqueda es **exacta**.
+* En otros casos se utiliza búsqueda parcial (`contains`, case-insensitive).
+
+---
+
+#### **Paginación**
+
+| Parámetro  | Tipo   | Default | Descripción                    |
+| ---------- | ------ | ------- | ------------------------------ |
+| `page`     | number | `1`     | Página actual                  |
+| `pageSize` | number | `20`    | Registros por página (máx 100) |
+
+---
+
+### **Ejemplos de uso**
+
+#### **Agenda semanal**
+
+```
+GET /recaladas?from=2026-02-01&to=2026-02-07
+```
+
+---
+
+#### **Agenda + búsqueda por buque**
+
+```
+GET /recaladas?from=2026-02-01&to=2026-02-07&q=MSC
+```
+
+---
+
+#### **Búsqueda directa por código**
+
+```
+GET /recaladas?q=RA-2026-000001
+```
+
+---
+
+#### **Filtro por estado operativo**
+
+```
+GET /recaladas?operationalStatus=SCHEDULED
+```
+
+---
+
+#### **Paginación**
+
+```
+GET /recaladas?page=2&pageSize=10
+```
+
+---
+
+### **Reglas de negocio**
+
+* Este endpoint:
+
+  * **NO** crea ni modifica recaladas.
+  * **NO** cambia estados operativos.
+  * **NO** genera atenciones ni turnos.
+
+* La consulta:
+
+  * respeta el estado administrativo (`status = ACTIVO`).
+  * retorna recaladas ordenadas por `fechaLlegada ASC`.
+  * aplica filtros de forma combinable.
+
+* Diseñado para ser:
+
+  * eficiente (índices por fecha y estado)
+  * estable para el front
+  * reutilizable para calendario semanal/mensual
+
+---
+
+### **Validación**
+
+* Validación estricta con **Zod** sobre `req.query`.
+* Conversión automática de tipos (`string → Date`, `string → number`).
+* Errores de validación producen respuesta `400`.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "codigoRecalada": "RA-2026-000001",
+      "fechaLlegada": "2026-02-01T02:30:14.151Z",
+      "fechaSalida": "2026-02-02T02:30:14.151Z",
+      "status": "ACTIVO",
+      "operationalStatus": "SCHEDULED",
+      "terminal": "Terminal de Cruceros",
+      "muelle": "Muelle 1",
+      "observaciones": "Recalada de prueba (programada).",
+      "buque": {
+        "id": 1,
+        "nombre": "Wonder of the Seas"
+      },
+      "paisOrigen": {
+        "id": 2,
+        "codigo": "US",
+        "nombre": "Estados Unidos"
+      }
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "pageSize": 20,
+    "total": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPrevPage": false,
+    "q": "RA-2026-000001",
+    "filters": {}
+  },
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                      |
+| -----: | --------------------------- |
+|  `401` | Token inválido o ausente    |
+|  `403` | Rol sin permisos            |
+|  `400` | Error de validación (query) |
+
+---
+
+### **Consideraciones de diseño**
+
+* Este endpoint es la **pantalla principal del módulo Recaladas**.
+* Diseñado para:
+
+  * vista tipo agenda
+  * planificación operativa
+  * consumo por front web y móvil
+* Base directa para:
+
+  * asignación de atenciones
+  * generación de turnos
+  * visualización por rol
+
+---
+
+## 🔚 Cierre de fase (actualizado)
+
+Con los endpoints **POST /recaladas** y **GET /recaladas** se consolida la
+**Fase 2: Lógica de negocio base del módulo Recaladas**.
+
+El sistema ahora permite:
+
+✅ Crear eventos operativos programados
+✅ Consultar agenda semanal/mensual
+✅ Filtrar por estado, buque y país
+✅ Buscar por código o texto libre
+✅ Preparar el terreno para Atenciones y Turnos
 
 ---

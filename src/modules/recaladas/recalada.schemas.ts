@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { RecaladaSource, StatusType } from "@prisma/client";
+import {
+  RecaladaSource,
+  StatusType,
+  RecaladaOperativeStatus,
+} from "@prisma/client";
 
 export const createRecaladaSchema = z
   .object({
@@ -40,5 +44,37 @@ export const createRecaladaSchema = z
     {
       message: "fechaSalida debe ser mayor o igual a fechaLlegada",
       path: ["fechaSalida"],
-    },
+    }
   );
+
+/**
+ * GET /recaladas (agenda)
+ * Query params:
+ * - from, to: rango de fechas (recomendado)
+ * - operationalStatus?
+ * - buqueId?
+ * - paisOrigenId?
+ * - q? (codigoRecalada, buque, observaciones)
+ * - page, pageSize
+ */
+export const listRecaladasQuerySchema = z
+  .object({
+    from: z.coerce.date().optional(),
+    to: z.coerce.date().optional(),
+
+    operationalStatus: z.nativeEnum(RecaladaOperativeStatus).optional(),
+
+    buqueId: z.coerce.number().int().positive().optional(),
+    paisOrigenId: z.coerce.number().int().positive().optional(),
+
+    q: z.string().trim().min(1).max(200).optional(),
+
+    page: z.coerce.number().int().positive().default(1),
+    pageSize: z.coerce.number().int().positive().max(100).default(20),
+  })
+  .refine((data) => !data.from || !data.to || data.to >= data.from, {
+    message: "to debe ser mayor o igual a from",
+    path: ["to"],
+  });
+
+export type ListRecaladasQuery = z.infer<typeof listRecaladasQuerySchema>;

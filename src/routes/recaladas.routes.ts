@@ -5,11 +5,25 @@ import { requireAuth } from "../libs/auth";
 import { requireSupervisor } from "../libs/rbac";
 import { validate } from "../libs/zod-mw";
 
-import { createRecaladaSchema } from "../modules/recaladas/recalada.schemas";
+import {
+  createRecaladaSchema,
+  listRecaladasQuerySchema,
+} from "../modules/recaladas/recalada.schemas";
 
 const router = Router();
 
 router.use(requireAuth);
+
+/**
+ * GET /recaladas
+ * Lista recaladas con filtros (vista tipo agenda)
+ * Auth: GUIA / SUPERVISOR / SUPER_ADMIN
+ */
+router.get(
+  "/",
+  validate({ query: listRecaladasQuerySchema }),
+  RecaladaController.list
+);
 
 /**
  * POST /recaladas
