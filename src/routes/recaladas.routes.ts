@@ -8,12 +8,27 @@ import { validate } from "../libs/zod-mw";
 import {
   createRecaladaSchema,
   listRecaladasQuerySchema,
-  getRecaladaByIdParamsSchema, // ✅ ADICIÓN
+  getRecaladaByIdParamsSchema,
+  updateRecaladaParamsSchema,
+  updateRecaladaBodySchema,
 } from "../modules/recaladas/recalada.schemas";
 
 const router = Router();
 
 router.use(requireAuth);
+
+/**
+ * ✅ ADICIÓN
+ * PATCH /recaladas/:id
+ * Edita una recalada (parcial) según reglas de negocio
+ * Auth: SUPERVISOR / SUPER_ADMIN
+ */
+router.patch(
+  "/:id",
+  requireSupervisor,
+  validate({ params: updateRecaladaParamsSchema, body: updateRecaladaBodySchema }),
+  RecaladaController.update
+);
 
 /**
  * ✅ ADICIÓN

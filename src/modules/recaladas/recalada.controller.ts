@@ -1,7 +1,12 @@
 import type { Request, Response, NextFunction } from "express";
 import { RecaladaService } from "./recalada.service";
 import { UnauthorizedError } from "../../libs/errors";
-import type { ListRecaladasQuery, GetRecaladaByIdParams } from "./recalada.schemas";
+import type {
+  ListRecaladasQuery,
+  GetRecaladaByIdParams,
+  UpdateRecaladaParams,
+  UpdateRecaladaBody,
+} from "./recalada.schemas";
 
 export class RecaladaController {
   static async create(
@@ -76,6 +81,36 @@ export class RecaladaController {
       const params = req.params as unknown as GetRecaladaByIdParams;
 
       const item = await RecaladaService.getById(params.id);
+
+      res.status(200).json({ data: item, meta: null, error: null });
+      return;
+    } catch (err) {
+      next(err);
+      return;
+    }
+  }
+
+  /**
+   * ADICIÓN
+   * PATCH /recaladas/:id
+   * Edita campos permitidos según estado operativo (reglas en service)
+   * Auth: SUPERVISOR / SUPER_ADMIN (requireSupervisor en routes)
+   */
+  static async update(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      if (!req.user?.userId) {
+        throw new UnauthorizedError("Authentication required");
+      }
+
+      // validate ya dejó todo limpio
+      const params = req.params as unknown as UpdateRecaladaParams;
+      const body = req.body as UpdateRecaladaBody;
+
+      const item = await RecaladaService.update(params.id, body, req.user.userId);
 
       res.status(200).json({ data: item, meta: null, error: null });
       return;

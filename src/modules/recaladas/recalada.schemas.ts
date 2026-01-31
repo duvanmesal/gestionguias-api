@@ -90,3 +90,65 @@ export const getRecaladaByIdParamsSchema = z.object({
 });
 
 export type GetRecaladaByIdParams = z.infer<typeof getRecaladaByIdParamsSchema>;
+
+/**
+ * ✅ ADICIÓN
+ * PATCH /recaladas/:id
+ * Params:
+ * - id (number)
+ */
+export const updateRecaladaParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export type UpdateRecaladaParams = z.infer<typeof updateRecaladaParamsSchema>;
+
+/**
+ * ✅ ADICIÓN
+ * PATCH /recaladas/:id
+ * Body parcial con campos permitidos (la restricción por estado vive en el service)
+ */
+export const updateRecaladaBodySchema = z
+  .object({
+    buqueId: z.coerce.number().int().positive().optional(),
+    paisOrigenId: z.coerce.number().int().positive().optional(),
+
+    // ISO string (DateTime)
+    fechaLlegada: z.coerce.date().optional(),
+    fechaSalida: z.coerce.date().optional(),
+
+    terminal: z.string().trim().min(2).max(80).optional(),
+    muelle: z.string().trim().min(1).max(80).optional(),
+
+    pasajerosEstimados: z.coerce
+      .number()
+      .int()
+      .nonnegative()
+      .max(300000)
+      .optional(),
+    tripulacionEstimada: z.coerce
+      .number()
+      .int()
+      .nonnegative()
+      .max(300000)
+      .optional(),
+
+    observaciones: z.string().trim().max(2000).optional(),
+    fuente: z.nativeEnum(RecaladaSource).optional(),
+  })
+  .strict()
+  .refine((data) => Object.keys(data).length > 0, {
+    message: "Debe enviar al menos un campo para actualizar",
+  })
+  .refine(
+    (data) =>
+      !data.fechaLlegada ||
+      !data.fechaSalida ||
+      data.fechaSalida.getTime() >= data.fechaLlegada.getTime(),
+    {
+      message: "fechaSalida debe ser mayor o igual a fechaLlegada",
+      path: ["fechaSalida"],
+    }
+  );
+
+export type UpdateRecaladaBody = z.infer<typeof updateRecaladaBodySchema>;

@@ -768,9 +768,219 @@ GET /recaladas/15
 
 ---
 
+## **2.4 Edición de recalada (agenda) con reglas por estado**
+
+#### **PATCH `/recaladas/:id`**
+
+Permite **editar parcialmente** una recalada existente, respetando reglas de negocio basadas en su **estado operativo** (`operationalStatus`).
+
+Este endpoint existe porque la **agenda cambia**: muelle, terminal, estimados, notas y hasta horarios programados pueden ajustarse antes o durante la operación.
+
+---
+
+### **Auth requerida**
+
+`Authorization: Bearer <accessToken>`
+
+* **Roles permitidos:**
+
+  * `SUPER_ADMIN`
+  * `SUPERVISOR`
+
+> La verificación de permisos se aplica a nivel de ruta mediante `requireSupervisor`.
+
+---
+
+### **Headers obligatorios**
+
+| Header              | Valor              |
+| ------------------- | ------------------ |
+| `Authorization`     | `Bearer <token>`   |
+| `Content-Type`      | `application/json` |
+| `X-Client-Platform` | `WEB` / `MOBILE`   |
+
+---
+
+### **Path params**
+
+| Parámetro | Tipo   | Descripción               |
+| --------- | ------ | ------------------------- |
+| `id`      | number | Identificador de recalada |
+
+---
+
+### **Body (parcial)**
+
+Todos los campos son **opcionales**, pero se debe enviar **al menos uno**.
+
+#### **Campos permitidos**
+
+| Campo                 | Tipo           | Descripción                        |
+| --------------------- | -------------- | ---------------------------------- |
+| `buqueId`             | number         | Cambia el buque asociado           |
+| `paisOrigenId`        | number         | Cambia el país de origen           |
+| `fechaLlegada`        | datetime (ISO) | Ajusta fecha programada de llegada |
+| `fechaSalida`         | datetime (ISO) | Ajusta fecha programada de salida  |
+| `terminal`            | string         | Terminal portuaria                 |
+| `muelle`              | string         | Muelle asignado                    |
+| `pasajerosEstimados`  | number         | Número estimado de pasajeros       |
+| `tripulacionEstimada` | number         | Número estimado de tripulación     |
+| `observaciones`       | string         | Comentarios operativos             |
+| `fuente`              | enum           | Origen (`MANUAL`, `IMPORT`, `API`) |
+
+> Nota: el schema es **estricto** (`strict()`), por lo que **cualquier campo no listado** será rechazado.
+
+---
+
+### **Ejemplo de request (cambio simple)**
+
+```
+PATCH /recaladas/1
+```
+
+```json
+{
+  "terminal": "Terminal de Cruceros 2",
+  "muelle": "Muelle 5",
+  "observaciones": "Cambio de muelle por disponibilidad."
+}
+```
+
+---
+
+### **Ejemplo de request (ajuste de estimados)**
+
+```json
+{
+  "pasajerosEstimados": 5200,
+  "tripulacionEstimada": 1900
+}
+```
+
+---
+
+### **Reglas de negocio**
+
+Este endpoint aplica reglas según `operationalStatus`:
+
+#### **Si `SCHEDULED`**
+
+✅ Permite editar “casi todo” dentro de los campos soportados por el schema (agenda flexible).
+
+#### **Si `ARRIVED`**
+
+✅ Permite edición **limitada** (ajustes operativos todavía útiles), típicamente:
+
+* `fechaSalida`
+* `terminal`
+* `muelle`
+* `pasajerosEstimados`
+* `tripulacionEstimada`
+* `observaciones`
+
+> La idea: ya llegó, pero aún pueden ajustarse detalles de salida y notas.
+
+#### **Si `DEPARTED` o `CANCELED`**
+
+⛔ **Bloqueado**. No se permite editar.
+
+---
+
+### **Validación**
+
+* Validación con **Zod** sobre:
+
+  * `req.params.id`
+  * `req.body` (parcial, estricto)
+* Reglas importantes:
+
+  * Debe enviarse al menos un campo.
+  * Si se envían `fechaLlegada` y `fechaSalida`, se valida:
+
+    * `fechaSalida >= fechaLlegada`
+* Además del schema, el servicio valida:
+
+  * existencia de `buqueId` si se envía
+  * existencia de `paisOrigenId` si se envía
+  * coherencia final de fechas combinando valores actuales + patch
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "id": 1,
+    "codigoRecalada": "RA-2026-000001",
+    "fechaLlegada": "2026-02-01T02:30:14.151Z",
+    "fechaSalida": "2026-02-02T02:30:14.151Z",
+    "status": "ACTIVO",
+    "operationalStatus": "SCHEDULED",
+    "terminal": "Terminal de Cruceros 2",
+    "muelle": "Muelle 5",
+    "pasajerosEstimados": 5000,
+    "tripulacionEstimada": 1800,
+    "observaciones": "Cambio de muelle por disponibilidad.",
+    "fuente": "MANUAL",
+    "buque": {
+      "id": 1,
+      "nombre": "Wonder of the Seas"
+    },
+    "paisOrigen": {
+      "id": 2,
+      "codigo": "US",
+      "nombre": "Estados Unidos"
+    },
+    "supervisor": {
+      "id": "cml09mohm000413r62uqa6cpk",
+      "usuario": {
+        "id": "cml09mohi000213r6sppgwve1",
+        "email": "supervisor@test.com",
+        "nombres": "María",
+        "apellidos": "González"
+      }
+    },
+    "createdAt": "2026-01-30T02:30:14.152Z",
+    "updatedAt": "2026-01-31T03:36:17.163Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                                                 |
+| ------ | ------------------------------------------------------ |
+| `401`  | Token inválido o ausente                               |
+| `403`  | Rol sin permisos (`requireSupervisor`)                 |
+| `400`  | Body inválido / patch vacío / fechas inválidas         |
+| `400`  | Edición bloqueada por estado (`DEPARTED` / `CANCELED`) |
+| `404`  | La recalada no existe                                  |
+| `404`  | Buque o país no existe (si se intenta cambiar)         |
+
+---
+
+### **Consideraciones de diseño**
+
+* Este endpoint **no cambia estados operativos** (no hace `ARRIVED`, `DEPARTED` ni `CANCELED`).
+* Solo ajusta atributos de la recalada respetando el estado actual.
+* Mantiene el envelope consistente con el resto del módulo:
+
+  * `{ data, meta, error }`
+* Preparado para extender reglas:
+
+  * excepción para `SUPER_ADMIN` en DEPARTED/CANCELED (si se decide)
+  * soporte a limpieza de campos (`null`) si se habilita en schema
+
+---
+
 ## 🔚 Cierre de fase (actualizado)
 
-Con los endpoints **POST /recaladas**, **GET /recaladas** y **GET /recaladas/:id** se consolida la
+Con los endpoints **POST /recaladas**, **GET /recaladas**, **GET /recaladas/:id** y **PATCH /recaladas/:id** se consolida la
 **Fase 2: Lógica de negocio base del módulo Recaladas**.
 
 El sistema ahora permite:
@@ -778,6 +988,7 @@ El sistema ahora permite:
 ✅ Crear eventos operativos programados
 ✅ Consultar agenda semanal/mensual
 ✅ Ver detalle completo por recalada
+✅ Editar la agenda de forma segura (según estado operativo)
 ✅ Filtrar por estado, buque y país
 ✅ Buscar por código o texto libre
 ✅ Preparar el terreno para acciones operativas y Atenciones/Turnos

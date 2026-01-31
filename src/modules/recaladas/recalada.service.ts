@@ -7,7 +7,7 @@ import type {
   RecaladaOperativeStatus,
   Prisma,
 } from "@prisma/client";
-import type { ListRecaladasQuery } from "./recalada.schemas";
+import type { ListRecaladasQuery, UpdateRecaladaBody } from "./recalada.schemas";
 
 /**
  * Genera código final estilo RA-YYYY-000123 usando el ID autoincremental.
@@ -67,6 +67,31 @@ export type ListRecaladasResult = {
 
 function toISO(d?: Date) {
   return d ? d.toISOString() : undefined;
+}
+
+export type UpdateRecaladaInput = UpdateRecaladaBody;
+
+function pickAllowedFields<T extends Record<string, any>>(
+  input: T,
+  allowed: string[],
+) {
+  const out: Record<string, any> = {};
+  for (const key of allowed) {
+    if (Object.prototype.hasOwnProperty.call(input, key)) {
+      out[key] = input[key];
+    }
+  }
+  return out;
+}
+
+function normalizeNullableFields(
+  data: Record<string, any>,
+): Record<string, any> {
+  // Convierte undefined -> (no tocar) ; deja valores concretos igual.
+  // Para campos nullable en Prisma, si quieres permitir "limpiar" campo,
+  // el front debería mandar null explícito.
+  // Como el schema actual no permite null, aquí no transformamos a null.
+  return data;
 }
 
 export class RecaladaService {
@@ -146,10 +171,7 @@ export class RecaladaService {
         select: { id: true, fechaLlegada: true },
       });
 
-      const codigoFinal = buildCodigoRecalada(
-        recalada.fechaLlegada,
-        recalada.id,
-      );
+      const codigoFinal = buildCodigoRecalada(recalada.fechaLlegada, recalada.id);
 
       const updated = await tx.recalada.update({
         where: { id: recalada.id },
@@ -196,11 +218,7 @@ export class RecaladaService {
     });
 
     logger.info(
-      {
-        recaladaId: created.id,
-        codigoRecalada: created.codigoRecalada,
-        actorUserId,
-      },
+      { recaladaId: created.id, codigoRecalada: created.codigoRecalada, actorUserId },
       "[Recaladas] created",
     );
 
@@ -227,8 +245,7 @@ export class RecaladaService {
     const AND: Prisma.RecaladaWhereInput[] = [];
 
     // Filtros simples
-    if (query.operationalStatus)
-      AND.push({ operationalStatus: query.operationalStatus });
+    if (query.operationalStatus) AND.push({ operationalStatus: query.operationalStatus });
     if (query.buqueId) AND.push({ buqueId: query.buqueId });
     if (query.paisOrigenId) AND.push({ paisOrigenId: query.paisOrigenId });
 
@@ -402,5 +419,158 @@ export class RecaladaService {
     logger.info({ recaladaId: id }, "[Recaladas] getById");
 
     return item;
+  }
+
+  /**
+   * ✅ PATCH /recaladas/:id
+   * Edita una recalada en forma parcial.
+   *
+   * Reglas clave por operationalStatus:
+   * - SCHEDULED: permite editar casi todo (de lo que expone el schema)
+   * - ARRIVED: edición limitada
+   * - DEPARTED o CANCELED: bloqueado
+   */
+  static async update(id: number, input: UpdateRecaladaInput, actorUserId: string) {
+    // 1) Traer estado actual + datos necesarios para validar fechas con parciales
+    const current = await prisma.recalada.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        operationalStatus: true,
+        fechaLlegada: true,
+        fechaSalida: true,
+      },
+    });
+
+    if (!current) {
+      throw new NotFoundError("La recalada no existe");
+    }
+
+    // 2) Regla: bloquear si ya finalizó
+    if (current.operationalStatus === "DEPARTED" || current.operationalStatus === "CANCELED") {
+      throw new BadRequestError("No se puede editar una recalada en estado DEPARTED o CANCELED");
+    }
+
+    // 3) Determinar campos permitidos según estado
+    const allowedWhenScheduled = [
+      "buqueId",
+      "paisOrigenId",
+      "fechaLlegada",
+      "fechaSalida",
+      "terminal",
+      "muelle",
+      "pasajerosEstimados",
+      "tripulacionEstimada",
+      "observaciones",
+      "fuente",
+    ];
+
+    // ARRIVED: edición limitada (puerto/operación ya pasó parcialmente)
+    const allowedWhenArrived = [
+      "fechaSalida",
+      "terminal",
+      "muelle",
+      "pasajerosEstimados",
+      "tripulacionEstimada",
+      "observaciones",
+    ];
+
+    const allowed =
+      current.operationalStatus === "SCHEDULED"
+        ? allowedWhenScheduled
+        : allowedWhenArrived;
+
+    const dataRaw = pickAllowedFields(input as Record<string, any>, allowed);
+    const data = normalizeNullableFields(dataRaw);
+
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestError("No hay campos permitidos para actualizar según el estado actual");
+    }
+
+    // 4) Validaciones extra de integridad (si cambian ids)
+    if (data.buqueId) {
+      const buque = await prisma.buque.findUnique({
+        where: { id: data.buqueId },
+        select: { id: true },
+      });
+      if (!buque) throw new NotFoundError("El buque (buqueId) no existe");
+    }
+
+    if (data.paisOrigenId) {
+      const pais = await prisma.pais.findUnique({
+        where: { id: data.paisOrigenId },
+        select: { id: true },
+      });
+      if (!pais) throw new NotFoundError("El país (paisOrigenId) no existe");
+    }
+
+    // 5) Validación de fechas usando mezcla (parcial + valores actuales)
+    const nextFechaLlegada: Date = data.fechaLlegada ?? current.fechaLlegada;
+    const nextFechaSalida: Date | null =
+      typeof data.fechaSalida !== "undefined" ? data.fechaSalida : current.fechaSalida;
+
+    if (nextFechaSalida && nextFechaSalida < nextFechaLlegada) {
+      throw new BadRequestError("fechaSalida debe ser >= fechaLlegada");
+    }
+
+    // Prisma nullable: fechaSalida se guarda como null si no viene o si es null.
+    // Como el schema de PATCH no permite null, solo actualizamos si viene.
+    if (typeof data.fechaSalida !== "undefined") {
+      data.fechaSalida = data.fechaSalida ?? null;
+    }
+
+    // 6) Update + retorno completo (misma forma del create/getById/list)
+    const updated = await prisma.recalada.update({
+      where: { id },
+      data,
+      select: {
+        id: true,
+        codigoRecalada: true,
+
+        fechaLlegada: true,
+        fechaSalida: true,
+
+        status: true,
+        operationalStatus: true,
+
+        terminal: true,
+        muelle: true,
+        pasajerosEstimados: true,
+        tripulacionEstimada: true,
+        observaciones: true,
+        fuente: true,
+
+        createdAt: true,
+        updatedAt: true,
+
+        buque: { select: { id: true, nombre: true } },
+        paisOrigen: { select: { id: true, codigo: true, nombre: true } },
+        supervisor: {
+          select: {
+            id: true,
+            usuario: {
+              select: {
+                id: true,
+                email: true,
+                nombres: true,
+                apellidos: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    logger.info(
+      {
+        recaladaId: id,
+        actorUserId,
+        operationalStatus: current.operationalStatus,
+        updatedKeys: Object.keys(data),
+      },
+      "[Recaladas] update",
+    );
+
+    return updated;
   }
 }
