@@ -11,11 +11,25 @@ import {
   getRecaladaByIdParamsSchema,
   updateRecaladaParamsSchema,
   updateRecaladaBodySchema,
+  deleteRecaladaParamsSchema,
 } from "../modules/recaladas/recalada.schemas";
 
 const router = Router();
 
 router.use(requireAuth);
+
+/**
+ * ✅ ADICIÓN
+ * DELETE /recaladas/:id
+ * Elimina físicamente una recalada SOLO si es "safe"
+ * Auth: SUPERVISOR / SUPER_ADMIN
+ */
+router.delete(
+  "/:id",
+  requireSupervisor,
+  validate({ params: deleteRecaladaParamsSchema }),
+  RecaladaController.delete
+);
 
 /**
  * ✅ ADICIÓN

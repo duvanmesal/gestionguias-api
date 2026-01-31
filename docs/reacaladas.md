@@ -978,9 +978,140 @@ Este endpoint aplica reglas según `operationalStatus`:
 
 ---
 
+## **2.5 Eliminación física de recalada (safe delete)**
+
+#### **DELETE `/recaladas/:id`**
+
+Permite **eliminar físicamente** una recalada **solo si es segura de borrar** (“safe delete”).
+
+Este endpoint existe para **limpieza de errores de carga** en desarrollo o para eliminar registros **sin uso** que nunca entraron al flujo operativo.
+
+> ⚠️ Importante: si la recalada ya tiene dependencias (Atenciones/Turnos) o ya avanzó en operación, **NO se elimina**.
+> En ese caso se debe usar **cancelación** (endpoint futuro / fase operativa), no delete.
+
+---
+
+### **Auth requerida**
+
+`Authorization: Bearer <accessToken>`
+
+* **Roles permitidos:**
+
+  * `SUPER_ADMIN`
+  * `SUPERVISOR`
+
+> La verificación de permisos se aplica a nivel de ruta mediante `requireSupervisor`.
+
+---
+
+### **Headers obligatorios**
+
+| Header              | Valor            |
+| ------------------- | ---------------- |
+| `Authorization`     | `Bearer <token>` |
+| `X-Client-Platform` | `WEB` / `MOBILE` |
+
+---
+
+### **Path params**
+
+| Parámetro | Tipo   | Descripción               |
+| --------- | ------ | ------------------------- |
+| `id`      | number | Identificador de recalada |
+
+---
+
+### **Ejemplo de uso**
+
+```
+DELETE /recaladas/15
+```
+
+---
+
+### **Reglas de negocio (Safe Delete)**
+
+Para permitir eliminación física, la recalada debe cumplir:
+
+1. **Debe existir** (si no existe → `404`).
+2. **Debe estar en estado operativo `SCHEDULED`**.
+   *Si está `ARRIVED`, `DEPARTED` o `CANCELED` → no se elimina físicamente.*
+3. **No debe tener dependencias**:
+
+   * **No debe tener Atenciones asociadas.**
+   * **No debe tener Turnos asociados** (directos o indirectos vía Atenciones).
+
+Si la recalada tiene dependencias o ya avanzó de estado:
+
+* se rechaza la eliminación
+* se indica usar **cancelación** en lugar de delete
+
+Este endpoint es deliberadamente estricto para proteger integridad referencial y trazabilidad.
+
+---
+
+### **Validación**
+
+* Validación estricta con **Zod** sobre `req.params`:
+
+  * `id` → `number` (`z.coerce.number().int().positive()`).
+* Errores de validación producen respuesta `400`.
+
+---
+
+### **Respuesta 200 (eliminación exitosa)**
+
+```json
+{
+  "data": {
+    "deleted": true,
+    "id": 15
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                                                                 |
+| ------ | ---------------------------------------------------------------------- |
+| `401`  | Token inválido o ausente                                               |
+| `403`  | Rol sin permisos (`requireSupervisor`)                                 |
+| `400`  | Error de validación (params Zod)                                       |
+| `400`  | Recalada no está en `SCHEDULED` → debe usarse cancelación              |
+| `400`  | Recalada tiene Atenciones o Turnos asociados → debe usarse cancelación |
+| `404`  | La recalada no existe                                                  |
+
+---
+
+### **Consideraciones de diseño**
+
+* Este endpoint:
+
+  * **NO es cancelación**.
+  * es **borrado físico controlado**.
+* Pensado principalmente para:
+
+  * desarrollo
+  * depuración
+  * limpieza de registros sin uso
+* Mantiene el envelope consistente:
+
+  * `{ data, meta, error }`
+* En producción, su uso debe ser:
+
+  * limitado
+  * auditado
+  * restringido a roles altos (como ya está)
+
+---
+
 ## 🔚 Cierre de fase (actualizado)
 
-Con los endpoints **POST /recaladas**, **GET /recaladas**, **GET /recaladas/:id** y **PATCH /recaladas/:id** se consolida la
+Con los endpoints **POST /recaladas**, **GET /recaladas**, **GET /recaladas/:id**, **PATCH /recaladas/:id** y **DELETE /recaladas/:id** se consolida la
 **Fase 2: Lógica de negocio base del módulo Recaladas**.
 
 El sistema ahora permite:
@@ -989,6 +1120,7 @@ El sistema ahora permite:
 ✅ Consultar agenda semanal/mensual
 ✅ Ver detalle completo por recalada
 ✅ Editar la agenda de forma segura (según estado operativo)
+✅ Eliminar físicamente recaladas solo cuando es seguro (safe delete)
 ✅ Filtrar por estado, buque y país
 ✅ Buscar por código o texto libre
 ✅ Preparar el terreno para acciones operativas y Atenciones/Turnos

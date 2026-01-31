@@ -152,3 +152,15 @@ export const updateRecaladaBodySchema = z
   );
 
 export type UpdateRecaladaBody = z.infer<typeof updateRecaladaBodySchema>;
+
+/**
+ * ✅ ADICIÓN
+ * DELETE /recaladas/:id
+ * Params:
+ * - id (number)
+ */
+export const deleteRecaladaParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export type DeleteRecaladaParams = z.infer<typeof deleteRecaladaParamsSchema>;

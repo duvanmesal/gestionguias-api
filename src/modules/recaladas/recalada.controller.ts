@@ -6,6 +6,7 @@ import type {
   GetRecaladaByIdParams,
   UpdateRecaladaParams,
   UpdateRecaladaBody,
+  DeleteRecaladaParams,
 } from "./recalada.schemas";
 
 export class RecaladaController {
@@ -113,6 +114,34 @@ export class RecaladaController {
       const item = await RecaladaService.update(params.id, body, req.user.userId);
 
       res.status(200).json({ data: item, meta: null, error: null });
+      return;
+    } catch (err) {
+      next(err);
+      return;
+    }
+  }
+
+  /**
+   * ✅ ADICIÓN
+   * DELETE /recaladas/:id
+   * Elimina físicamente una recalada SOLO si es "safe"
+   * Auth: SUPERVISOR / SUPER_ADMIN (requireSupervisor en routes)
+   */
+  static async delete(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      if (!req.user?.userId) {
+        throw new UnauthorizedError("Authentication required");
+      }
+
+      const params = req.params as unknown as DeleteRecaladaParams;
+
+      const result = await RecaladaService.deleteSafe(params.id, req.user.userId);
+
+      res.status(200).json({ data: result, meta: null, error: null });
       return;
     } catch (err) {
       next(err);

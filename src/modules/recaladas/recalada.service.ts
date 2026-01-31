@@ -573,4 +573,76 @@ export class RecaladaService {
 
     return updated;
   }
+
+  /**
+   * ✅ ADICIÓN
+   * DELETE /recaladas/:id
+   * Elimina físicamente una recalada SOLO si es "safe"
+   *
+   * Reglas:
+   * - Idealmente solo si operationalStatus = SCHEDULED
+   * - No debe tener atenciones ni turnos relacionados
+   * - Si tiene dependencias: usar cancelación, no delete
+   */
+  static async deleteSafe(id: number, actorUserId: string) {
+    // 1) Existe?
+    const current = await prisma.recalada.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        codigoRecalada: true,
+        operationalStatus: true,
+      },
+    });
+
+    if (!current) {
+      throw new NotFoundError("La recalada no existe");
+    }
+
+    // 2) Idealmente SOLO si está SCHEDULED
+    if (current.operationalStatus !== "SCHEDULED") {
+      throw new BadRequestError(
+        "No se puede eliminar físicamente una recalada que no esté en SCHEDULED. Use cancelación.",
+      );
+    }
+
+    // 3) Validar dependencias
+    // Atenciones directas
+    const atencionesCount = await prisma.atencion.count({
+      where: { recaladaId: id },
+    });
+
+    if (atencionesCount > 0) {
+      throw new BadRequestError(
+        "No se puede eliminar la recalada porque tiene atenciones asociadas. Use cancelación.",
+      );
+    }
+
+    // Turnos indirectos (si existen vía Atencion)
+    const turnosCount = await prisma.turno.count({
+      where: { atencion: { recaladaId: id } },
+    });
+
+    if (turnosCount > 0) {
+      throw new BadRequestError(
+        "No se puede eliminar la recalada porque tiene turnos asociados. Use cancelación.",
+      );
+    }
+
+    // 4) Delete físico
+    await prisma.recalada.delete({
+      where: { id },
+    });
+
+    logger.info(
+      {
+        recaladaId: id,
+        codigoRecalada: current.codigoRecalada,
+        actorUserId,
+      },
+      "[Recaladas] deleteSafe",
+    );
+
+    return { deleted: true, id };
+  }
 }
