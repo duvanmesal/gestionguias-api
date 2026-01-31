@@ -1109,20 +1109,512 @@ Este endpoint es deliberadamente estricto para proteger integridad referencial y
 
 ---
 
-## 🔚 Cierre de fase (actualizado)
+## **2.6 Operación real — Arribo (botón “Arribó”)**
 
-Con los endpoints **POST /recaladas**, **GET /recaladas**, **GET /recaladas/:id**, **PATCH /recaladas/:id** y **DELETE /recaladas/:id** se consolida la
-**Fase 2: Lógica de negocio base del módulo Recaladas**.
+#### **PATCH `/recaladas/:id/arrive`**
+
+Marca una recalada como **ARRIVED** y registra la fecha/hora real de arribo en `arrivedAt`.
+
+Este endpoint existe para que el front tenga un botón directo y claro:
+
+✅ **“Arribó”** → el sistema pasa a modo operación real.
+
+---
+
+### **Auth requerida**
+
+`Authorization: Bearer <accessToken>`
+
+* **Roles permitidos:**
+
+  * `SUPER_ADMIN`
+  * `SUPERVISOR`
+
+> La verificación de permisos se aplica a nivel de ruta mediante `requireSupervisor`.
+
+---
+
+### **Headers obligatorios**
+
+| Header              | Valor              |
+| ------------------- | ------------------ |
+| `Authorization`     | `Bearer <token>`   |
+| `Content-Type`      | `application/json` |
+| `X-Client-Platform` | `WEB` / `MOBILE`   |
+
+---
+
+### **Path params**
+
+| Parámetro | Tipo   | Descripción               |
+| --------- | ------ | ------------------------- |
+| `id`      | number | Identificador de recalada |
+
+---
+
+### **Body (opcional)**
+
+| Campo       | Tipo           | Descripción                                          |
+| ----------- | -------------- | ---------------------------------------------------- |
+| `arrivedAt` | datetime (ISO) | Fecha real de arribo. Si no se envía, se usa `now()` |
+
+> El schema es estricto (`strict()`): si mandas campos no soportados, se rechaza.
+
+---
+
+### **Ejemplo de request (sin body → now())**
+
+```
+PATCH /recaladas/3/arrive
+```
+
+```json
+{}
+```
+
+---
+
+### **Ejemplo de request (con fecha explícita)**
+
+```json
+{
+  "arrivedAt": "2026-02-02T20:00:00.000Z"
+}
+```
+
+---
+
+### **Reglas de negocio**
+
+* La recalada debe existir.
+
+* Solo se permite marcar ARRIVED si:
+
+  * `operationalStatus = SCHEDULED`
+
+* Si la recalada está:
+
+  * `DEPARTED` → ⛔ no se permite
+  * `CANCELED` → ⛔ no se permite
+  * `ARRIVED` → ⛔ no se permite (ya arribó)
+
+* Si no llega `arrivedAt`, el servicio usa `now()`.
+
+* Al marcar ARRIVED:
+
+  * `operationalStatus` se actualiza a `ARRIVED`
+  * `arrivedAt` se setea (real)
+  * `canceledAt` y `cancelReason` se limpian a `null` (defensa extra)
+
+---
+
+### **Validación**
+
+* Zod valida:
+
+  * `params.id`
+  * `body.arrivedAt` (opcional)
+* Errores de validación producen `400`.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "id": 3,
+    "codigoRecalada": "RA-2026-000003",
+    "fechaLlegada": "2026-02-02T10:00:00.000Z",
+    "fechaSalida": "2026-02-02T18:00:00.000Z",
+    "arrivedAt": "2026-02-02T20:00:00.000Z",
+    "departedAt": null,
+    "canceledAt": null,
+    "cancelReason": null,
+    "status": "ACTIVO",
+    "operationalStatus": "ARRIVED",
+    "terminal": "Terminal de Cruceros",
+    "muelle": "Muelle A",
+    "observaciones": "LAB A: para ARRIVE y luego DEPART",
+    "fuente": "MANUAL",
+    "buque": { "id": 1, "nombre": "Wonder of the Seas" },
+    "paisOrigen": { "id": 2, "codigo": "US", "nombre": "Estados Unidos" },
+    "createdAt": "2026-01-31T19:39:25.575Z",
+    "updatedAt": "2026-01-31T19:40:10.100Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                                   |
+| ------ | ---------------------------------------- |
+| `401`  | Token inválido o ausente                 |
+| `403`  | Rol sin permisos                         |
+| `400`  | Error de validación (Zod)                |
+| `400`  | Estado inválido (no está en `SCHEDULED`) |
+| `404`  | La recalada no existe                    |
+
+---
+
+### **Consideraciones de diseño**
+
+* Este endpoint representa el **inicio de la operación real**.
+* Permite que el front active un modo operacional (timeline/acciones).
+* En fases posteriores se podrá:
+
+  * abrir/crear Atenciones automáticamente al arribo (si se decide)
+  * registrar bitácora de eventos operativos
+
+---
+
+## **2.7 Operación real — Zarpe (botón “Zarpó”)**
+
+#### **PATCH `/recaladas/:id/depart`**
+
+Marca una recalada como **DEPARTED** y registra la fecha/hora real de zarpe en `departedAt`.
+
+Este endpoint existe para que el front tenga un botón claro:
+
+✅ **“Zarpó”** → se cierra la operación y se bloquean cambios grandes.
+
+---
+
+### **Auth requerida**
+
+`Authorization: Bearer <accessToken>`
+
+* **Roles permitidos:**
+
+  * `SUPER_ADMIN`
+  * `SUPERVISOR`
+
+---
+
+### **Headers obligatorios**
+
+| Header              | Valor              |
+| ------------------- | ------------------ |
+| `Authorization`     | `Bearer <token>`   |
+| `Content-Type`      | `application/json` |
+| `X-Client-Platform` | `WEB` / `MOBILE`   |
+
+---
+
+### **Path params**
+
+| Parámetro | Tipo   | Descripción               |
+| --------- | ------ | ------------------------- |
+| `id`      | number | Identificador de recalada |
+
+---
+
+### **Body (opcional)**
+
+| Campo        | Tipo           | Descripción                                         |
+| ------------ | -------------- | --------------------------------------------------- |
+| `departedAt` | datetime (ISO) | Fecha real de zarpe. Si no se envía, se usa `now()` |
+
+---
+
+### **Ejemplo de request (sin body → now())**
+
+```
+PATCH /recaladas/3/depart
+```
+
+```json
+{}
+```
+
+---
+
+### **Ejemplo de request (con fecha explícita)**
+
+```json
+{
+  "departedAt": "2026-02-03T19:40:00.000Z"
+}
+```
+
+---
+
+### **Reglas de negocio**
+
+* La recalada debe existir.
+
+* Solo se permite marcar DEPARTED si:
+
+  * `operationalStatus = ARRIVED`
+
+* Si la recalada está:
+
+  * `SCHEDULED` → ⛔ no se permite (no puede zarpar sin haber arribado)
+  * `CANCELED` → ⛔ no se permite
+  * `DEPARTED` → ⛔ no se permite (ya zarpó)
+
+* Si `arrivedAt` existe, el servicio valida que:
+
+  * `departedAt >= arrivedAt`
+
+* Si no llega `departedAt`, el servicio usa `now()`.
+
+---
+
+### **Validación**
+
+* Zod valida:
+
+  * `params.id`
+  * `body.departedAt` (opcional)
+* Errores de validación producen `400`.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "id": 3,
+    "codigoRecalada": "RA-2026-000003",
+    "arrivedAt": "2026-02-02T20:00:00.000Z",
+    "departedAt": "2026-02-03T19:40:00.000Z",
+    "operationalStatus": "DEPARTED",
+    "canceledAt": null,
+    "cancelReason": null
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                                 |
+| ------ | -------------------------------------- |
+| `401`  | Token inválido o ausente               |
+| `403`  | Rol sin permisos                       |
+| `400`  | Error de validación (Zod)              |
+| `400`  | Estado inválido (no está en `ARRIVED`) |
+| `400`  | `departedAt` menor a `arrivedAt`       |
+| `404`  | La recalada no existe                  |
+
+---
+
+### **Consideraciones de diseño**
+
+* Este endpoint indica cierre de operación real.
+* En la fase actual ya bloquea “cambios grandes” indirectamente, porque:
+
+  * el `PATCH /recaladas/:id` bloquea edición si `DEPARTED`
+  * el `DELETE` también bloquea si no está `SCHEDULED`
+
+---
+
+## **2.8 Operación real — Cancelación (botón “Cancelar”)**
+
+#### **PATCH `/recaladas/:id/cancel`**
+
+Marca una recalada como **CANCELED**, registra `canceledAt` y guarda `cancelReason` (si se envía).
+
+Este endpoint existe porque en puerto real:
+
+⚠️ **una recalada puede cancelarse** y el sistema debe mantener consistencia operativa.
+
+---
+
+### **Auth requerida**
+
+`Authorization: Bearer <accessToken>`
+
+* **Roles permitidos:**
+
+  * `SUPER_ADMIN`
+  * `SUPERVISOR`
+
+---
+
+### **Headers obligatorios**
+
+| Header              | Valor              |
+| ------------------- | ------------------ |
+| `Authorization`     | `Bearer <token>`   |
+| `Content-Type`      | `application/json` |
+| `X-Client-Platform` | `WEB` / `MOBILE`   |
+
+---
+
+### **Path params**
+
+| Parámetro | Tipo   | Descripción               |
+| --------- | ------ | ------------------------- |
+| `id`      | number | Identificador de recalada |
+
+---
+
+### **Body (opcional en la implementación actual)**
+
+| Campo    | Tipo   | Descripción                                                                              |
+| -------- | ------ | ---------------------------------------------------------------------------------------- |
+| `reason` | string | Motivo de cancelación (opcional por ahora, puede volverse obligatorio en futuras reglas) |
+
+> El schema actual permite `{}` y `reason?`.
+
+---
+
+### **Ejemplo de request (con razón)**
+
+```
+PATCH /recaladas/4/cancel
+```
+
+```json
+{
+  "reason": "Cancelación por condiciones climáticas"
+}
+```
+
+---
+
+### **Ejemplo de request (sin razón)**
+
+```json
+{}
+```
+
+---
+
+### **Reglas de negocio**
+
+* La recalada debe existir.
+
+* No se puede cancelar si ya está:
+
+  * `DEPARTED` → ⛔ no permitido
+  * `CANCELED` → ⛔ no permitido
+
+* Regla especial de seguridad:
+
+  * Si `operationalStatus = ARRIVED`:
+
+    * ✅ permitir solo a `SUPER_ADMIN`
+    * ⛔ `SUPERVISOR` no puede cancelar en ese estado
+
+* Dependencias (Atenciones/Turnos):
+
+  * Si existen Atenciones o Turnos asociados:
+
+    * ⛔ se bloquea la cancelación en esta fase
+    * hasta definir política de cascada:
+
+      * cancelar dependencias, o
+      * bloquear nuevos, o
+      * mantener historiales con estados
+
+* Al cancelar:
+
+  * `operationalStatus = CANCELED`
+  * `canceledAt = now()`
+  * `cancelReason = reason || null`
+
+---
+
+### **Validación**
+
+* Zod valida:
+
+  * `params.id`
+  * `body.reason` (opcional, min 3, max 500)
+* Errores de validación producen `400`.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "id": 4,
+    "codigoRecalada": "RA-2026-000004",
+    "operationalStatus": "CANCELED",
+    "canceledAt": "2026-01-31T19:37:20.185Z",
+    "cancelReason": "Cancelación por condiciones climáticas",
+    "arrivedAt": null,
+    "departedAt": null
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                                                               |
+| ------ | -------------------------------------------------------------------- |
+| `401`  | Token inválido o ausente                                             |
+| `403`  | Rol sin permisos                                                     |
+| `400`  | Error de validación (Zod)                                            |
+| `400`  | Estado inválido (`DEPARTED` o ya `CANCELED`)                         |
+| `400`  | Cancelación en `ARRIVED` requiere `SUPER_ADMIN`                      |
+| `400`  | Tiene Atenciones/Turnos asociados (sin política de cascada definida) |
+| `404`  | La recalada no existe                                                |
+
+---
+
+### **Consideraciones de diseño**
+
+* Este endpoint es la alternativa correcta a “delete” cuando:
+
+  * la recalada ya entró a operación o tiene dependencias
+
+* Diseñado para mantener:
+
+  * trazabilidad
+  * auditoría
+  * consistencia operacional
+
+* Extensión futura (cuando exista cascada):
+
+  * opción A: cancelar atenciones/turnos automáticamente
+  * opción B: bloquear creación de nuevos y cerrar los activos
+  * opción C: mantener historial pero impedir operación
+
+---
+
+## ✅ Cierre de fase (actualizado)
+
+Con la incorporación de:
+
+* **PATCH `/recaladas/:id/arrive`**
+* **PATCH `/recaladas/:id/depart`**
+* **PATCH `/recaladas/:id/cancel`**
+
+se completa la **Fase 2 del módulo Recaladas: Operación real (botones del front)**.
 
 El sistema ahora permite:
 
-✅ Crear eventos operativos programados
-✅ Consultar agenda semanal/mensual
-✅ Ver detalle completo por recalada
-✅ Editar la agenda de forma segura (según estado operativo)
-✅ Eliminar físicamente recaladas solo cuando es seguro (safe delete)
-✅ Filtrar por estado, buque y país
-✅ Buscar por código o texto libre
-✅ Preparar el terreno para acciones operativas y Atenciones/Turnos
+✅ Agendar recaladas (`POST /recaladas`)
+✅ Consultar agenda (`GET /recaladas`)
+✅ Ver detalle (`GET /recaladas/:id`)
+✅ Ajustar agenda con reglas (`PATCH /recaladas/:id`)
+✅ Eliminar físicamente solo si es seguro (`DELETE /recaladas/:id`)
+✅ Ejecutar operación real:
+
+* Arribo real (`ARRIVED`)
+* Zarpe real (`DEPARTED`)
+* Cancelación real (`CANCELED`) con auditoría
+
+Queda listo el terreno para la siguiente expansión:
+
+➡️ **Atenciones** y **Turnos** (y su política de cascada al cancelar).
 
 ---

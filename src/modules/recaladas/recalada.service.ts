@@ -6,6 +6,7 @@ import type {
   StatusType,
   RecaladaOperativeStatus,
   Prisma,
+  RolType,
 } from "@prisma/client";
 import type { ListRecaladasQuery, UpdateRecaladaBody } from "./recalada.schemas";
 
@@ -94,6 +95,49 @@ function normalizeNullableFields(
   return data;
 }
 
+const recaladaSelect = {
+  id: true,
+  codigoRecalada: true,
+
+  fechaLlegada: true,
+  fechaSalida: true,
+
+  // ✅ Operación real
+  arrivedAt: true,
+  departedAt: true,
+  canceledAt: true,
+  cancelReason: true,
+
+  status: true,
+  operationalStatus: true,
+
+  terminal: true,
+  muelle: true,
+  pasajerosEstimados: true,
+  tripulacionEstimada: true,
+  observaciones: true,
+  fuente: true,
+
+  createdAt: true,
+  updatedAt: true,
+
+  buque: { select: { id: true, nombre: true } },
+  paisOrigen: { select: { id: true, codigo: true, nombre: true } },
+  supervisor: {
+    select: {
+      id: true,
+      usuario: {
+        select: {
+          id: true,
+          email: true,
+          nombres: true,
+          apellidos: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.RecaladaSelect;
+
 export class RecaladaService {
   /**
    * Crea una recalada (agenda madre).
@@ -176,42 +220,7 @@ export class RecaladaService {
       const updated = await tx.recalada.update({
         where: { id: recalada.id },
         data: { codigoRecalada: codigoFinal },
-        select: {
-          id: true,
-          codigoRecalada: true,
-
-          fechaLlegada: true,
-          fechaSalida: true,
-
-          status: true,
-          operationalStatus: true,
-
-          terminal: true,
-          muelle: true,
-          pasajerosEstimados: true,
-          tripulacionEstimada: true,
-          observaciones: true,
-          fuente: true,
-
-          createdAt: true,
-          updatedAt: true,
-
-          buque: { select: { id: true, nombre: true } },
-          paisOrigen: { select: { id: true, codigo: true, nombre: true } },
-          supervisor: {
-            select: {
-              id: true,
-              usuario: {
-                select: {
-                  id: true,
-                  email: true,
-                  nombres: true,
-                  apellidos: true,
-                },
-              },
-            },
-          },
-        },
+        select: recaladaSelect,
       });
 
       return updated;
@@ -292,42 +301,7 @@ export class RecaladaService {
         orderBy: { fechaLlegada: "asc" },
         skip,
         take,
-        select: {
-          id: true,
-          codigoRecalada: true,
-
-          fechaLlegada: true,
-          fechaSalida: true,
-
-          status: true,
-          operationalStatus: true,
-
-          terminal: true,
-          muelle: true,
-          pasajerosEstimados: true,
-          tripulacionEstimada: true,
-          observaciones: true,
-          fuente: true,
-
-          createdAt: true,
-          updatedAt: true,
-
-          buque: { select: { id: true, nombre: true } },
-          paisOrigen: { select: { id: true, codigo: true, nombre: true } },
-          supervisor: {
-            select: {
-              id: true,
-              usuario: {
-                select: {
-                  id: true,
-                  email: true,
-                  nombres: true,
-                  apellidos: true,
-                },
-              },
-            },
-          },
-        },
+        select: recaladaSelect,
       }),
     ]);
 
@@ -374,42 +348,7 @@ export class RecaladaService {
   static async getById(id: number) {
     const item = await prisma.recalada.findUnique({
       where: { id },
-      select: {
-        id: true,
-        codigoRecalada: true,
-
-        fechaLlegada: true,
-        fechaSalida: true,
-
-        status: true,
-        operationalStatus: true,
-
-        terminal: true,
-        muelle: true,
-        pasajerosEstimados: true,
-        tripulacionEstimada: true,
-        observaciones: true,
-        fuente: true,
-
-        createdAt: true,
-        updatedAt: true,
-
-        buque: { select: { id: true, nombre: true } },
-        paisOrigen: { select: { id: true, codigo: true, nombre: true } },
-        supervisor: {
-          select: {
-            id: true,
-            usuario: {
-              select: {
-                id: true,
-                email: true,
-                nombres: true,
-                apellidos: true,
-              },
-            },
-          },
-        },
-      },
+      select: recaladaSelect,
     });
 
     if (!item) {
@@ -523,42 +462,7 @@ export class RecaladaService {
     const updated = await prisma.recalada.update({
       where: { id },
       data,
-      select: {
-        id: true,
-        codigoRecalada: true,
-
-        fechaLlegada: true,
-        fechaSalida: true,
-
-        status: true,
-        operationalStatus: true,
-
-        terminal: true,
-        muelle: true,
-        pasajerosEstimados: true,
-        tripulacionEstimada: true,
-        observaciones: true,
-        fuente: true,
-
-        createdAt: true,
-        updatedAt: true,
-
-        buque: { select: { id: true, nombre: true } },
-        paisOrigen: { select: { id: true, codigo: true, nombre: true } },
-        supervisor: {
-          select: {
-            id: true,
-            usuario: {
-              select: {
-                id: true,
-                email: true,
-                nombres: true,
-                apellidos: true,
-              },
-            },
-          },
-        },
-      },
+      select: recaladaSelect,
     });
 
     logger.info(
@@ -575,8 +479,190 @@ export class RecaladaService {
   }
 
   /**
-   * ✅ ADICIÓN
-   * DELETE /recaladas/:id
+   * ✅ PATCH /recaladas/:id/arrive
+   * Marca recalada como ARRIVED y guarda arrivedAt.
+   *
+   * Reglas:
+   * - Solo permitido si operationalStatus = SCHEDULED
+   * - Si body.arrivedAt no viene: now()
+   */
+  static async arrive(id: number, arrivedAt: Date | undefined, actorUserId: string) {
+    const current = await prisma.recalada.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        operationalStatus: true,
+      },
+    });
+
+    if (!current) throw new NotFoundError("La recalada no existe");
+
+    if (current.operationalStatus === "DEPARTED") {
+      throw new BadRequestError("No se puede marcar ARRIVED una recalada en estado DEPARTED");
+    }
+    if (current.operationalStatus === "CANCELED") {
+      throw new BadRequestError("No se puede marcar ARRIVED una recalada en estado CANCELED");
+    }
+    if (current.operationalStatus !== "SCHEDULED") {
+      throw new BadRequestError("Solo se puede marcar ARRIVED si la recalada está en SCHEDULED");
+    }
+
+    const when = arrivedAt ?? new Date();
+
+    const updated = await prisma.recalada.update({
+      where: { id },
+      data: {
+        operationalStatus: "ARRIVED",
+        arrivedAt: when,
+        // si venía de algo raro (por seguridad), limpiamos auditoría de cancelación
+        canceledAt: null,
+        cancelReason: null,
+      },
+      select: recaladaSelect,
+    });
+
+    logger.info(
+      { recaladaId: id, actorUserId, arrivedAt: when.toISOString() },
+      "[Recaladas] arrive",
+    );
+
+    return updated;
+  }
+
+  /**
+   * ✅ PATCH /recaladas/:id/depart
+   * Marca recalada como DEPARTED y guarda departedAt.
+   *
+   * Reglas:
+   * - Solo permitido si operationalStatus = ARRIVED
+   * - Si body.departedAt no viene: now()
+   */
+  static async depart(id: number, departedAt: Date | undefined, actorUserId: string) {
+    const current = await prisma.recalada.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        operationalStatus: true,
+        arrivedAt: true,
+      },
+    });
+
+    if (!current) throw new NotFoundError("La recalada no existe");
+
+    if (current.operationalStatus === "CANCELED") {
+      throw new BadRequestError("No se puede marcar DEPARTED una recalada en estado CANCELED");
+    }
+    if (current.operationalStatus === "DEPARTED") {
+      throw new BadRequestError("La recalada ya está en DEPARTED");
+    }
+    if (current.operationalStatus !== "ARRIVED") {
+      throw new BadRequestError("Solo se puede marcar DEPARTED si la recalada está en ARRIVED");
+    }
+
+    const when = departedAt ?? new Date();
+
+    if (current.arrivedAt && when < current.arrivedAt) {
+      throw new BadRequestError("departedAt debe ser >= arrivedAt");
+    }
+
+    const updated = await prisma.recalada.update({
+      where: { id },
+      data: {
+        operationalStatus: "DEPARTED",
+        departedAt: when,
+      },
+      select: recaladaSelect,
+    });
+
+    logger.info(
+      { recaladaId: id, actorUserId, departedAt: when.toISOString() },
+      "[Recaladas] depart",
+    );
+
+    return updated;
+  }
+
+  /**
+   * ✅ PATCH /recaladas/:id/cancel
+   * Marca recalada como CANCELED y setea canceledAt + cancelReason.
+   *
+   * Reglas:
+   * - No se puede cancelar si ya está DEPARTED o CANCELED
+   * - Si está ARRIVED: permitir solo SUPER_ADMIN (si aplicamos esa regla)
+   * - Si existen Atenciones/Turnos: por ahora bloqueamos (hasta definir cascada)
+   */
+  static async cancel(
+    id: number,
+    reason: string | undefined,
+    actorUserId: string,
+    actorRol: RolType | undefined,
+  ) {
+    const current = await prisma.recalada.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        operationalStatus: true,
+      },
+    });
+
+    if (!current) throw new NotFoundError("La recalada no existe");
+
+    if (current.operationalStatus === "DEPARTED") {
+      throw new BadRequestError("No se puede cancelar una recalada en estado DEPARTED");
+    }
+    if (current.operationalStatus === "CANCELED") {
+      throw new BadRequestError("La recalada ya está en estado CANCELED");
+    }
+
+    // Regla especial: si ya está ARRIVED solo SUPER_ADMIN
+    if (current.operationalStatus === "ARRIVED") {
+      if (!actorRol) {
+        throw new BadRequestError("No se pudo determinar el rol del usuario");
+      }
+      if (actorRol !== "SUPER_ADMIN") {
+        throw new BadRequestError("Solo SUPER_ADMIN puede cancelar una recalada que ya ARRIVED");
+      }
+    }
+
+    // Dependencias (por ahora bloqueamos hasta definir cascada)
+    const [atencionesCount, turnosCount] = await Promise.all([
+      prisma.atencion.count({ where: { recaladaId: id } }),
+      prisma.turno.count({ where: { atencion: { recaladaId: id } } }),
+    ]);
+
+    if (atencionesCount > 0 || turnosCount > 0) {
+      throw new BadRequestError(
+        "No se puede cancelar la recalada porque tiene atenciones/turnos asociados. Defina política de cascada (cancelar o bloquear) para habilitar esta acción.",
+      );
+    }
+
+    const when = new Date();
+
+    const updated = await prisma.recalada.update({
+      where: { id },
+      data: {
+        operationalStatus: "CANCELED",
+        canceledAt: when,
+        cancelReason: reason ?? null,
+      },
+      select: recaladaSelect,
+    });
+
+    logger.info(
+      {
+        recaladaId: id,
+        actorUserId,
+        actorRol,
+        canceledAt: when.toISOString(),
+      },
+      "[Recaladas] cancel",
+    );
+
+    return updated;
+  }
+
+  /**
+   * ✅ DELETE /recaladas/:id
    * Elimina físicamente una recalada SOLO si es "safe"
    *
    * Reglas:

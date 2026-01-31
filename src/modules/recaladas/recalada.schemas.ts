@@ -5,6 +5,11 @@ import {
   RecaladaOperativeStatus,
 } from "@prisma/client";
 
+/* ============================================================================
+ * CREATE
+ * ============================================================================
+ */
+
 export const createRecaladaSchema = z
   .object({
     buqueId: z.coerce.number().int().positive(),
@@ -33,8 +38,7 @@ export const createRecaladaSchema = z
     observaciones: z.string().trim().max(2000).optional(),
     fuente: z.nativeEnum(RecaladaSource).optional(),
 
-    // Por ahora NO lo exponemos como input (se maneja por negocio),
-    // pero si en el futuro lo quieres permitir, ya está listo:
+    // Manejado por negocio
     status: z.nativeEnum(StatusType).optional(),
   })
   .refine(
@@ -47,16 +51,11 @@ export const createRecaladaSchema = z
     }
   );
 
-/**
- * GET /recaladas (agenda)
- * Query params:
- * - from, to: rango de fechas (recomendado)
- * - operationalStatus?
- * - buqueId?
- * - paisOrigenId?
- * - q? (codigoRecalada, buque, observaciones)
- * - page, pageSize
+/* ============================================================================
+ * LIST
+ * ============================================================================
  */
+
 export const listRecaladasQuerySchema = z
   .object({
     from: z.coerce.date().optional(),
@@ -77,43 +76,29 @@ export const listRecaladasQuerySchema = z
     path: ["to"],
   });
 
-export type ListRecaladasQuery = z.infer<typeof listRecaladasQuerySchema>;
-
-/**
- * ✅ ADICIÓN
- * GET /recaladas/:id
- * Params:
- * - id (number)
+/* ============================================================================
+ * GET BY ID
+ * ============================================================================
  */
+
 export const getRecaladaByIdParamsSchema = z.object({
   id: z.coerce.number().int().positive(),
 });
 
-export type GetRecaladaByIdParams = z.infer<typeof getRecaladaByIdParamsSchema>;
-
-/**
- * ✅ ADICIÓN
- * PATCH /recaladas/:id
- * Params:
- * - id (number)
+/* ============================================================================
+ * UPDATE
+ * ============================================================================
  */
+
 export const updateRecaladaParamsSchema = z.object({
   id: z.coerce.number().int().positive(),
 });
 
-export type UpdateRecaladaParams = z.infer<typeof updateRecaladaParamsSchema>;
-
-/**
- * ✅ ADICIÓN
- * PATCH /recaladas/:id
- * Body parcial con campos permitidos (la restricción por estado vive en el service)
- */
 export const updateRecaladaBodySchema = z
   .object({
     buqueId: z.coerce.number().int().positive().optional(),
     paisOrigenId: z.coerce.number().int().positive().optional(),
 
-    // ISO string (DateTime)
     fechaLlegada: z.coerce.date().optional(),
     fechaSalida: z.coerce.date().optional(),
 
@@ -151,16 +136,91 @@ export const updateRecaladaBodySchema = z
     }
   );
 
-export type UpdateRecaladaBody = z.infer<typeof updateRecaladaBodySchema>;
-
-/**
- * ✅ ADICIÓN
- * DELETE /recaladas/:id
- * Params:
- * - id (number)
+/* ============================================================================
+ * DELETE
+ * ============================================================================
  */
+
 export const deleteRecaladaParamsSchema = z.object({
   id: z.coerce.number().int().positive(),
 });
 
-export type DeleteRecaladaParams = z.infer<typeof deleteRecaladaParamsSchema>;
+/* ============================================================================
+ * OPERACIÓN REAL
+ * ============================================================================
+ */
+
+export const arriveRecaladaParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export const arriveRecaladaBodySchema = z
+  .object({
+    arrivedAt: z.coerce.date().optional(),
+  })
+  .strict();
+
+export const departRecaladaParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export const departRecaladaBodySchema = z
+  .object({
+    departedAt: z.coerce.date().optional(),
+  })
+  .strict();
+
+export const cancelRecaladaParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export const cancelRecaladaBodySchema = z
+  .object({
+    reason: z.string().trim().min(3).max(500).optional(),
+  })
+  .strict();
+
+/* ============================================================================
+ * TYPES (todos juntos abajo ✅)
+ * ============================================================================
+ */
+
+export type CreateRecaladaBody = z.infer<typeof createRecaladaSchema>;
+
+export type ListRecaladasQuery = z.infer<typeof listRecaladasQuerySchema>;
+
+export type GetRecaladaByIdParams = z.infer<
+  typeof getRecaladaByIdParamsSchema
+>;
+
+export type UpdateRecaladaParams = z.infer<
+  typeof updateRecaladaParamsSchema
+>;
+export type UpdateRecaladaBody = z.infer<
+  typeof updateRecaladaBodySchema
+>;
+
+export type DeleteRecaladaParams = z.infer<
+  typeof deleteRecaladaParamsSchema
+>;
+
+export type ArriveRecaladaParams = z.infer<
+  typeof arriveRecaladaParamsSchema
+>;
+export type ArriveRecaladaBody = z.infer<
+  typeof arriveRecaladaBodySchema
+>;
+
+export type DepartRecaladaParams = z.infer<
+  typeof departRecaladaParamsSchema
+>;
+export type DepartRecaladaBody = z.infer<
+  typeof departRecaladaBodySchema
+>;
+
+export type CancelRecaladaParams = z.infer<
+  typeof cancelRecaladaParamsSchema
+>;
+export type CancelRecaladaBody = z.infer<
+  typeof cancelRecaladaBodySchema
+>;
