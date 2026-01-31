@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { RecaladaService } from "./recalada.service";
 import { UnauthorizedError } from "../../libs/errors";
-import type { ListRecaladasQuery } from "./recalada.schemas";
+import type { ListRecaladasQuery, GetRecaladaByIdParams } from "./recalada.schemas";
 
 export class RecaladaController {
   static async create(
@@ -49,6 +49,35 @@ export class RecaladaController {
         meta: result.meta,
         error: null,
       });
+      return;
+    } catch (err) {
+      next(err);
+      return;
+    }
+  }
+
+  /**
+   * ✅ ADICIÓN
+   * GET /recaladas/:id
+   * Detalle de una recalada
+   * Auth: GUIA / SUPERVISOR / SUPER_ADMIN
+   */
+  static async getById(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      if (!req.user?.userId) {
+        throw new UnauthorizedError("Authentication required");
+      }
+
+      // validate({ params: getRecaladaByIdParamsSchema }) ya lo dejó listo
+      const params = req.params as unknown as GetRecaladaByIdParams;
+
+      const item = await RecaladaService.getById(params.id);
+
+      res.status(200).json({ data: item, meta: null, error: null });
       return;
     } catch (err) {
       next(err);

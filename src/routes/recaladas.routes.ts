@@ -8,11 +8,24 @@ import { validate } from "../libs/zod-mw";
 import {
   createRecaladaSchema,
   listRecaladasQuerySchema,
+  getRecaladaByIdParamsSchema, // ✅ ADICIÓN
 } from "../modules/recaladas/recalada.schemas";
 
 const router = Router();
 
 router.use(requireAuth);
+
+/**
+ * ✅ ADICIÓN
+ * GET /recaladas/:id
+ * Detalle de una recalada
+ * Auth: GUIA / SUPERVISOR / SUPER_ADMIN
+ */
+router.get(
+  "/:id",
+  validate({ params: getRecaladaByIdParamsSchema }),
+  RecaladaController.getById
+);
 
 /**
  * GET /recaladas

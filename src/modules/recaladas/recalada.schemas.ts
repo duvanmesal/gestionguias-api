@@ -78,3 +78,15 @@ export const listRecaladasQuerySchema = z
   });
 
 export type ListRecaladasQuery = z.infer<typeof listRecaladasQuerySchema>;
+
+/**
+ * ✅ ADICIÓN
+ * GET /recaladas/:id
+ * Params:
+ * - id (number)
+ */
+export const getRecaladaByIdParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export type GetRecaladaByIdParams = z.infer<typeof getRecaladaByIdParamsSchema>;

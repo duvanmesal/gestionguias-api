@@ -621,17 +621,165 @@ GET /recaladas?page=2&pageSize=10
 
 ---
 
+## **2.3 Detalle de recalada (vista de detalle)**
+
+#### **GET `/recaladas/:id`**
+
+Permite **consultar el detalle completo de una recalada** a partir de su `id`.
+
+Este endpoint es utilizado por:
+
+* **Guías** → ver información completa antes/durante operación.
+* **Supervisores** → revisar y preparar acciones operativas.
+* **Administradores** → auditoría y control global.
+
+No modifica estado ni ejecuta operación real, **solo consulta información**, pero es la base para habilitar acciones como **arribar/zarpar/cancelar** en fases posteriores.
+
+---
+
+### **Auth requerida**
+
+`Authorization: Bearer <accessToken>`
+
+* **Roles permitidos:**
+
+  * `SUPER_ADMIN`
+  * `SUPERVISOR`
+  * `GUIA`
+
+---
+
+### **Headers obligatorios**
+
+| Header              | Valor            |
+| ------------------- | ---------------- |
+| `Authorization`     | `Bearer <token>` |
+| `X-Client-Platform` | `WEB` / `MOBILE` |
+
+---
+
+### **Path params**
+
+| Parámetro | Tipo   | Descripción               |
+| --------- | ------ | ------------------------- |
+| `id`      | number | Identificador de recalada |
+
+---
+
+### **Ejemplo de uso**
+
+```
+GET /recaladas/15
+```
+
+---
+
+### **Reglas de negocio**
+
+* Este endpoint:
+
+  * **NO** crea ni modifica recaladas.
+  * **NO** cambia estados operativos.
+  * **NO** genera atenciones ni turnos.
+* Si la recalada **no existe**, retorna `404`.
+* Se utiliza para:
+
+  * renderizar la **pantalla de detalle**
+  * habilitar decisiones y botones del flujo operativo (fase posterior)
+
+---
+
+### **Validación**
+
+* Validación estricta con **Zod** sobre `req.params`.
+* Conversión automática:
+
+  * `id` → `number` (via `z.coerce.number()`).
+* Errores de validación producen respuesta `400`.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "id": 15,
+    "codigoRecalada": "RA-2026-000015",
+    "fechaLlegada": "2026-02-01T10:00:00.000Z",
+    "fechaSalida": "2026-02-01T18:00:00.000Z",
+    "status": "ACTIVO",
+    "operationalStatus": "SCHEDULED",
+    "terminal": "Terminal Internacional",
+    "muelle": "Muelle Norte",
+    "pasajerosEstimados": 2400,
+    "tripulacionEstimada": 1100,
+    "observaciones": "Arribo sujeto a condiciones climáticas",
+    "fuente": "MANUAL",
+    "buque": {
+      "id": 1,
+      "nombre": "MSC Seaside"
+    },
+    "paisOrigen": {
+      "id": 1,
+      "codigo": "IT",
+      "nombre": "Italia"
+    },
+    "supervisor": {
+      "id": 3,
+      "usuario": {
+        "id": "u-123",
+        "email": "supervisor@gestionguias.com",
+        "nombres": "Milena",
+        "apellidos": "Rojas"
+      }
+    },
+    "createdAt": "2026-02-01T08:30:00.000Z",
+    "updatedAt": "2026-02-01T08:30:00.000Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                           |
+| ------ | -------------------------------- |
+| `401`  | Token inválido o ausente         |
+| `403`  | Rol sin permisos                 |
+| `400`  | Error de validación (params Zod) |
+| `404`  | La recalada no existe            |
+
+---
+
+### **Consideraciones de diseño**
+
+* Este endpoint es la **base de la vista de detalle** del módulo Recaladas.
+* Mantiene una forma de respuesta consistente con `GET /recaladas` (agenda), pero permite:
+
+  * acceso directo por `id`
+  * consumo eficiente por pantallas tipo `/recaladas/:id`
+* Preparado para crecimiento:
+
+  * En fases posteriores se puede extender con `include` de **Atenciones** y **Turnos** sin romper el contrato base.
+
+---
+
 ## 🔚 Cierre de fase (actualizado)
 
-Con los endpoints **POST /recaladas** y **GET /recaladas** se consolida la
+Con los endpoints **POST /recaladas**, **GET /recaladas** y **GET /recaladas/:id** se consolida la
 **Fase 2: Lógica de negocio base del módulo Recaladas**.
 
 El sistema ahora permite:
 
 ✅ Crear eventos operativos programados
 ✅ Consultar agenda semanal/mensual
+✅ Ver detalle completo por recalada
 ✅ Filtrar por estado, buque y país
 ✅ Buscar por código o texto libre
-✅ Preparar el terreno para Atenciones y Turnos
+✅ Preparar el terreno para acciones operativas y Atenciones/Turnos
 
 ---

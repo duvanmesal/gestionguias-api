@@ -349,4 +349,58 @@ export class RecaladaService {
 
     return { items, meta };
   }
+
+  /**
+   * GET /recaladas/:id
+   * Trae el detalle completo de una recalada para vista de detalle y acciones operativas.
+   */
+  static async getById(id: number) {
+    const item = await prisma.recalada.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        codigoRecalada: true,
+
+        fechaLlegada: true,
+        fechaSalida: true,
+
+        status: true,
+        operationalStatus: true,
+
+        terminal: true,
+        muelle: true,
+        pasajerosEstimados: true,
+        tripulacionEstimada: true,
+        observaciones: true,
+        fuente: true,
+
+        createdAt: true,
+        updatedAt: true,
+
+        buque: { select: { id: true, nombre: true } },
+        paisOrigen: { select: { id: true, codigo: true, nombre: true } },
+        supervisor: {
+          select: {
+            id: true,
+            usuario: {
+              select: {
+                id: true,
+                email: true,
+                nombres: true,
+                apellidos: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!item) {
+      throw new NotFoundError("La recalada no existe");
+    }
+
+    logger.info({ recaladaId: id }, "[Recaladas] getById");
+
+    return item;
+  }
 }
