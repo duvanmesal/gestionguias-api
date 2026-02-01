@@ -21,12 +21,14 @@ enum StatusType {
   SUSPENDIDO
 }
 
+// NUEVO: estados del Turno como slot materializado
 enum TurnoStatus {
-  CREADO
-  EN_USO
-  LIBERADO
-  TERMINADO
-  CANCELADO
+  AVAILABLE     // slot libre
+  ASSIGNED      // slot asignado a un guía
+  IN_PROGRESS   // (opcional) en curso
+  COMPLETED     // terminado
+  CANCELED      // cancelado
+  NO_SHOW       // (opcional) no se presentó
 }
 
 enum Platform {
@@ -68,6 +70,13 @@ enum RecaladaSource {
   API
 }
 
+// NUEVO: estado operativo de Atención
+enum AtencionOperativeStatus {
+  OPEN
+  CLOSED
+  CANCELED
+}
+
 model Usuario {
   id           String  @id @default(cuid())
   email        String  @unique
@@ -98,6 +107,14 @@ model Usuario {
 
   sentInvitations    Invitation[] @relation("InviterRelation")
   receivedInvitation Invitation?  @relation("InviteeRelation")
+
+  // Auditoría Atenciones
+  atencionesCreadas   Atencion[] @relation("AtencionCreatedBy")
+  atencionesCanceladas Atencion[] @relation("AtencionCanceledBy")
+
+  // Auditoría Turnos
+  turnosCreados     Turno[] @relation("TurnoCreatedBy")
+  turnosCancelados  Turno[] @relation("TurnoCanceledBy")
 
   @@index([documentType, documentNumber])
   @@index([emailVerifiedAt])
@@ -238,32 +255,32 @@ model Supervisor {
 }
 
 model Pais {
-  id         Int         @id @default(autoincrement())
-  nombre     String      @unique
-  codigo     String      @unique
-  status     StatusType  @default(ACTIVO)
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
+  id        Int        @id @default(autoincrement())
+  nombre    String     @unique
+  codigo    String     @unique
+  status    StatusType @default(ACTIVO)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 
-  recaladas  Recalada[]
-  buques     Buque[]
+  recaladas Recalada[]
+  buques    Buque[]
 
   @@index([status])
   @@map("paises")
 }
 
 model Buque {
-  id         Int         @id @default(autoincrement())
-  nombre     String      @unique
-  naviera    String?
-  capacidad  Int?
-  status     StatusType  @default(ACTIVO)
-  paisId     Int?
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
+  id        Int        @id @default(autoincrement())
+  nombre    String     @unique
+  naviera   String?
+  capacidad Int?
+  status    StatusType @default(ACTIVO)
+  paisId    Int?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 
-  pais       Pais?       @relation(fields: [paisId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  recaladas  Recalada[]
+  pais      Pais?     @relation(fields: [paisId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  recaladas Recalada[]
 
   @@index([paisId])
   @@index([status])
@@ -271,40 +288,40 @@ model Buque {
 }
 
 model Recalada {
-  id            Int                    @id @default(autoincrement())
-  buqueId       Int
-  paisOrigenId  Int
-  supervisorId  String
+  id           Int    @id @default(autoincrement())
+  buqueId      Int
+  paisOrigenId Int
+  supervisorId String
 
   // Identidad operativa (soporte/imports/búsqueda)
-  codigoRecalada String               @unique
+  codigoRecalada String @unique
 
   // Fechas programadas (agenda)
-  fechaLlegada  DateTime
-  fechaSalida   DateTime?
+  fechaLlegada DateTime
+  fechaSalida  DateTime?
 
   // Fechas reales (operación)
-  arrivedAt     DateTime?
-  departedAt    DateTime?
+  arrivedAt  DateTime?
+  departedAt DateTime?
 
   // Estado del registro (soft enable/disable) + estado operativo real
-  status            StatusType               @default(ACTIVO)
-  operationalStatus RecaladaOperativeStatus  @default(SCHEDULED)
+  status            StatusType              @default(ACTIVO)
+  operationalStatus RecaladaOperativeStatus @default(SCHEDULED)
 
   // Datos operativos (UI feliz)
-  terminal            String?
-  muelle              String?
-  pasajerosEstimados   Int?
-  tripulacionEstimada  Int?
-  observaciones        String?
-  fuente               RecaladaSource        @default(MANUAL)
+  terminal           String?
+  muelle             String?
+  pasajerosEstimados Int?
+  tripulacionEstimada Int?
+  observaciones       String?
+  fuente              RecaladaSource @default(MANUAL)
 
   // Auditoría de cancelación
-  canceledAt     DateTime?
-  cancelReason   String?
+  canceledAt   DateTime?
+  cancelReason String?
 
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   buque      Buque      @relation(fields: [buqueId], references: [id])
   paisOrigen Pais       @relation(fields: [paisOrigenId], references: [id])
@@ -323,40 +340,88 @@ model Atencion {
   id           Int        @id @default(autoincrement())
   recaladaId   Int
   supervisorId String
+
+  // Cupo materializable: al crear Atencion, se crean Turnos 1..turnosTotal
   turnosTotal  Int
+
   descripcion  String?
+
+  // Ventana operativa (cerrada, siempre)
   fechaInicio  DateTime
-  fechaFin     DateTime?
+  fechaFin     DateTime
+
+  // Estado admin del registro
   status       StatusType @default(ACTIVO)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+
+  // Estado operativo
+  operationalStatus AtencionOperativeStatus @default(OPEN)
+
+  // Auditoría
+  createdById  String
+  canceledAt   DateTime?
+  cancelReason String?
+  canceledById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   recalada   Recalada   @relation(fields: [recaladaId], references: [id])
   supervisor Supervisor @relation(fields: [supervisorId], references: [id])
-  turnos     Turno[]
+
+  createdBy  Usuario @relation("AtencionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  canceledBy Usuario? @relation("AtencionCanceledBy", fields: [canceledById], references: [id], onDelete: SetNull)
+
+  turnos Turno[]
 
   @@index([recaladaId])
   @@index([supervisorId])
   @@index([status])
+  @@index([operationalStatus])
+  @@index([recaladaId, fechaInicio])
   @@map("atenciones")
 }
 
 model Turno {
-  id            Int         @id @default(autoincrement())
-  atencionId    Int
-  guiaId        String?
-  numero        Int
-  status        TurnoStatus @default(CREADO)
-  fechaInicio   DateTime?
-  fechaFin      DateTime?
+  id         Int    @id @default(autoincrement())
+  atencionId Int
+
+  // Slot asignable a un guía (nullable si está libre)
+  guiaId     String?
+
+  // Cupón numerado 1..N
+  numero     Int
+
+  status     TurnoStatus @default(AVAILABLE)
+
+  // Por defecto heredan de la Atención, pero se dejan opcionales por flexibilidad futura
+  fechaInicio DateTime?
+  fechaFin    DateTime?
+
   observaciones String?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+
+  // Operación real
+  checkInAt  DateTime?
+  checkOutAt DateTime?
+
+  // Auditoría
+  createdById String
+  canceledAt  DateTime?
+  cancelReason String?
+  canceledById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   atencion Atencion @relation(fields: [atencionId], references: [id])
   guia     Guia?    @relation(fields: [guiaId], references: [id])
 
+  createdBy  Usuario @relation("TurnoCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  canceledBy Usuario? @relation("TurnoCanceledBy", fields: [canceledById], references: [id], onDelete: SetNull)
+
+  // Reglas de integridad
   @@unique([atencionId, numero])
+  @@unique([atencionId, guiaId])
+
   @@index([atencionId])
   @@index([guiaId])
   @@index([status])

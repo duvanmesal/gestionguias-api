@@ -8,6 +8,9 @@ import {
   ProfileStatus,
   RecaladaOperativeStatus,
   RecaladaSource,
+  TurnoStatus,
+  AtencionOperativeStatus,
+  StatusType,
 } from "@prisma/client"
 import { hash as argonHash, argon2id } from "argon2"
 
@@ -38,6 +41,12 @@ async function resolveBuqueIdOrThrow(nombreBuque: string) {
   return buque.id
 }
 
+async function resolveUserIdOrThrow(email: string) {
+  const user = await prisma.usuario.findUnique({ where: { email } })
+  if (!user) throw new Error(`No existe usuario con email=${email}`)
+  return user.id
+}
+
 async function resolveSupervisorIdOrThrow(emailSupervisor: string) {
   const user = await prisma.usuario.findUnique({ where: { email: emailSupervisor } })
   if (!user) throw new Error(`No existe usuario con email=${emailSupervisor}`)
@@ -58,6 +67,11 @@ function tempCodigoRecalada() {
   return `TEMP-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+// Helper: suma horas
+function addHours(date: Date, hours: number) {
+  return new Date(date.getTime() + hours * 60 * 60 * 1000)
+}
+
 async function main() {
   console.log("🌱 Starting database seeding...")
 
@@ -76,7 +90,14 @@ async function main() {
     await upsertTestUsers()
 
     // ✅ Datos dev para Recaladas (para probar el módulo)
-    await upsertDevRecaladas()
+    const recaladas = await upsertDevRecaladas()
+
+    // ✅ NUEVO: Atenciones + Turnos slots 1..N
+    await upsertDevAtencionesAndTurnos({
+      recaladas,
+      supervisorEmail: "supervisor@test.com",
+      createdByEmail: SUPER_EMAIL, // auditoría: quien crea en seed (SuperAdmin)
+    })
   }
 
   console.log("✅ Database seeding completed!")
@@ -184,7 +205,6 @@ async function fixShipsPaisIdIfNull() {
     for (const b of nullShips) {
       const best = bestByBuque[b.id]
       if (best?.paisOrigenId) {
-        // Validar que el país exista (debería)
         const exists = await tx.pais.findUnique({
           where: { id: best.paisOrigenId },
           select: { id: true },
@@ -280,7 +300,8 @@ async function upsertTestUsers() {
   console.log("🧪 Test users upserted")
 }
 
-// ✅ NUEVO: Recaladas de ejemplo (DEV) con codigoRecalada y operationalStatus
+// ✅ Recaladas de ejemplo (DEV) con codigoRecalada y operationalStatus
+// Devuelve las recaladas creadas para encadenar atenciones.
 async function upsertDevRecaladas() {
   const supervisorId = await resolveSupervisorIdOrThrow("supervisor@test.com")
 
@@ -306,7 +327,7 @@ async function upsertDevRecaladas() {
       codigoRecalada: tempCodigoRecalada(), // ✅ único en el insert
       fechaLlegada: in2Days,
       fechaSalida: in3Days,
-      status: "ACTIVO",
+      status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.SCHEDULED,
       fuente: RecaladaSource.MANUAL,
       terminal: "Terminal de Cruceros",
@@ -325,7 +346,7 @@ async function upsertDevRecaladas() {
       codigoRecalada: tempCodigoRecalada(), // ✅ único en el insert
       fechaLlegada: in7Days,
       fechaSalida: in8Days,
-      status: "ACTIVO",
+      status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.SCHEDULED,
       fuente: RecaladaSource.MANUAL,
       terminal: "Terminal de Cruceros",
@@ -337,17 +358,183 @@ async function upsertDevRecaladas() {
   })
 
   // Backfill determinístico: RA-YYYY-000123
-  await prisma.recalada.update({
+  const r1Final = await prisma.recalada.update({
     where: { id: r1.id },
     data: { codigoRecalada: buildCodigoRecalada(r1.fechaLlegada, r1.id) },
   })
 
-  await prisma.recalada.update({
+  const r2Final = await prisma.recalada.update({
     where: { id: r2.id },
     data: { codigoRecalada: buildCodigoRecalada(r2.fechaLlegada, r2.id) },
   })
 
   console.log("🧭 Dev Recaladas created (2) with codigoRecalada")
+
+  return [r1Final, r2Final]
+}
+
+type DevAtencionesInput = {
+  recaladas: Array<{ id: number; fechaLlegada: Date; fechaSalida: Date | null }>
+  supervisorEmail: string
+  createdByEmail: string
+}
+
+// ✅ NUEVO: crea Atenciones DEV y materializa Turnos 1..N como slots
+async function upsertDevAtencionesAndTurnos(input: DevAtencionesInput) {
+  const supervisorId = await resolveSupervisorIdOrThrow(input.supervisorEmail)
+  const createdById = await resolveUserIdOrThrow(input.createdByEmail)
+
+  // Para evitar solapes, generamos 2 atenciones por recalada, en ventanas separadas
+  // (y siempre dentro de [fechaLlegada, fechaSalida])
+  for (const r of input.recaladas) {
+    if (!r.fechaSalida) {
+      console.log(`⚠️ Recalada id=${r.id} no tiene fechaSalida, se omiten atenciones dev.`)
+      continue
+    }
+
+    const baseStart = addHours(r.fechaLlegada, 1)
+    const baseEnd = addHours(baseStart, 4) // 4h
+
+    const secondStart = addHours(baseEnd, 1) // gap 1h
+    const secondEnd = addHours(secondStart, 3) // 3h
+
+    // Asegurar que no se pase de fechaSalida
+    const a1End = baseEnd > r.fechaSalida ? r.fechaSalida : baseEnd
+    const a2End = secondEnd > r.fechaSalida ? r.fechaSalida : secondEnd
+
+    // Si por ajustes quedan inválidas, saltar
+    if (a1End <= baseStart) {
+      console.log(`⚠️ Ventana inválida para atención 1 en recalada id=${r.id}. Se omite.`)
+      continue
+    }
+    if (a2End <= secondStart) {
+      console.log(`⚠️ Ventana inválida para atención 2 en recalada id=${r.id}. Se omite.`)
+      continue
+    }
+
+    // Creamos/actualizamos por “huella” estable: recaladaId + fechas.
+    // Como no tenemos unique en prisma para eso, hacemos findFirst.
+    const desired = [
+      {
+        descripcion: "Atención Dev A (slots materializados)",
+        fechaInicio: baseStart,
+        fechaFin: a1End,
+        turnosTotal: 6,
+      },
+      {
+        descripcion: "Atención Dev B (slots materializados)",
+        fechaInicio: secondStart,
+        fechaFin: a2End,
+        turnosTotal: 4,
+      },
+    ]
+
+    for (const d of desired) {
+      const existing = await prisma.atencion.findFirst({
+        where: {
+          recaladaId: r.id,
+          fechaInicio: d.fechaInicio,
+          fechaFin: d.fechaFin,
+        },
+        select: { id: true, turnosTotal: true },
+      })
+
+      const atencion = existing
+        ? await prisma.atencion.update({
+            where: { id: existing.id },
+            data: {
+              supervisorId,
+              descripcion: d.descripcion,
+              turnosTotal: d.turnosTotal,
+              status: StatusType.ACTIVO,
+              operationalStatus: AtencionOperativeStatus.OPEN,
+              // no tocamos createdById en update para mantener historial
+            },
+          })
+        : await prisma.atencion.create({
+            data: {
+              recaladaId: r.id,
+              supervisorId,
+              turnosTotal: d.turnosTotal,
+              descripcion: d.descripcion,
+              fechaInicio: d.fechaInicio,
+              fechaFin: d.fechaFin,
+              status: StatusType.ACTIVO,
+              operationalStatus: AtencionOperativeStatus.OPEN,
+              createdById,
+            },
+          })
+
+      // Materializar cupo: garantizar turnos 1..N como AVAILABLE
+      // Si se aumentó cupo, crea faltantes; si se disminuyó, borra sobrantes SOLO si están AVAILABLE y sin guia.
+      await prisma.$transaction(async (tx) => {
+        const current = await tx.turno.findMany({
+          where: { atencionId: atencion.id },
+          select: { id: true, numero: true, status: true, guiaId: true },
+          orderBy: { numero: "asc" },
+        })
+
+        const currentMax = current.length > 0 ? current[current.length - 1]!.numero : 0
+
+        // 1) Aumentar: crear turnos faltantes
+        for (let n = currentMax + 1; n <= d.turnosTotal; n++) {
+          await tx.turno.create({
+            data: {
+              atencionId: atencion.id,
+              numero: n,
+              status: TurnoStatus.AVAILABLE,
+              guiaId: null,
+              fechaInicio: d.fechaInicio, // heredamos por defecto
+              fechaFin: d.fechaFin,
+              createdById,
+            },
+          })
+        }
+
+        // 2) Alinear existentes (si el seed se corrió antes con otras fechas/estados)
+        //    Solo tocamos slots libres para no romper datos si ya probaste cosas.
+        for (const t of current) {
+          if (t.status === TurnoStatus.AVAILABLE && !t.guiaId) {
+            await tx.turno.update({
+              where: { id: t.id },
+              data: {
+                fechaInicio: d.fechaInicio,
+                fechaFin: d.fechaFin,
+              },
+            })
+          }
+        }
+
+        // 3) Disminuir: eliminar sobrantes (solo libres)
+        const toDelete = current
+          .filter((t) => t.numero > d.turnosTotal)
+          .filter((t) => t.status === TurnoStatus.AVAILABLE && !t.guiaId)
+
+        if (toDelete.length > 0) {
+          await tx.turno.deleteMany({
+            where: { id: { in: toDelete.map((x) => x.id) } },
+          })
+        }
+
+        // Si hay sobrantes NO eliminables, lo reportamos (y no rompemos la seed)
+        const blocked = current
+          .filter((t) => t.numero > d.turnosTotal)
+          .filter((t) => !(t.status === TurnoStatus.AVAILABLE && !t.guiaId))
+
+        if (blocked.length > 0) {
+          console.log(
+            `⚠️ Atencion id=${atencion.id}: cupo bajó a ${d.turnosTotal}, pero ${blocked.length} turno(s) > cupo no se pueden borrar (no están libres).`
+          )
+        }
+      })
+
+      console.log(
+        `🎫 Atencion ready id=${atencion.id} (recaladaId=${r.id}) ventana=${d.fechaInicio.toISOString()} -> ${d.fechaFin.toISOString()} cupo=${d.turnosTotal}`
+      )
+    }
+  }
+
+  console.log("🧩 Dev Atenciones + Turnos slots ready")
 }
 
 main()
