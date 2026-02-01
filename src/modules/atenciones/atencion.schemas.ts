@@ -42,6 +42,61 @@ export const getAtencionByIdParamsSchema = z.object({
   id: z.coerce.number().int().positive(),
 });
 
+/**
+ * PATCH /atenciones/:id
+ * Campos opcionales para edición de planificación.
+ */
+export const updateAtencionParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export const updateAtencionBodySchema = z
+  .object({
+    fechaInicio: z.coerce.date().optional(),
+    fechaFin: z.coerce.date().optional(),
+
+    turnosTotal: z.coerce.number().int().positive().max(5000).optional(),
+    descripcion: z.string().trim().max(500).nullable().optional(),
+
+    status: z.nativeEnum(StatusType).optional(),
+  })
+  .refine(
+    (data) =>
+      !data.fechaInicio ||
+      !data.fechaFin ||
+      data.fechaFin >= data.fechaInicio,
+    {
+      message: "fechaFin debe ser mayor o igual a fechaInicio",
+      path: ["fechaFin"],
+    }
+  );
+
+/**
+ * PATCH /atenciones/:id/cancel
+ */
+export const cancelAtencionParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export const cancelAtencionBodySchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+});
+
+/**
+ * PATCH /atenciones/:id/close
+ */
+export const closeAtencionParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
 export type CreateAtencionBody = z.infer<typeof createAtencionSchema>;
 export type ListAtencionesQuery = z.infer<typeof listAtencionesQuerySchema>;
 export type GetAtencionByIdParams = z.infer<typeof getAtencionByIdParamsSchema>;
+
+export type UpdateAtencionParams = z.infer<typeof updateAtencionParamsSchema>;
+export type UpdateAtencionBody = z.infer<typeof updateAtencionBodySchema>;
+
+export type CancelAtencionParams = z.infer<typeof cancelAtencionParamsSchema>;
+export type CancelAtencionBody = z.infer<typeof cancelAtencionBodySchema>;
+
+export type CloseAtencionParams = z.infer<typeof closeAtencionParamsSchema>;

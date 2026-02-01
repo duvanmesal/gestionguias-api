@@ -8,7 +8,6 @@ import type {
   UpdateRecaladaBody,
   DeleteRecaladaParams,
 
-  // ✅ NUEVOS
   ArriveRecaladaParams,
   ArriveRecaladaBody,
   DepartRecaladaParams,
@@ -53,7 +52,6 @@ export class RecaladaController {
         throw new UnauthorizedError("Authentication required");
       }
 
-      // El validate({ query: listRecaladasQuerySchema }) ya dejó esto limpio
       const query = req.query as unknown as ListRecaladasQuery;
 
       const result = await RecaladaService.list(query);
@@ -85,12 +83,38 @@ export class RecaladaController {
         throw new UnauthorizedError("Authentication required");
       }
 
-      // validate({ params: getRecaladaByIdParamsSchema }) ya lo dejó listo
       const params = req.params as unknown as GetRecaladaByIdParams;
 
       const item = await RecaladaService.getById(params.id);
 
       res.status(200).json({ data: item, meta: null, error: null });
+      return;
+    } catch (err) {
+      next(err);
+      return;
+    }
+  }
+
+  /**
+   * ✅ GET /recaladas/:id/atenciones
+   * Atenciones de una recalada (para tab "Atenciones" en detalle)
+   * Auth: GUIA / SUPERVISOR / SUPER_ADMIN
+   */
+  static async getAtenciones(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      if (!req.user?.userId) {
+        throw new UnauthorizedError("Authentication required");
+      }
+
+      const params = req.params as unknown as GetRecaladaByIdParams;
+
+      const items = await RecaladaService.getAtenciones(params.id);
+
+      res.status(200).json({ data: items, meta: null, error: null });
       return;
     } catch (err) {
       next(err);
@@ -113,7 +137,6 @@ export class RecaladaController {
         throw new UnauthorizedError("Authentication required");
       }
 
-      // validate ya dejó todo limpio
       const params = req.params as unknown as UpdateRecaladaParams;
       const body = req.body as UpdateRecaladaBody;
 

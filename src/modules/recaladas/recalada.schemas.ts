@@ -5,11 +5,6 @@ import {
   RecaladaOperativeStatus,
 } from "@prisma/client";
 
-/* ============================================================================
- * CREATE
- * ============================================================================
- */
-
 export const createRecaladaSchema = z
   .object({
     buqueId: z.coerce.number().int().positive(),
@@ -51,10 +46,6 @@ export const createRecaladaSchema = z
     }
   );
 
-/* ============================================================================
- * LIST
- * ============================================================================
- */
 
 export const listRecaladasQuerySchema = z
   .object({
@@ -76,19 +67,9 @@ export const listRecaladasQuerySchema = z
     path: ["to"],
   });
 
-/* ============================================================================
- * GET BY ID
- * ============================================================================
- */
-
 export const getRecaladaByIdParamsSchema = z.object({
   id: z.coerce.number().int().positive(),
 });
-
-/* ============================================================================
- * UPDATE
- * ============================================================================
- */
 
 export const updateRecaladaParamsSchema = z.object({
   id: z.coerce.number().int().positive(),
@@ -136,19 +117,9 @@ export const updateRecaladaBodySchema = z
     }
   );
 
-/* ============================================================================
- * DELETE
- * ============================================================================
- */
-
 export const deleteRecaladaParamsSchema = z.object({
   id: z.coerce.number().int().positive(),
 });
-
-/* ============================================================================
- * OPERACIÓN REAL
- * ============================================================================
- */
 
 export const arriveRecaladaParamsSchema = z.object({
   id: z.coerce.number().int().positive(),
@@ -180,10 +151,6 @@ export const cancelRecaladaBodySchema = z
   })
   .strict();
 
-/* ============================================================================
- * TYPES (todos juntos abajo ✅)
- * ============================================================================
- */
 
 export type CreateRecaladaBody = z.infer<typeof createRecaladaSchema>;
 

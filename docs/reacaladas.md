@@ -1590,31 +1590,185 @@ PATCH /recaladas/4/cancel
 
 ---
 
-## ✅ Cierre de fase (actualizado)
+Perfecto. Aquí tienes **solo lo que debes agregar** 👇
+tal como pediste: **el nuevo 2.9** y **la actualización del cierre de la fase**, coherente con lo ya documentado y con el código real.
+
+---
+
+## **2.9 Atenciones de una recalada (vista detalle / tab “Atenciones”)**
+
+#### **GET `/recaladas/:id/atenciones`**
+
+Permite **listar todas las Atenciones asociadas a una Recalada específica**.
+
+Este endpoint existe para soportar directamente la **pantalla de detalle de Recalada**, en particular el **tab “Atenciones”**, sin mezclar esta responsabilidad con el listado global de atenciones.
+
+---
+
+### **Auth requerida**
+
+`Authorization: Bearer <accessToken>`
+
+* **Roles permitidos:**
+
+  * `SUPER_ADMIN`
+  * `SUPERVISOR`
+  * `GUIA`
+
+---
+
+### **Headers obligatorios**
+
+| Header              | Valor            |
+| ------------------- | ---------------- |
+| `Authorization`     | `Bearer <token>` |
+| `X-Client-Platform` | `WEB` / `MOBILE` |
+
+---
+
+### **Path params**
+
+| Parámetro | Tipo   | Descripción               |
+| --------- | ------ | ------------------------- |
+| `id`      | number | Identificador de recalada |
+
+---
+
+### **Ejemplo de uso**
+
+```
+GET /recaladas/15/atenciones
+```
+
+---
+
+### **Reglas de negocio**
+
+* La recalada debe existir.
+
+  * Si no existe → `404`.
+
+* El endpoint:
+
+  * **NO crea** atenciones.
+  * **NO modifica** estados.
+  * **NO aplica paginación** (se espera un número acotado por recalada).
+  * **NO aplica filtros externos** (solo por `recaladaId`).
+
+* Orden de retorno:
+
+  * `fechaInicio ASC` (orden cronológico natural).
+
+* Cada atención incluye:
+
+  * datos propios de la atención
+  * estados administrativos y operativos
+  * relación con `turnos` (ordenados por `numero ASC`)
+
+---
+
+### **Validación**
+
+* Validación estricta con **Zod** sobre `req.params.id`.
+* Conversión automática:
+
+  * `id` → `number`.
+
+Errores de validación producen respuesta `400`.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": [
+    {
+      "id": 10,
+      "recaladaId": 15,
+      "fechaInicio": "2026-02-01T08:00:00.000Z",
+      "fechaFin": "2026-02-01T12:00:00.000Z",
+      "turnosTotal": 6,
+      "descripcion": "Ventana mañana (grupo A)",
+      "status": "ACTIVO",
+      "operationalStatus": "OPEN",
+      "turnos": [
+        {
+          "id": 501,
+          "numero": 1,
+          "status": "AVAILABLE",
+          "guiaId": null,
+          "fechaInicio": "2026-02-01T08:00:00.000Z",
+          "fechaFin": "2026-02-01T12:00:00.000Z"
+        }
+      ],
+      "createdAt": "2026-02-01T07:59:55.000Z",
+      "updatedAt": "2026-02-01T07:59:55.000Z"
+    }
+  ],
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                       |
+| -----: | ---------------------------- |
+|  `401` | Token inválido o ausente     |
+|  `403` | Rol sin permisos             |
+|  `400` | Error de validación (params) |
+|  `404` | La recalada no existe        |
+
+---
+
+### **Consideraciones de diseño**
+
+* Este endpoint:
+
+  * mantiene la **separación clara de responsabilidades**:
+
+    * `/recaladas/:id` → información del evento
+    * `/recaladas/:id/atenciones` → ventanas operativas del evento
+  * evita que el front tenga que usar `/atenciones?recaladaId=...` para una vista de detalle.
+* Diseñado para:
+
+  * renderizar timeline/tabla de atenciones
+  * habilitar acciones contextuales (crear, editar, cerrar, cancelar atención)
+* Preparado para expansión futura:
+
+  * incluir métricas (`ocupados / libres`)
+  * incluir resúmenes de turnos
+  * políticas de cascada al cancelar recalada
+
+---
+
+## ✅ **Cierre de fase (actualizado)**
 
 Con la incorporación de:
 
+* **GET `/recaladas/:id/atenciones`**
 * **PATCH `/recaladas/:id/arrive`**
 * **PATCH `/recaladas/:id/depart`**
 * **PATCH `/recaladas/:id/cancel`**
+* **PATCH `/recaladas/:id`**
+* **DELETE `/recaladas/:id` (safe delete)**
 
-se completa la **Fase 2 del módulo Recaladas: Operación real (botones del front)**.
+se completa la **Fase 2 del módulo Recaladas: Agenda + Operación real**.
 
 El sistema ahora permite:
 
-✅ Agendar recaladas (`POST /recaladas`)
-✅ Consultar agenda (`GET /recaladas`)
-✅ Ver detalle (`GET /recaladas/:id`)
-✅ Ajustar agenda con reglas (`PATCH /recaladas/:id`)
-✅ Eliminar físicamente solo si es seguro (`DELETE /recaladas/:id`)
+✅ Crear y planificar recaladas
+✅ Consultar agenda con filtros avanzados
+✅ Ver detalle completo de una recalada
+✅ Ajustar agenda según estado operativo
 ✅ Ejecutar operación real:
 
-* Arribo real (`ARRIVED`)
-* Zarpe real (`DEPARTED`)
-* Cancelación real (`CANCELED`) con auditoría
+* Arribo (`ARRIVED`)
+* Zarpe (`DEPARTED`)
+* Cancelación (`CANCELED`) con auditoría
+  ✅ Consultar **Atenciones por Recalada** como parte natural del flujo operativo
 
-Queda listo el terreno para la siguiente expansión:
-
-➡️ **Atenciones** y **Turnos** (y su política de cascada al cancelar).
-
----
+Con esto, **Recaladas queda cerrado funcionalmente** y perfectamente integrado con el módulo **Atenciones**.

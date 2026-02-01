@@ -1,8 +1,12 @@
 import { prisma } from "../../prisma/client";
-import { BadRequestError, NotFoundError } from "../../libs/errors";
+import { BadRequestError, NotFoundError, ConflictError } from "../../libs/errors";
 import { logger } from "../../libs/logger";
 import type { Prisma, AtencionOperativeStatus, StatusType } from "@prisma/client";
-import type { CreateAtencionBody, ListAtencionesQuery } from "./atencion.schemas";
+import type {
+  CreateAtencionBody,
+  ListAtencionesQuery,
+  UpdateAtencionBody,
+} from "./atencion.schemas";
 
 const atencionSelect = {
   id: true,
@@ -117,7 +121,7 @@ export class AtencionService {
     if (!supervisor) {
       logger.warn(
         { actorUserId },
-        "[Atenciones] supervisor not found for user; creating one",
+        "[Atenciones] supervisor not found for user; creating one"
       );
       supervisor = await prisma.supervisor.create({
         data: { usuarioId: actorUserId },
@@ -147,11 +151,9 @@ export class AtencionService {
       const turnosData = Array.from({ length: atencion.turnosTotal }, (_, i) => ({
         atencionId: atencion.id,
         numero: i + 1,
-        // Heredar ventana por defecto (opcional en Prisma)
         fechaInicio: atencion.fechaInicio,
         fechaFin: atencion.fechaFin,
         createdById: actorUserId,
-        // status default AVAILABLE
       }));
 
       await tx.turno.createMany({
@@ -159,7 +161,6 @@ export class AtencionService {
         skipDuplicates: false,
       });
 
-      // Retornar detalle completo
       return tx.atencion.findUnique({
         where: { id: atencion.id },
         select: atencionSelect,
@@ -172,7 +173,7 @@ export class AtencionService {
 
     logger.info(
       { atencionId: created.id, recaladaId: created.recaladaId, actorUserId },
-      "[Atenciones] created",
+      "[Atenciones] created"
     );
 
     return created;
@@ -255,5 +256,248 @@ export class AtencionService {
     if (!item) throw new NotFoundError("Atención no encontrada");
 
     return item;
+  }
+
+  /**
+   * Lista atenciones de una Recalada (para tab "Atenciones").
+   */
+  static async listByRecaladaId(recaladaId: number) {
+    // Validar recalada existe (para 404 claro)
+    const recalada = await prisma.recalada.findUnique({
+      where: { id: recaladaId },
+      select: { id: true },
+    });
+    if (!recalada) throw new NotFoundError("Recalada no encontrada");
+
+    const items = await prisma.atencion.findMany({
+      where: { recaladaId },
+      select: atencionSelect,
+      orderBy: { fechaInicio: "asc" },
+    });
+
+    return items;
+  }
+
+  /**
+   * PATCH /atenciones/:id
+   * Edita ventana/cupo/descripcion/status admin.
+   *
+   * Reglas clave implementadas:
+   * - No permite editar si operationalStatus = CANCELED
+   * - Si cambia ventana: actualiza Atencion y ajusta ventana de turnos NO asignados (guiaId = null)
+   * - Si cambia turnosTotal:
+   *   - Aumenta: crea nuevos turnos (numero old+1..new)
+   *   - Disminuye: solo permite si los turnos a eliminar NO están asignados (guiaId = null)
+   */
+  static async update(id: number, body: UpdateAtencionBody, actorUserId: string) {
+    const current = await prisma.atencion.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        recaladaId: true,
+        turnosTotal: true,
+        fechaInicio: true,
+        fechaFin: true,
+        status: true,
+        operationalStatus: true,
+      },
+    });
+
+    if (!current) throw new NotFoundError("Atención no encontrada");
+
+    if (current.operationalStatus === "CANCELED") {
+      throw new ConflictError("No se puede editar una atención cancelada");
+    }
+
+    // Armar patch
+    const patch: Prisma.AtencionUpdateInput = {};
+
+    const newFechaInicio = body.fechaInicio ?? current.fechaInicio;
+    const newFechaFin = body.fechaFin ?? current.fechaFin;
+
+    if (newFechaFin < newFechaInicio) {
+      throw new BadRequestError("fechaFin debe ser mayor o igual a fechaInicio");
+    }
+
+    const windowChanged =
+      (body.fechaInicio && body.fechaInicio.getTime() !== current.fechaInicio.getTime()) ||
+      (body.fechaFin && body.fechaFin.getTime() !== current.fechaFin.getTime());
+
+    if (body.fechaInicio) patch.fechaInicio = body.fechaInicio;
+    if (body.fechaFin) patch.fechaFin = body.fechaFin;
+
+    if (typeof body.descripcion !== "undefined") {
+      patch.descripcion = body.descripcion; // puede ser null
+    }
+
+    if (body.status) patch.status = body.status;
+
+    const targetTurnosTotal =
+      typeof body.turnosTotal === "number" ? body.turnosTotal : current.turnosTotal;
+
+    if (targetTurnosTotal <= 0) {
+      throw new BadRequestError("turnosTotal debe ser un entero positivo");
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      // 1) Actualizar Atencion base (si aplica)
+      const updatedAtencion = await tx.atencion.update({
+        where: { id },
+        data: {
+          ...patch,
+          ...(typeof body.turnosTotal === "number" ? { turnosTotal: body.turnosTotal } : {}),
+        },
+        select: { id: true, turnosTotal: true, fechaInicio: true, fechaFin: true },
+      });
+
+      // 2) Si cambió ventana, actualizar turnos NO asignados
+      if (windowChanged) {
+        await tx.turno.updateMany({
+          where: { atencionId: id, guiaId: null },
+          data: {
+            fechaInicio: newFechaInicio,
+            fechaFin: newFechaFin,
+          },
+        });
+      }
+
+      // 3) Ajuste de cupo (turnosTotal)
+      const oldTotal = current.turnosTotal;
+      const newTotal = targetTurnosTotal;
+
+      if (newTotal > oldTotal) {
+        // crear turnos faltantes
+        const toCreate = Array.from({ length: newTotal - oldTotal }, (_, i) => ({
+          atencionId: id,
+          numero: oldTotal + i + 1,
+          fechaInicio: newFechaInicio,
+          fechaFin: newFechaFin,
+          createdById: actorUserId,
+        }));
+
+        await tx.turno.createMany({ data: toCreate, skipDuplicates: false });
+      }
+
+      if (newTotal < oldTotal) {
+        // Solo se pueden eliminar los turnos "sobrantes" si NO están asignados
+        const extraTurnos = await tx.turno.findMany({
+          where: { atencionId: id, numero: { gt: newTotal } },
+          select: { id: true, numero: true, guiaId: true },
+          orderBy: { numero: "asc" },
+        });
+
+        const assigned = extraTurnos.filter((t) => t.guiaId !== null);
+        if (assigned.length > 0) {
+          throw new ConflictError(
+            `No se puede reducir el cupo: existen turnos asignados en los números > ${newTotal}`
+          );
+        }
+
+        // borrar los extra
+        await tx.turno.deleteMany({
+          where: { atencionId: id, numero: { gt: newTotal } },
+        });
+      }
+
+      // 4) Devolver detalle completo
+      return tx.atencion.findUnique({
+        where: { id },
+        select: atencionSelect,
+      });
+    });
+
+    if (!result) throw new BadRequestError("No fue posible actualizar la atención");
+
+    logger.info(
+      { atencionId: id, actorUserId, body },
+      "[Atenciones] updated"
+    );
+
+    return result;
+  }
+
+  /**
+   * PATCH /atenciones/:id/cancel
+   * Cancela atención con razón y auditoría.
+   */
+  static async cancel(id: number, reason: string, actorUserId: string) {
+    const current = await prisma.atencion.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        operationalStatus: true,
+        canceledAt: true,
+      },
+    });
+
+    if (!current) throw new NotFoundError("Atención no encontrada");
+
+    if (current.operationalStatus === "CANCELED") {
+      // idempotencia "suave": si ya está cancelada, devolvemos la entidad
+      const item = await prisma.atencion.findUnique({
+        where: { id },
+        select: atencionSelect,
+      });
+      if (!item) throw new NotFoundError("Atención no encontrada");
+      return item;
+    }
+
+    if (current.operationalStatus === "CLOSED") {
+      throw new ConflictError("No se puede cancelar una atención cerrada");
+    }
+
+    const updated = await prisma.atencion.update({
+      where: { id },
+      data: {
+        operationalStatus: "CANCELED",
+        canceledAt: new Date(),
+        cancelReason: reason,
+        canceledById: actorUserId,
+      },
+      select: atencionSelect,
+    });
+
+    logger.info({ atencionId: id, actorUserId }, "[Atenciones] canceled");
+
+    return updated;
+  }
+
+  /**
+   * PATCH /atenciones/:id/close
+   * Cierra atención (operationalStatus -> CLOSED)
+   */
+  static async close(id: number, actorUserId: string) {
+    const current = await prisma.atencion.findUnique({
+      where: { id },
+      select: { id: true, operationalStatus: true },
+    });
+
+    if (!current) throw new NotFoundError("Atención no encontrada");
+
+    if (current.operationalStatus === "CANCELED") {
+      throw new ConflictError("No se puede cerrar una atención cancelada");
+    }
+
+    if (current.operationalStatus === "CLOSED") {
+      // idempotente
+      const item = await prisma.atencion.findUnique({
+        where: { id },
+        select: atencionSelect,
+      });
+      if (!item) throw new NotFoundError("Atención no encontrada");
+      return item;
+    }
+
+    const updated = await prisma.atencion.update({
+      where: { id },
+      data: {
+        operationalStatus: "CLOSED",
+      },
+      select: atencionSelect,
+    });
+
+    logger.info({ atencionId: id, actorUserId }, "[Atenciones] closed");
+
+    return updated;
   }
 }

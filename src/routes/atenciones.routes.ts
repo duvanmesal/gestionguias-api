@@ -9,6 +9,11 @@ import {
   createAtencionSchema,
   listAtencionesQuerySchema,
   getAtencionByIdParamsSchema,
+  updateAtencionParamsSchema,
+  updateAtencionBodySchema,
+  cancelAtencionParamsSchema,
+  cancelAtencionBodySchema,
+  closeAtencionParamsSchema,
 } from "../modules/atenciones/atencion.schemas";
 
 const router = Router();
@@ -47,6 +52,42 @@ router.post(
   requireSupervisor,
   validate({ body: createAtencionSchema }),
   AtencionController.create
+);
+
+/**
+ * PATCH /atenciones/:id
+ * Edita ventana/cupo/descripcion/estado admin
+ * Auth: SUPERVISOR / SUPER_ADMIN
+ */
+router.patch(
+  "/:id",
+  requireSupervisor,
+  validate({ params: updateAtencionParamsSchema, body: updateAtencionBodySchema }),
+  AtencionController.update
+);
+
+/**
+ * PATCH /atenciones/:id/cancel
+ * Cancela atención con razón + auditoría (sin borrar)
+ * Auth: SUPERVISOR / SUPER_ADMIN
+ */
+router.patch(
+  "/:id/cancel",
+  requireSupervisor,
+  validate({ params: cancelAtencionParamsSchema, body: cancelAtencionBodySchema }),
+  AtencionController.cancel
+);
+
+/**
+ * PATCH /atenciones/:id/close
+ * Cierra atención (operationalStatus -> CLOSED)
+ * Auth: SUPERVISOR / SUPER_ADMIN
+ */
+router.patch(
+  "/:id/close",
+  requireSupervisor,
+  validate({ params: closeAtencionParamsSchema }),
+  AtencionController.close
 );
 
 export default router;

@@ -86,6 +86,19 @@ router.patch(
 );
 
 /**
+ * GET /recaladas/:id/atenciones
+ * Atenciones de una recalada (para tab "Atenciones" en detalle)
+ * Auth: GUIA / SUPERVISOR / SUPER_ADMIN
+ *
+ * IMPORTANTE: debe ir ANTES del GET "/:id"
+ */
+router.get(
+  "/:id/atenciones",
+  validate({ params: getRecaladaByIdParamsSchema }),
+  RecaladaController.getAtenciones
+);
+
+/**
  * GET /recaladas/:id
  * Detalle de una recalada
  * Auth: GUIA / SUPERVISOR / SUPER_ADMIN

@@ -750,23 +750,332 @@ GET /atenciones/10
 
 ---
 
-# ✅ Cierre e inicio de fase
+## 2.4 Endpoints del módulo Atenciones (Fase 2)
 
-Con la incorporación de:
+En esta fase se implementan los **endpoints operativos** del módulo Atenciones, con validaciones y auditoría, manteniendo el envelope estándar:
 
-* **POST `/atenciones`**
-* **GET `/atenciones`**
-* **GET `/atenciones/:id`**
-
-se da por iniciada formalmente la **Fase 2 del módulo Atenciones: servicios + endpoints + lógica operativa inicial**.
-
-El sistema ahora permite:
-
-✅ Crear ventanas operativas con cupo dentro de una Recalada
-✅ Consultar atenciones por rangos, filtros y paginación
-✅ Consultar detalle completo (incluyendo turnos materializados)
-
-Siguiente paso natural (cuando tú digas):
-➡️ **PATCH /atenciones/:id** (editar ventana/cupo con reglas) y luego **close/cancel** con política clara.
+```json
+{ "data": ..., "meta": ..., "error": ... }
+```
 
 ---
+
+### 2.4.1 Listado de atenciones con filtros/paginación
+
+#### GET `/atenciones`
+
+Lista atenciones para panel/agenda con filtros por **ventana**, **recalada**, **supervisor** y **estados**.
+
+**Auth requerida:** ✅ Sí (GUIA / SUPERVISOR / SUPER_ADMIN)
+
+**Query params:**
+
+| Parámetro           | Tipo                      | Descripción           |
+| ------------------- | ------------------------- | --------------------- |
+| `from`              | datetime ISO              | Inicio del rango      |
+| `to`                | datetime ISO              | Fin del rango         |
+| `recaladaId`        | number                    | Filtra por recalada   |
+| `supervisorId`      | string                    | Filtra por supervisor |
+| `status`            | `StatusType`              | Estado administrativo |
+| `operationalStatus` | `AtencionOperativeStatus` | Estado operativo      |
+| `page`              | number                    | default 1             |
+| `pageSize`          | number                    | default 20, máx 100   |
+
+**Regla de ventana (solapamiento):**
+
+* Si `from` y `to`: `fechaFin >= from` **AND** `fechaInicio <= to`
+* Si solo `from`: `fechaFin >= from`
+* Si solo `to`: `fechaInicio <= to`
+
+**Ejemplo:**
+
+```
+GET /atenciones?recaladaId=1&from=2026-02-01T00:00:00.000Z&to=2026-02-02T00:00:00.000Z&page=1&pageSize=20
+```
+
+**Respuesta 200 (ejemplo):**
+
+```json
+{
+  "data": [
+    {
+      "id": 10,
+      "recaladaId": 1,
+      "supervisorId": "sup-123",
+      "turnosTotal": 6,
+      "descripcion": "Ventana mañana",
+      "fechaInicio": "2026-02-01T08:00:00.000Z",
+      "fechaFin": "2026-02-01T12:00:00.000Z",
+      "status": "ACTIVO",
+      "operationalStatus": "OPEN",
+      "canceledAt": null,
+      "cancelReason": null,
+      "canceledById": null,
+      "createdAt": "2026-02-01T07:59:55.000Z",
+      "updatedAt": "2026-02-01T07:59:55.000Z"
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "pageSize": 20,
+    "total": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPrevPage": false,
+    "from": "2026-02-01T00:00:00.000Z",
+    "to": "2026-02-02T00:00:00.000Z",
+    "filters": {
+      "recaladaId": 1,
+      "supervisorId": null,
+      "status": null,
+      "operationalStatus": null
+    }
+  },
+  "error": null
+}
+```
+
+**Errores posibles:** `401` (no auth), `400` (validación de query, ej. `to < from`).
+
+---
+
+### 2.4.2 Detalle de atención
+
+#### GET `/atenciones/:id`
+
+Retorna el detalle completo de una atención para vista detalle/edición. Incluye relaciones (`recalada`, `supervisor`) y `turnos` ordenados por `numero ASC`.
+
+**Auth requerida:** ✅ Sí (GUIA / SUPERVISOR / SUPER_ADMIN)
+
+**Path params:**
+
+| Parámetro | Tipo   |
+| --------- | ------ |
+| `id`      | number |
+
+**Ejemplo:**
+
+```
+GET /atenciones/10
+```
+
+**Respuesta 200:** devuelve el objeto completo (incluye `turnos`).
+
+**Errores posibles:** `401`, `400` (params), `404` (no existe).
+
+---
+
+### 2.4.3 Creación de atención + materialización de turnos
+
+#### POST `/atenciones`
+
+Crea una atención dentro de una recalada y **materializa automáticamente los turnos** `1..turnosTotal` dentro de la misma transacción.
+
+**Auth requerida:** ✅ Sí (**SUPERVISOR / SUPER_ADMIN**)
+(Protegido en routes con `requireSupervisor`)
+
+**Body:**
+
+| Campo         | Tipo         | Requerido | Descripción                    |
+| ------------- | ------------ | --------: | ------------------------------ |
+| `recaladaId`  | number       |         ✅ | Recalada padre                 |
+| `fechaInicio` | datetime ISO |         ✅ | Inicio ventana                 |
+| `fechaFin`    | datetime ISO |         ✅ | Fin ventana                    |
+| `turnosTotal` | number       |         ✅ | Cupo, crea N turnos (máx 5000) |
+| `descripcion` | string       |         ❌ | Máx 500 chars                  |
+
+**Reglas de negocio principales:**
+
+* `fechaFin >= fechaInicio` (si no: `400`)
+* `recaladaId` debe existir (si no: `404`)
+* `status` por defecto: `ACTIVO`
+* `operationalStatus` por defecto: `OPEN`
+* **Supervisor** se resuelve por usuario autenticado; si no existe Supervisor, se crea (defensa de integridad).
+* Se crean `Turno` `1..N` heredando `fechaInicio/fechaFin` de la atención.
+
+**Ejemplo request:**
+
+```json
+{
+  "recaladaId": 1,
+  "fechaInicio": "2026-02-01T08:00:00.000Z",
+  "fechaFin": "2026-02-01T12:00:00.000Z",
+  "turnosTotal": 6,
+  "descripcion": "Ventana mañana (grupo A)"
+}
+```
+
+**Respuesta 201:** devuelve la atención creada con relaciones y turnos.
+
+---
+
+### 2.4.4 Atenciones de una recalada (Tab “Atenciones”)
+
+#### GET `/recaladas/:id/atenciones`
+
+Lista todas las atenciones asociadas a una recalada específica para el tab de detalle.
+
+**Auth requerida:** ✅ Sí (GUIA / SUPERVISOR / SUPER_ADMIN)
+
+**Path params:**
+
+| Parámetro | Tipo   |
+| --------- | ------ |
+| `id`      | number |
+
+**Reglas:**
+
+* La recalada debe existir (si no: `404`)
+* Orden: `fechaInicio ASC`
+* Retorna atenciones con `turnos` (útil para mostrar cupo/estado).
+
+**Ejemplo:**
+
+```
+GET /recaladas/1/atenciones
+```
+
+**Respuesta 200:**
+
+```json
+{
+  "data": [
+    {
+      "id": 10,
+      "recaladaId": 1,
+      "turnosTotal": 6,
+      "fechaInicio": "2026-02-01T08:00:00.000Z",
+      "fechaFin": "2026-02-01T12:00:00.000Z",
+      "status": "ACTIVO",
+      "operationalStatus": "OPEN",
+      "turnos": [
+        { "id": 501, "numero": 1, "status": "AVAILABLE", "guiaId": null }
+      ]
+    }
+  ],
+  "meta": null,
+  "error": null
+}
+```
+
+**Errores posibles:** `401`, `400` (params), `404` (recalada no existe).
+
+---
+
+### 2.4.5 Actualización de atención (planificación)
+
+#### PATCH `/atenciones/:id`
+
+Permite editar una atención para cambios de planificación:
+
+* ventana (`fechaInicio`, `fechaFin`)
+* cupo (`turnosTotal`)
+* `descripcion`
+* estado administrativo (`status`)
+
+**Auth requerida:** ✅ Sí (**SUPERVISOR / SUPER_ADMIN**)
+
+**Body (campos permitidos):**
+
+| Campo         | Tipo         | Descripción               |
+| ------------- | ------------ | ------------------------- |
+| `fechaInicio` | datetime ISO | Reprogramación de ventana |
+| `fechaFin`    | datetime ISO | Reprogramación de ventana |
+| `turnosTotal` | number       | Ajuste de cupo            |
+| `descripcion` | string       | Nota                      |
+| `status`      | `StatusType` | Estado administrativo     |
+
+**Reglas clave (implementadas):**
+
+* `fechaFin >= fechaInicio` (si no: `400`)
+* Si se cambia ventana, solo se actualizan `turnos` **no asignados** (no se rompe historia de turnos ya tomados).
+* Si aumenta `turnosTotal`: se crean nuevos turnos (N+1..M).
+* Si disminuye `turnosTotal`: solo se permite si los turnos a recortar no están asignados (si no: conflicto/validación).
+
+**Ejemplo:**
+
+```json
+{
+  "fechaInicio": "2026-02-01T09:00:00.000Z",
+  "fechaFin": "2026-02-01T13:00:00.000Z",
+  "turnosTotal": 8,
+  "descripcion": "Ajuste por cambio operativo"
+}
+```
+
+**Respuesta 200:** devuelve la atención actualizada con turnos.
+
+---
+
+### 2.4.6 Cancelación de atención (con auditoría)
+
+#### PATCH `/atenciones/:id/cancel`
+
+Cancela una atención operativa conservando historia, con auditoría.
+
+**Auth requerida:** ✅ Sí (**SUPERVISOR / SUPER_ADMIN**)
+
+**Body:**
+
+| Campo    | Tipo            | Requerido |
+| -------- | --------------- | --------: |
+| `reason` | string (3..500) |         ✅ |
+
+**Efectos:**
+
+* `operationalStatus` → `CANCELED`
+* `canceledAt` → now()
+* `cancelReason` → `reason`
+* `canceledById` → usuario autenticado
+
+**Ejemplo:**
+
+```json
+{
+  "reason": "Se cancela por cambio operativo del puerto"
+}
+```
+
+**Errores típicos:**
+
+* Si ya está `CLOSED`: conflicto/validación
+* Si no existe: `404`
+
+---
+
+### 2.4.7 Cierre de atención (finalización operativa)
+
+#### PATCH `/atenciones/:id/close`
+
+Cierra una atención, marcándola como finalizada sin borrarla.
+
+**Auth requerida:** ✅ Sí (**SUPERVISOR / SUPER_ADMIN**)
+
+**Body:** vacío
+
+**Efectos:**
+
+* `operationalStatus` → `CLOSED`
+
+**Reglas:**
+
+* Si está cancelada: conflicto/validación
+* Si ya está cerrada: responde exitoso (idempotente)
+
+---
+
+## 7. Resultado de la fase
+
+✅ **Fase 1 (Prisma + Seeds) cerrada**
+✅ **Fase 2 (Servicios + Endpoints) para Atenciones implementada y validada en Postman**
+
+A partir de aquí el módulo Atenciones permite:
+
+* Crear ventanas operativas con cupo dentro de una recalada
+* Materializar turnos automáticamente al crear/aumentar cupo
+* Consultar agenda/listados con filtros por ventana y estados
+* Consultar detalle completo (incluye turnos)
+* Editar planificación (ventana/cupo/descripcion/status)
+* Cancelar con auditoría
+* Cerrar operativamente sin perder historial
+* Consultar atenciones por recalada para el tab “Atenciones” en detalle de recalada
