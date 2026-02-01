@@ -11,6 +11,9 @@ import buqueRoutes from "./buque.routes";
 // 🔹 Recaladas (módulo base)
 import recaladasRoutes from "./recaladas.routes";
 
+// 🔹 Atenciones (ventanas operativas)
+import atencionesRoutes from "./atenciones.routes";
+
 const router = Router();
 
 // API v1 routes
@@ -27,6 +30,9 @@ v1Router.use("/buques", buqueRoutes);
 
 // 🔹 Recaladas
 v1Router.use("/recaladas", recaladasRoutes);
+
+// 🔹 Atenciones
+v1Router.use("/atenciones", atencionesRoutes);
 
 // Mount versioned routes
 router.use("/", v1Router);
@@ -46,6 +52,7 @@ router.get("/", (_req, res) => {
         paises: `${process.env.API_PREFIX ?? "/api"}/paises`,
         buques: `${process.env.API_PREFIX ?? "/api"}/buques`,
         recaladas: `${process.env.API_PREFIX ?? "/api"}/recaladas`,
+        atenciones: `${process.env.API_PREFIX ?? "/api"}/atenciones`,
         health: "/health",
       },
     },
