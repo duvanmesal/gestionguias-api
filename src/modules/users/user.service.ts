@@ -45,6 +45,45 @@ export interface PaginatedResult<T> {
 }
 
 export class UserService {
+  async getMe(userId: string): Promise<any> {
+    const user = await prisma.usuario.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        nombres: true,
+        apellidos: true,
+        telefono: true,
+        rol: true,
+        activo: true,
+        profileStatus: true,
+        profileCompletedAt: true,
+        documentType: true,
+        createdAt: true,
+        updatedAt: true,
+        guia: {
+          select: {
+            id: true,
+            telefono: true,
+            direccion: true,
+          },
+        },
+        supervisor: {
+          select: {
+            id: true,
+            telefono: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundError("User not found");
+    }
+
+    return user;
+  }
+
   async list(options: PaginationOptions = {}): Promise<PaginatedResult<any>> {
     // Normalización defensiva
     const rawPage = Number(options.page ?? 1);

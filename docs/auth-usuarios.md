@@ -1077,7 +1077,134 @@ GET /users/search?page=1&pageSize=10&rol=GUIA&activo=true&profileStatus=COMPLETE
 
 ---
 
-# ✅ **1.15 Definition of Done (actualizado)**
+Perfecto, Duvan. Aquí va la actualización **por partes** tal como la quieres:
+
+* ✅ **1.15** ahora será el nuevo endpoint **GET `/users/me`**
+* ✅ El **Definition of Done** baja a **1.16** y se actualiza con este endpoint (siguiendo tu estilo)
+
+Te lo dejo listo para pegar en tu `auth_usuarios.md` (o donde estés llevando ese bloque).
+
+---
+
+# **1.15 Perfil del usuario autenticado (implementado)**
+
+Este endpoint permite obtener el **perfil del usuario actualmente autenticado**, sin necesidad de conocer su `id`, y sin depender de endpoints administrativos.
+
+Es clave para:
+
+* **frontends** (mostrar datos del usuario logueado),
+* **autocompletar formularios**,
+* **obtener el `guiaId` / `supervisorId`** cuando aplica,
+* y soportar flujos como **Turnos/Claim/Assign** sin “hackear” búsquedas.
+
+---
+
+## **1.15.1 Obtener perfil actual**
+
+#### GET `/users/me`
+
+Devuelve la información del usuario autenticado (`req.user.userId`), incluyendo (si existen) sus relaciones `guia` y `supervisor`.
+
+---
+
+### **Auth requerida**
+
+`Authorization: Bearer <accessToken>`
+
+* **Roles permitidos:**
+  `SUPER_ADMIN`, `SUPERVISOR`, `GUIA`
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Body**
+
+❌ No usa body.
+
+---
+
+### **Reglas de negocio**
+
+* El endpoint:
+
+  * requiere JWT válido.
+  * identifica al usuario mediante `req.user.userId` (payload del access token).
+  * **no permite consultar a otros usuarios** (es “self only”).
+* Incluye información base del usuario:
+
+  * `id`, `email`, `rol`, `activo`, `profileStatus`, etc.
+* Incluye relaciones si existen:
+
+  * `guia` (ej: `guia.id`, `telefono`, `direccion`)
+  * `supervisor` (ej: `supervisor.id`, `telefono`)
+* Si por alguna razón el `userId` autenticado no existe en BD → `404`.
+
+---
+
+### **Validación**
+
+* No hay Zod de body/query porque no recibe payload.
+* La validación ocurre por:
+
+  * middleware `requireAuth` (token válido)
+  * existencia del usuario en DB (`findUnique`)
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "id": "cml30bpm10005ih4da8iukdfz",
+    "email": "guia1@test.com",
+    "nombres": "Carlos",
+    "apellidos": "Rodríguez",
+    "telefono": "3000000000",
+    "rol": "GUIA",
+    "activo": true,
+    "profileStatus": "COMPLETE",
+    "profileCompletedAt": "2026-02-03T22:10:01.000Z",
+    "documentType": "CC",
+    "createdAt": "2026-01-26T20:40:07.423Z",
+    "updatedAt": "2026-02-03T22:15:25.100Z",
+    "guia": {
+      "id": "cml4abcd0000xxx999",
+      "telefono": "3000000000",
+      "direccion": "Cartagena"
+    },
+    "supervisor": null
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                   |
+| -----: | ------------------------ |
+|  `401` | Token inválido o ausente |
+|  `404` | Usuario no encontrado    |
+
+---
+
+### **Motivo de diseño**
+
+* Evita que el frontend dependa de endpoints administrativos (como `GET /users/:id`) para obtener datos del usuario logueado.
+* Permite que un guía obtenga su propio `guiaId` de forma segura.
+* Reduce fricción para módulos operativos como **Turnos**, **Atenciones** y **Claim**.
+
+---
+
+# ✅ **1.16 Definition of Done (actualizado)**
 
 * Login / Refresh / Logout / Logout-all funcionando correctamente.
 * CRUD de usuarios con RBAC activo.
@@ -1098,3 +1225,5 @@ GET /users/search?page=1&pageSize=10&rol=GUIA&activo=true&profileStatus=COMPLETE
 * **PATCH `/users/me` implementado y validado (edición de perfil propio sin `:id`, validación estricta).** *29/01/2026*
 * **Búsqueda y filtros de usuarios implementado (`GET /users` y `GET /users/search`) con paginación, búsqueda, filtros por rol/estado/perfil, rangos de fechas y ordenamiento.** *29/01/2026*
 * **Pruebas en Postman cubriendo casos válidos, combinados y de error para filtros administrativos.** *29/01/2026*
+* **GET `/users/me` implementado y validado (consulta del usuario autenticado, incluye relaciones `guia`/`supervisor` si existen).** *03/02/2026*
+* **Pruebas en Postman verificando que GUIA obtiene `guia.id` para operar Turnos/Claim.** *03/02/2026*

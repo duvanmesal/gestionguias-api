@@ -1,7 +1,15 @@
 import { prisma } from "../../prisma/client";
-import { BadRequestError, NotFoundError, ConflictError } from "../../libs/errors";
+import {
+  BadRequestError,
+  NotFoundError,
+  ConflictError,
+} from "../../libs/errors";
 import { logger } from "../../libs/logger";
-import type { Prisma, AtencionOperativeStatus, StatusType } from "@prisma/client";
+import type {
+  Prisma,
+  AtencionOperativeStatus,
+  StatusType,
+} from "@prisma/client";
 import type {
   CreateAtencionBody,
   ListAtencionesQuery,
@@ -90,6 +98,37 @@ function toISO(d?: Date) {
   return d ? d.toISOString() : undefined;
 }
 
+type OperativeGate = {
+  atencion: { status: StatusType; operationalStatus: AtencionOperativeStatus };
+  recalada: { status: StatusType; operationalStatus: any };
+};
+
+function assertOperacionPermitida(gate: OperativeGate) {
+  // Admin status
+  if (gate.recalada.status !== "ACTIVO") {
+    throw new ConflictError("La recalada no está activa");
+  }
+  if (gate.atencion.status !== "ACTIVO") {
+    throw new ConflictError("La atención no está activa");
+  }
+
+  // Recalada operative status (lo dejamos como string para no pelear con imports)
+  if (gate.recalada.operationalStatus === "CANCELED") {
+    throw new ConflictError("La recalada está cancelada");
+  }
+  if (gate.recalada.operationalStatus === "DEPARTED") {
+    throw new ConflictError("La recalada ya finalizó (DEPARTED)");
+  }
+
+  // Atención operative status
+  if (gate.atencion.operationalStatus === "CANCELED") {
+    throw new ConflictError("La atención está cancelada");
+  }
+  if (gate.atencion.operationalStatus === "CLOSED") {
+    throw new ConflictError("La atención está cerrada");
+  }
+}
+
 export type AtencionTurnosSummary = {
   turnosTotal: number;
   availableCount: number;
@@ -131,7 +170,7 @@ export class AtencionService {
     if (!supervisor) {
       logger.warn(
         { actorUserId },
-        "[Atenciones] supervisor not found for user; creating one"
+        "[Atenciones] supervisor not found for user; creating one",
       );
       supervisor = await prisma.supervisor.create({
         data: { usuarioId: actorUserId },
@@ -154,17 +193,25 @@ export class AtencionService {
           // defaults: status=ACTIVO, operationalStatus=OPEN
           createdById: actorUserId,
         },
-        select: { id: true, turnosTotal: true, fechaInicio: true, fechaFin: true },
+        select: {
+          id: true,
+          turnosTotal: true,
+          fechaInicio: true,
+          fechaFin: true,
+        },
       });
 
       // Materializar turnos 1..N
-      const turnosData = Array.from({ length: atencion.turnosTotal }, (_, i) => ({
-        atencionId: atencion.id,
-        numero: i + 1,
-        fechaInicio: atencion.fechaInicio,
-        fechaFin: atencion.fechaFin,
-        createdById: actorUserId,
-      }));
+      const turnosData = Array.from(
+        { length: atencion.turnosTotal },
+        (_, i) => ({
+          atencionId: atencion.id,
+          numero: i + 1,
+          fechaInicio: atencion.fechaInicio,
+          fechaFin: atencion.fechaFin,
+          createdById: actorUserId,
+        }),
+      );
 
       await tx.turno.createMany({
         data: turnosData,
@@ -183,7 +230,7 @@ export class AtencionService {
 
     logger.info(
       { atencionId: created.id, recaladaId: created.recaladaId, actorUserId },
-      "[Atenciones] created"
+      "[Atenciones] created",
     );
 
     return created;
@@ -206,7 +253,8 @@ export class AtencionService {
     if (query.recaladaId) where.recaladaId = query.recaladaId;
     if (query.supervisorId) where.supervisorId = query.supervisorId;
     if (query.status) where.status = query.status;
-    if (query.operationalStatus) where.operationalStatus = query.operationalStatus;
+    if (query.operationalStatus)
+      where.operationalStatus = query.operationalStatus;
 
     // Filtro de ventana por solapamiento
     if (query.from && query.to) {
@@ -299,7 +347,11 @@ export class AtencionService {
    *   - Aumenta: crea nuevos turnos (numero old+1..new)
    *   - Disminuye: solo permite si los turnos a eliminar NO están asignados (guiaId = null)
    */
-  static async update(id: number, body: UpdateAtencionBody, actorUserId: string) {
+  static async update(
+    id: number,
+    body: UpdateAtencionBody,
+    actorUserId: string,
+  ) {
     const current = await prisma.atencion.findUnique({
       where: { id },
       select: {
@@ -326,11 +378,14 @@ export class AtencionService {
     const newFechaFin = body.fechaFin ?? current.fechaFin;
 
     if (newFechaFin < newFechaInicio) {
-      throw new BadRequestError("fechaFin debe ser mayor o igual a fechaInicio");
+      throw new BadRequestError(
+        "fechaFin debe ser mayor o igual a fechaInicio",
+      );
     }
 
     const windowChanged =
-      (body.fechaInicio && body.fechaInicio.getTime() !== current.fechaInicio.getTime()) ||
+      (body.fechaInicio &&
+        body.fechaInicio.getTime() !== current.fechaInicio.getTime()) ||
       (body.fechaFin && body.fechaFin.getTime() !== current.fechaFin.getTime());
 
     if (body.fechaInicio) patch.fechaInicio = body.fechaInicio;
@@ -343,7 +398,9 @@ export class AtencionService {
     if (body.status) patch.status = body.status;
 
     const targetTurnosTotal =
-      typeof body.turnosTotal === "number" ? body.turnosTotal : current.turnosTotal;
+      typeof body.turnosTotal === "number"
+        ? body.turnosTotal
+        : current.turnosTotal;
 
     if (targetTurnosTotal <= 0) {
       throw new BadRequestError("turnosTotal debe ser un entero positivo");
@@ -355,9 +412,16 @@ export class AtencionService {
         where: { id },
         data: {
           ...patch,
-          ...(typeof body.turnosTotal === "number" ? { turnosTotal: body.turnosTotal } : {}),
+          ...(typeof body.turnosTotal === "number"
+            ? { turnosTotal: body.turnosTotal }
+            : {}),
         },
-        select: { id: true, turnosTotal: true, fechaInicio: true, fechaFin: true },
+        select: {
+          id: true,
+          turnosTotal: true,
+          fechaInicio: true,
+          fechaFin: true,
+        },
       });
 
       // 2) Si cambió ventana, actualizar turnos NO asignados
@@ -377,13 +441,16 @@ export class AtencionService {
 
       if (newTotal > oldTotal) {
         // crear turnos faltantes
-        const toCreate = Array.from({ length: newTotal - oldTotal }, (_, i) => ({
-          atencionId: id,
-          numero: oldTotal + i + 1,
-          fechaInicio: newFechaInicio,
-          fechaFin: newFechaFin,
-          createdById: actorUserId,
-        }));
+        const toCreate = Array.from(
+          { length: newTotal - oldTotal },
+          (_, i) => ({
+            atencionId: id,
+            numero: oldTotal + i + 1,
+            fechaInicio: newFechaInicio,
+            fechaFin: newFechaFin,
+            createdById: actorUserId,
+          }),
+        );
 
         await tx.turno.createMany({ data: toCreate, skipDuplicates: false });
       }
@@ -399,7 +466,7 @@ export class AtencionService {
         const assigned = extraTurnos.filter((t) => t.guiaId !== null);
         if (assigned.length > 0) {
           throw new ConflictError(
-            `No se puede reducir el cupo: existen turnos asignados en los números > ${newTotal}`
+            `No se puede reducir el cupo: existen turnos asignados en los números > ${newTotal}`,
           );
         }
 
@@ -416,12 +483,10 @@ export class AtencionService {
       });
     });
 
-    if (!result) throw new BadRequestError("No fue posible actualizar la atención");
+    if (!result)
+      throw new BadRequestError("No fue posible actualizar la atención");
 
-    logger.info(
-      { atencionId: id, actorUserId, body },
-      "[Atenciones] updated"
-    );
+    logger.info({ atencionId: id, actorUserId, body }, "[Atenciones] updated");
 
     return result;
   }
@@ -583,7 +648,9 @@ export class AtencionService {
    * turnosTotal,
    * availableCount, assignedCount, inProgressCount, completedCount, canceledCount, noShowCount
    */
-  static async getSummaryByAtencionId(atencionId: number): Promise<AtencionTurnosSummary> {
+  static async getSummaryByAtencionId(
+    atencionId: number,
+  ): Promise<AtencionTurnosSummary> {
     // 1) validar atención existe y obtener turnosTotal
     const atencion = await prisma.atencion.findUnique({
       where: { id: atencionId },
@@ -620,5 +687,171 @@ export class AtencionService {
     };
 
     return summary;
+  }
+
+  /**
+   * POST /atenciones/:id/claim
+   * Autoclaim: busca el primer Turno AVAILABLE por numero ASC y lo asigna al guía autenticado.
+   *
+   * Reglas:
+   * - Atención/Recalada deben permitir operación (OPEN/activa)
+   * - El guía autenticado debe existir como Guia (guia.usuarioId = actorUserId)
+   * - Si el guía ya tiene turno en esa atención -> conflicto (unique)
+   * - Transaccional + anti-carreras:
+   *   - Selecciona 1 turno disponible
+   *   - updateMany condicional (id + AVAILABLE + guiaId null)
+   *   - si perdió la carrera, reintenta (hasta N)
+   */
+  static async claimFirstAvailableTurno(
+    atencionId: number,
+    actorUserId: string,
+  ) {
+    // 1) Resolver guiaId desde usuario autenticado
+    const guia = await prisma.guia.findUnique({
+      where: { usuarioId: actorUserId },
+      select: { id: true },
+    });
+
+    if (!guia) {
+      throw new ConflictError(
+        "El usuario autenticado no está registrado como guía",
+      );
+    }
+
+    try {
+      const claimed = await prisma.$transaction(async (tx) => {
+        // 2) Validar atención + gate operativo
+        const atencionGate = await tx.atencion.findUnique({
+          where: { id: atencionId },
+          select: {
+            id: true,
+            status: true,
+            operationalStatus: true,
+            recalada: {
+              select: {
+                status: true,
+                operationalStatus: true,
+              },
+            },
+          },
+        });
+
+        if (!atencionGate) throw new NotFoundError("Atención no encontrada");
+
+        assertOperacionPermitida({
+          atencion: {
+            status: atencionGate.status,
+            operationalStatus: atencionGate.operationalStatus,
+          },
+          recalada: {
+            status: atencionGate.recalada.status,
+            operationalStatus: atencionGate.recalada.operationalStatus,
+          },
+        });
+
+        // 3) Si el guía ya tiene turno en esta atención -> conflicto (mensaje limpio)
+        const existing = await tx.turno.findFirst({
+          where: { atencionId, guiaId: guia.id },
+          select: { id: true },
+        });
+
+        if (existing) {
+          throw new ConflictError(
+            "Ya tienes un turno asignado en esta atención",
+          );
+        }
+
+        // 4) Anti-carreras: reintentos dentro de la misma transacción
+        const maxAttempts = 6;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          const candidate = await tx.turno.findFirst({
+            where: {
+              atencionId,
+              status: "AVAILABLE",
+              guiaId: null,
+            },
+            orderBy: { numero: "asc" },
+            select: { id: true },
+          });
+
+          if (!candidate) {
+            throw new ConflictError(
+              "No hay cupos disponibles para esta atención",
+            );
+          }
+
+          // update condicional: si alguien se lo llevó, count=0
+          const updated = await tx.turno.updateMany({
+            where: {
+              id: candidate.id,
+              status: "AVAILABLE",
+              guiaId: null,
+            },
+            data: {
+              guiaId: guia.id,
+              status: "ASSIGNED",
+            },
+          });
+
+          if (updated.count === 1) {
+            // devolver el turno ya asignado (payload útil)
+            const turno = await tx.turno.findUnique({
+              where: { id: candidate.id },
+              select: {
+                id: true,
+                atencionId: true,
+                numero: true,
+                status: true,
+                guiaId: true,
+                fechaInicio: true,
+                fechaFin: true,
+                checkInAt: true,
+                checkOutAt: true,
+                createdAt: true,
+                updatedAt: true,
+                guia: {
+                  select: {
+                    id: true,
+                    usuario: {
+                      select: {
+                        id: true,
+                        email: true,
+                        nombres: true,
+                        apellidos: true,
+                      },
+                    },
+                  },
+                },
+              },
+            });
+
+            if (!turno)
+              throw new BadRequestError("No fue posible completar el claim");
+
+            return turno;
+          }
+
+          // Si count=0, perdimos la carrera. Reintentamos.
+        }
+
+        throw new ConflictError(
+          "No fue posible tomar cupo: alta concurrencia, intenta de nuevo",
+        );
+      });
+
+      logger.info(
+        { atencionId, actorUserId, guiaId: guia.id, turnoId: claimed.id },
+        "[Atenciones] claim turno",
+      );
+
+      return claimed;
+    } catch (err: any) {
+      // Respaldo por si explota @@unique([atencionId, guiaId])
+      if (err?.code === "P2002") {
+        throw new ConflictError("Ya tienes un turno asignado en esta atención");
+      }
+      throw err;
+    }
   }
 }

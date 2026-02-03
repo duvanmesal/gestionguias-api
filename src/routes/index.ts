@@ -14,6 +14,9 @@ import recaladasRoutes from "./recaladas.routes";
 // 🔹 Atenciones (ventanas operativas)
 import atencionesRoutes from "./atenciones.routes";
 
+// 🔹 Turnos (slots/cupos)
+import turnosRoutes from "./turno.routes";
+
 const router = Router();
 
 // API v1 routes
@@ -34,6 +37,9 @@ v1Router.use("/recaladas", recaladasRoutes);
 // 🔹 Atenciones
 v1Router.use("/atenciones", atencionesRoutes);
 
+// 🔹 Turnos
+v1Router.use("/turnos", turnosRoutes);
+
 // Mount versioned routes
 router.use("/", v1Router);
 
@@ -53,6 +59,7 @@ router.get("/", (_req, res) => {
         buques: `${process.env.API_PREFIX ?? "/api"}/buques`,
         recaladas: `${process.env.API_PREFIX ?? "/api"}/recaladas`,
         atenciones: `${process.env.API_PREFIX ?? "/api"}/atenciones`,
+        turnos: `${process.env.API_PREFIX ?? "/api"}/turnos`,
         health: "/health",
       },
     },

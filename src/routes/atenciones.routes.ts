@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../libs/auth";
-import { requireSupervisor } from "../libs/rbac";
+import { requireSupervisor, requireGuia } from "../libs/rbac";
 import { validate } from "../libs/zod-mw";
 
 import { AtencionController } from "../modules/atenciones/atencion.controller";
@@ -16,6 +16,7 @@ import {
   closeAtencionParamsSchema,
   getAtencionTurnosParamsSchema,
   getAtencionSummaryParamsSchema,
+  claimAtencionParamsSchema,
 } from "../modules/atenciones/atencion.schemas";
 
 const router = Router();
@@ -42,6 +43,18 @@ router.get(
   "/:id/summary",
   validate({ params: getAtencionSummaryParamsSchema }),
   AtencionController.getSummary
+);
+
+/**
+ * POST /atenciones/:id/claim
+ * Autoclaim: toma el primer turno AVAILABLE por numero ASC y lo asigna al guía autenticado
+ * Auth: GUIA / SUPERVISOR / SUPER_ADMIN (pero pensado para GUIA)
+ */
+router.post(
+  "/:id/claim",
+  requireGuia,
+  validate({ params: claimAtencionParamsSchema }),
+  AtencionController.claimTurno
 );
 
 /**

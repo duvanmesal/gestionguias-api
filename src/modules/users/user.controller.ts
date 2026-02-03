@@ -11,6 +11,18 @@ import type { CompleteProfileRequest, UpdateMeRequest } from "./user.schemas";
 import type { RolType, ProfileStatus } from "@prisma/client";
 
 export class UserController {
+  async me(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.userId;
+
+      const user = await userService.getMe(userId);
+
+      res.json(ok(user));
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async list(req: Request, res: Response, next: NextFunction) {
     try {
       /**

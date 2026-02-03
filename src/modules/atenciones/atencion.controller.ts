@@ -16,6 +16,7 @@ import type {
   // NEW for turnero/summary
   GetAtencionTurnosParams,
   GetAtencionSummaryParams,
+  ClaimAtencionParams,
 } from "./atencion.schemas";
 
 export class AtencionController {
@@ -159,6 +160,36 @@ export class AtencionController {
   }
 
   /**
+   * POST /atenciones/:id/claim
+   * Autoclaim: toma el primer turno AVAILABLE por numero ASC y lo asigna al guía autenticado.
+   * Auth: GUIA (requireGuia en routes)
+   */
+  static async claimTurno(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      if (!req.user?.userId) {
+        throw new UnauthorizedError("Authentication required");
+      }
+
+      const params = req.params as unknown as ClaimAtencionParams;
+
+      const item = await AtencionService.claimFirstAvailableTurno(
+        params.id,
+        req.user.userId,
+      );
+
+      res.status(200).json({ data: item, meta: null, error: null });
+      return;
+    } catch (err) {
+      next(err);
+      return;
+    }
+  }
+
+  /**
    * PATCH /atenciones/:id
    * Edita ventana/cupo/descripcion/status admin
    * Auth: SUPERVISOR / SUPER_ADMIN
@@ -176,7 +207,11 @@ export class AtencionController {
       const params = req.params as unknown as UpdateAtencionParams;
       const body = req.body as UpdateAtencionBody;
 
-      const item = await AtencionService.update(params.id, body, req.user.userId);
+      const item = await AtencionService.update(
+        params.id,
+        body,
+        req.user.userId,
+      );
 
       res.status(200).json({ data: item, meta: null, error: null });
       return;

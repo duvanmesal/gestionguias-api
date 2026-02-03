@@ -1454,6 +1454,203 @@ Esto garantiza:
 
 ---
 
+Perfecto, Duvan. Aquí va lo que me pediste:
+
+* ✅ **Agregar la documentación del nuevo endpoint en 2.4.10** (el **claim**)
+* ✅ **Actualizar el 2.5** para incluirlo y dejar claro el alcance operativo (demo “vivo”)
+
+Te lo dejo listo para pegar, siguiendo exactamente el estilo de tu 2.4.9.
+
+---
+
+## ✅ 2.4.10 Autoclaim de cupo (modo guía, operativo “vivo”)
+
+#### POST `/atenciones/:id/claim`
+
+Permite que un usuario con rol **GUIA** (autenticado) pueda **tomar automáticamente un cupo** dentro de una Atención.
+
+Este endpoint replica el “corazón” del sistema viejo (**guiastur**):
+
+* el guía no espera asignación manual
+* toma el primer cupo disponible
+* el sistema asegura que **no haya sobrecupo** incluso con múltiples guías reclamando al mismo tiempo
+
+Está diseñado para operación real y demos que se sienten “vivos”.
+
+---
+
+### Auth requerida
+
+✅ Sí
+
+**Roles permitidos:**
+
+* `GUIA`
+
+> El endpoint está pensado para `GUIA`. Si deseas permitirlo también a `SUPERVISOR/SUPER_ADMIN` (para pruebas), se hace a nivel de routes, pero por contrato se documenta como GUIA-only.
+
+---
+
+### Headers obligatorios
+
+| Header              | Valor            |
+| ------------------- | ---------------- |
+| `Authorization`     | `Bearer <token>` |
+| `X-Client-Platform` | `WEB` / `MOBILE` |
+
+---
+
+### Path params
+
+| Parámetro | Tipo   | Descripción                            |
+| --------- | ------ | -------------------------------------- |
+| `id`      | number | ID de la Atención donde se tomará cupo |
+
+---
+
+### Body
+
+❌ No usa body.
+
+---
+
+### Qué hace exactamente
+
+1. Valida que la Atención exista.
+2. Valida que la operación esté permitida:
+
+   * Atención debe estar activa y operativamente **OPEN**
+   * Recalada debe estar activa y no estar **CANCELED/DEPARTED**
+3. Resuelve el `guiaId` a partir del usuario autenticado.
+4. Verifica que el guía **no tenga ya** un turno asignado en esa atención.
+5. Busca el primer turno disponible:
+
+   * `status = AVAILABLE`
+   * `guiaId = null`
+   * ordenado por `numero ASC`
+6. Lo asigna al guía y lo cambia a:
+
+   * `status = ASSIGNED`
+   * `guiaId = <guia.id>`
+
+---
+
+### Ejemplo de uso
+
+```
+POST /atenciones/8/claim
+```
+
+---
+
+### Respuesta 200 (ejemplo)
+
+```json
+{
+  "data": {
+    "id": 43,
+    "atencionId": 8,
+    "numero": 1,
+    "status": "ASSIGNED",
+    "guiaId": "cml4abcd0000xxx999",
+    "fechaInicio": "2026-02-02T08:00:00.000Z",
+    "fechaFin": "2026-02-02T10:00:00.000Z",
+    "checkInAt": null,
+    "checkOutAt": null,
+    "createdAt": "2026-02-03T00:40:11.010Z",
+    "updatedAt": "2026-02-03T00:45:55.900Z",
+    "guia": {
+      "id": "cml4abcd0000xxx999",
+      "usuario": {
+        "id": "cml30bpm10005ih4da8iukdfz",
+        "email": "guia1@test.com",
+        "nombres": "Carlos",
+        "apellidos": "Rodríguez"
+      }
+    }
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### Cómo se asegura contra carreras (implementación)
+
+Este endpoint es **transaccional** y seguro contra concurrencia:
+
+* Se ejecuta dentro de `prisma.$transaction`.
+* Selecciona un candidato `AVAILABLE` por `numero ASC`.
+* Intenta asignarlo con un `updateMany` condicional:
+
+  * `id = candidato.id`
+  * `status = AVAILABLE`
+  * `guiaId = null`
+
+Si `count = 0`, significa que **otro guía lo tomó antes**, y se reintenta (hasta N intentos).
+
+Esto garantiza:
+
+* **cero sobrecupo**
+* consistencia real en DB
+* operación estable incluso con múltiples guías reclamando al mismo tiempo
+
+---
+
+### Reglas de negocio (implementadas)
+
+1. **La atención debe existir**
+
+* Si no existe → `404`
+
+2. **La atención debe permitir operación**
+
+* Si `operationalStatus = CLOSED` → `409`
+* Si `operationalStatus = CANCELED` → `409`
+
+3. **La recalada debe permitir operación**
+
+* Si recalada `CANCELED` o `DEPARTED` → `409`
+
+4. **Un guía no puede tener 2 turnos en la misma atención**
+
+* Si ya tiene uno → `409` (conflicto)
+
+5. **Si no hay cupos disponibles**
+
+* Si no existe turno `AVAILABLE` → `409`
+
+---
+
+### Validación
+
+* `id` validado con Zod (params)
+* params inválidos → `400`
+* autenticación obligatoria → `401`
+
+---
+
+### Errores posibles
+
+| Código | Motivo                                                          |
+| -----: | --------------------------------------------------------------- |
+|  `401` | Token inválido o ausente                                        |
+|  `400` | Error de validación (params)                                    |
+|  `404` | Atención no encontrada                                          |
+|  `409` | No hay cupos / ya tiene turno / atención o recalada no operable |
+
+---
+
+### Motivo de existencia (por qué existe)
+
+* Replica el flujo real del sistema viejo (guiastur).
+* Reduce carga operativa del supervisor.
+* Hace que el sistema “se sienta vivo” en demos.
+* La fuente de verdad es DB, no contadores en memoria.
+
+---
+
 ## ✅ 2.5 Resultado de la fase (actualización)
 
 ✅ **Fase 1 (Prisma + Seeds) cerrada**
@@ -1469,15 +1666,18 @@ A partir de aquí el módulo Atenciones permite:
 * Cancelar con auditoría
 * Cerrar operativamente sin perder historial
 * Consultar atenciones por recalada para el tab “Atenciones” en detalle de recalada
-* * ✅ Se agregó endpoint base de UI para “turnero”:
+* ✅ Se agregó endpoint base de UI para “turnero” (slots reales):
 
   * `GET /atenciones/:id/turnos`
-* ✅ Se agregó endpoint de resumen operativo:
+* ✅ Se agregó endpoint de resumen operativo (cards/contadores):
 
   * `GET /atenciones/:id/summary`
-* ✅ El front ya puede pintar:
+* ✅ Se agregó endpoint operativo “vivo” (autoclaim por guía):
 
-  * slots reales (sin cálculos)
-  * contadores operativos por estado
-* ✅ Base lista para endpoints de Turnos (asignación, check-in/out, no-show)
+  * `POST /atenciones/:id/claim`
+* ✅ El front ya puede:
 
+  * pintar slots reales (sin cálculos)
+  * pintar contadores por estado
+  * permitir que el guía tome cupo sin intervención del supervisor
+* ✅ Base lista para el módulo Turnos (asignación supervisor, unassign, check-in/out, no-show)
