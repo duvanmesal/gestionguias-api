@@ -259,13 +259,6 @@ Esto cierra la **Fase 1: Prisma + Seeds** del módulo Turnos.
 
 ---
 
-Perfecto, Duvan. Seguimos **ordenados y con narrativa clara** 👌
-Aquí tienes la **documentación completa de la Fase 2 del módulo Turnos (Servicios + Endpoints)**, alineada **1:1 con lo que ya implementaste y decidiste** (assign / unassign / claim), y escrita con nivel **proyecto de grado + sistema real**.
-
-Puedes pegar esto **debajo de la Fase 1** en `turnos.md`.
-
----
-
 # 🎟️ **Módulo Turnos — Endpoints y Lógica de Negocio (Fase 2)**
 
 ## 1. Objetivo de la Fase 2
