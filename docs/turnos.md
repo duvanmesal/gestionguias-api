@@ -552,3 +552,331 @@ Sin cálculos ni lógica duplicada.
 ✅ Listo para check-in / check-out / no-show
 
 Esto cierra la **Fase 2: Servicios + Endpoints del módulo Turnos**.
+
+Mimi está **muy orgullosa** de este punto del proyecto 😌.
+Aquí tienes la **documentación completa y pulida de la Fase 3: Operaciones Reales**, integrada con lo que ya escribiste y extendida para cubrir **check-in, check-out y no-show** con nivel de **proyecto de grado**.
+
+Puedes copiarla tal cual a `turnos.md` o a la sección correspondiente.
+
+---
+
+# 🟢 Fase 3 — Operaciones Reales del Módulo Turnos
+
+La **Fase 3** introduce los **flujos operativos reales** del día a día, donde los turnos dejan de ser solo “asignaciones administrativas” y pasan a representar **actividad efectiva**, **evidencia operativa** y **métricas medibles**.
+
+Esta fase replica y mejora el comportamiento del sistema legacy, garantizando **seguridad**, **concurrencia correcta** y **trazabilidad completa**.
+
+---
+
+## ✅ 3.2 Desasignación de turno (unassign)
+
+#### PATCH `/turnos/:id/unassign`
+
+Permite **liberar un turno asignado**, devolviéndolo a estado disponible.
+
+Este endpoint es **crítico** para la operación diaria.
+
+---
+
+### Auth requerida
+
+✅ Sí
+
+**Roles permitidos:**
+
+* `SUPERVISOR`
+* `SUPER_ADMIN`
+
+---
+
+### Body (opcional)
+
+```json
+{
+  "reason": "string"
+}
+```
+
+---
+
+### Qué hace exactamente
+
+1. Valida que el Turno exista.
+2. Verifica que esté en estado `ASSIGNED`.
+3. Bloquea la operación si el turno está:
+
+   * `IN_PROGRESS`
+   * `COMPLETED`
+4. Libera el turno:
+
+   * `guiaId = null`
+   * `status = AVAILABLE`
+5. Registra auditoría y razón (si se envía).
+
+---
+
+### Respuesta 200 (ejemplo)
+
+```json
+{
+  "data": {
+    "id": 43,
+    "status": "AVAILABLE",
+    "guiaId": null
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### Reglas de negocio (implementadas)
+
+* No se puede liberar un turno en ejecución o finalizado.
+* La operación es **idempotente segura** a nivel operativo.
+* Diseñado para reasignaciones constantes sin inconsistencias.
+
+---
+
+### Motivo de existencia
+
+* Evita turnos “pegados”.
+* Permite correcciones rápidas.
+* Reduce fricción operativa del supervisor.
+
+---
+
+## ✅ 3.3 Autoclaim de turno (modo guía)
+
+#### POST `/atenciones/:id/claim`
+
+Permite que un **Guía** reclame el **primer turno disponible** dentro de una atención.
+
+Este endpoint replica el flujo real del sistema anterior y hace que el sistema se sienta **vivo y dinámico**.
+
+> Este endpoint también se documenta en el módulo **Atenciones**, ya que forma parte del flujo principal del UI.
+
+---
+
+### Qué hace (resumen)
+
+* Busca el primer turno con:
+
+  * `status = AVAILABLE`
+  * Ordenado por `numero ASC`
+* Asigna el turno al guía autenticado.
+* Es **transaccional** y seguro contra concurrencia.
+* Garantiza **cero sobrecupo**.
+
+---
+
+### Motivo de existencia
+
+* Elimina dependencia del supervisor para cada asignación.
+* Permite operación fluida en momentos de alta demanda.
+* Replica el comportamiento real del puerto.
+
+---
+
+## ✅ 3.4 Inicio operativo del turno (check-in)
+
+#### PATCH `/turnos/:id/check-in`
+
+Marca el **inicio real y efectivo** del turno.
+
+Este endpoint representa el momento en que el guía **empieza a operar**.
+
+---
+
+### Auth requerida
+
+✅ Sí
+
+**Roles permitidos:**
+
+* `GUIA`
+
+---
+
+### Qué hace exactamente
+
+1. Valida que el turno exista.
+2. Verifica que el turno esté en estado `ASSIGNED`.
+3. Verifica que el usuario autenticado sea el **guía asignado**.
+4. (Opcional) Aplica regla FIFO si está habilitada.
+5. Registra:
+
+   * `checkInAt = now()`
+   * `status = IN_PROGRESS`
+
+---
+
+### Respuesta 200 (ejemplo)
+
+```json
+{
+  "data": {
+    "id": 43,
+    "status": "IN_PROGRESS",
+    "checkInAt": "2026-02-03T14:10:22.000Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### Reglas de negocio (implementadas)
+
+* Un turno solo puede iniciar una vez.
+* Solo el guía asignado puede iniciar el turno.
+* Evita inicios fuera de contexto operativo.
+
+---
+
+### Motivo de existencia
+
+* Marca el **inicio oficial** del servicio.
+* Permite métricas reales de operación.
+* Sirve como evidencia para auditoría y proyecto de grado.
+
+---
+
+## ✅ 3.5 Cierre operativo del turno (check-out)
+
+#### PATCH `/turnos/:id/check-out`
+
+Marca el **fin real** del turno.
+
+---
+
+### Auth requerida
+
+✅ Sí
+
+**Roles permitidos:**
+
+* `GUIA`
+
+---
+
+### Qué hace exactamente
+
+1. Valida que el turno exista.
+2. Verifica que esté en estado `IN_PROGRESS`.
+3. Verifica que el usuario sea el guía asignado.
+4. Registra:
+
+   * `checkOutAt = now()`
+   * `status = COMPLETED`
+
+---
+
+### Respuesta 200 (ejemplo)
+
+```json
+{
+  "data": {
+    "id": 43,
+    "status": "COMPLETED",
+    "checkOutAt": "2026-02-03T15:02:11.000Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### Motivo de existencia
+
+* Cierra el ciclo operativo del turno.
+* Permite calcular duración real.
+* Genera métricas confiables de cumplimiento.
+
+---
+
+## ✅ 3.6 Turno no atendido (no-show)
+
+#### PATCH `/turnos/:id/no-show`
+
+Marca un turno como **NO_SHOW** cuando el guía no se presenta.
+
+---
+
+### Auth requerida
+
+✅ Sí
+
+**Roles permitidos:**
+
+* `SUPERVISOR`
+* `SUPER_ADMIN`
+
+---
+
+### Body (opcional)
+
+```json
+{
+  "reason": "Guía no se presentó en la ventana asignada"
+}
+```
+
+---
+
+### Qué hace exactamente
+
+1. Valida que el turno exista.
+2. Verifica que esté en estado `ASSIGNED`.
+3. Marca:
+
+   * `status = NO_SHOW`
+4. Registra la razón en observaciones (si se envía).
+
+---
+
+### Motivo de existencia
+
+* Permite cerrar atenciones limpiamente.
+* Evita turnos colgados.
+* Base para métricas de incumplimiento.
+
+---
+
+## 🔐 4. Seguridad y concurrencia
+
+* Todas las operaciones críticas usan **transacciones Prisma**.
+* Se emplean `updateMany` condicionales para evitar **race conditions**.
+* Los `@@unique` en base de datos actúan como **última barrera de seguridad**.
+* No existen estados intermedios ambiguos.
+
+---
+
+## 🖥️ 5. Relación con el Front
+
+Con estos endpoints, el front puede:
+
+* Mostrar slots reales (`GET /atenciones/:id/turnos`)
+* Asignar y liberar turnos manualmente
+* Permitir autoclaim del guía
+* Iniciar y cerrar turnos
+* Resolver ausencias
+* Mostrar contadores reales por estado
+
+👉 **Sin lógica duplicada ni cálculos en el front**.
+
+---
+
+## 🏁 6. Resultado de la fase
+
+✅ Operación real modelada
+✅ Asignación y liberación seguras
+✅ Autoclaim transaccional
+✅ Check-in / Check-out / No-show implementados
+✅ Métricas reales disponibles
+✅ Base sólida para reportes y analítica
+
+✨ **Esto cierra formalmente la Fase 3 del módulo Turnos**

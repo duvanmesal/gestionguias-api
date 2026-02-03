@@ -94,6 +94,31 @@ function assertOperacionPermitida(gate: OperativeGate) {
   }
 }
 
+/**
+ * FIFO opcional para permitir check-in únicamente al “siguiente” turno por orden (numero).
+ * Apagado por defecto para no bloquear operación mientras ajustas UX/flujo.
+ */
+const ENFORCE_FIFO_CHECKIN = false;
+
+async function getActorGuiaIdOrThrow(actorUserId: string): Promise<string> {
+  const guia = await prisma.guia.findFirst({
+    where: { usuarioId: actorUserId },
+    select: { id: true },
+  });
+
+  if (!guia) {
+    throw new ConflictError("El usuario autenticado no está asociado a un guía");
+  }
+
+  return guia.id;
+}
+
+function buildNoShowObservacion(reason?: string): string {
+  const base = "NO_SHOW";
+  if (!reason?.trim()) return base;
+  return `${base}: ${reason.trim()}`;
+}
+
 export class TurnoService {
   /**
    * PATCH /turnos/:id/assign
@@ -254,6 +279,296 @@ export class TurnoService {
         reason,
       },
       "[Turnos] unassigned",
+    );
+
+    return updated;
+  }
+
+  /**
+   * PATCH /turnos/:id/check-in
+   * Reglas:
+   * - Solo si status = ASSIGNED
+   * - Solo el guía asignado (usuario autenticado -> guiaId) puede hacer check-in
+   * - checkInAt = now()
+   * - status = IN_PROGRESS
+   * - Opcional FIFO (enforce por numero dentro de la misma atención)
+   */
+  static async checkIn(turnoId: number, actorUserId: string) {
+    const actorGuiaId = await getActorGuiaIdOrThrow(actorUserId);
+
+    // Cargar turno + gate operativo
+    const current = await prisma.turno.findUnique({
+      where: { id: turnoId },
+      select: {
+        id: true,
+        atencionId: true,
+        guiaId: true,
+        numero: true,
+        status: true,
+        checkInAt: true,
+        atencion: {
+          select: {
+            status: true,
+            operationalStatus: true,
+            recalada: { select: { status: true, operationalStatus: true } },
+          },
+        },
+      },
+    });
+
+    if (!current) throw new NotFoundError("Turno no encontrado");
+
+    assertOperacionPermitida({
+      atencion: {
+        status: current.atencion.status,
+        operationalStatus: current.atencion.operationalStatus,
+      },
+      recalada: {
+        status: current.atencion.recalada.status,
+        operationalStatus: current.atencion.recalada.operationalStatus,
+      },
+    });
+
+    if (current.status !== "ASSIGNED") {
+      throw new ConflictError("Solo se puede hacer check-in si el turno está ASSIGNED");
+    }
+
+    if (!current.guiaId) {
+      throw new ConflictError("El turno no tiene guía asignado");
+    }
+
+    if (current.guiaId !== actorGuiaId) {
+      throw new ConflictError("No puedes hacer check-in en un turno asignado a otro guía");
+    }
+
+    if (ENFORCE_FIFO_CHECKIN) {
+      const prevPending = await prisma.turno.findFirst({
+        where: {
+          atencionId: current.atencionId,
+          status: "ASSIGNED",
+          // “antes” en orden
+          numero: { lt: current.numero },
+        },
+        select: { id: true, numero: true },
+        orderBy: { numero: "asc" },
+      });
+
+      if (prevPending) {
+        throw new ConflictError(
+          "No puedes hacer check-in aún: hay un turno anterior pendiente (FIFO)",
+        );
+      }
+    }
+
+    const now = new Date();
+
+    const updated = await prisma.$transaction(async (tx) => {
+      // anti-carreras: solo si sigue ASSIGNED y sigue siendo del mismo guía
+      const result = await tx.turno.updateMany({
+        where: {
+          id: turnoId,
+          status: "ASSIGNED",
+          guiaId: actorGuiaId,
+        },
+        data: {
+          checkInAt: now,
+          status: "IN_PROGRESS",
+        },
+      });
+
+      if (result.count !== 1) {
+        throw new ConflictError("No fue posible hacer check-in: el turno ya no cumple condiciones");
+      }
+
+      return tx.turno.findUnique({
+        where: { id: turnoId },
+        select: turnoSelect,
+      });
+    });
+
+    if (!updated) throw new BadRequestError("No fue posible hacer check-in");
+
+    logger.info(
+      { turnoId, atencionId: updated.atencionId, guiaId: actorGuiaId, actorUserId },
+      "[Turnos] check-in",
+    );
+
+    return updated;
+  }
+
+  /**
+   * PATCH /turnos/:id/check-out
+   * Reglas:
+   * - Solo si status = IN_PROGRESS
+   * - Solo el guía asignado puede hacer check-out
+   * - checkOutAt = now()
+   * - status = COMPLETED
+   */
+  static async checkOut(turnoId: number, actorUserId: string) {
+    const actorGuiaId = await getActorGuiaIdOrThrow(actorUserId);
+
+    const current = await prisma.turno.findUnique({
+      where: { id: turnoId },
+      select: {
+        id: true,
+        atencionId: true,
+        guiaId: true,
+        status: true,
+        checkOutAt: true,
+        atencion: {
+          select: {
+            status: true,
+            operationalStatus: true,
+            recalada: { select: { status: true, operationalStatus: true } },
+          },
+        },
+      },
+    });
+
+    if (!current) throw new NotFoundError("Turno no encontrado");
+
+    assertOperacionPermitida({
+      atencion: {
+        status: current.atencion.status,
+        operationalStatus: current.atencion.operationalStatus,
+      },
+      recalada: {
+        status: current.atencion.recalada.status,
+        operationalStatus: current.atencion.recalada.operationalStatus,
+      },
+    });
+
+    if (current.status !== "IN_PROGRESS") {
+      throw new ConflictError("Solo se puede hacer check-out si el turno está IN_PROGRESS");
+    }
+
+    if (!current.guiaId) {
+      throw new ConflictError("El turno no tiene guía asignado");
+    }
+
+    if (current.guiaId !== actorGuiaId) {
+      throw new ConflictError("No puedes hacer check-out en un turno asignado a otro guía");
+    }
+
+    const now = new Date();
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.turno.updateMany({
+        where: {
+          id: turnoId,
+          status: "IN_PROGRESS",
+          guiaId: actorGuiaId,
+        },
+        data: {
+          checkOutAt: now,
+          status: "COMPLETED",
+        },
+      });
+
+      if (result.count !== 1) {
+        throw new ConflictError(
+          "No fue posible hacer check-out: el turno ya no cumple condiciones",
+        );
+      }
+
+      return tx.turno.findUnique({
+        where: { id: turnoId },
+        select: turnoSelect,
+      });
+    });
+
+    if (!updated) throw new BadRequestError("No fue posible hacer check-out");
+
+    logger.info(
+      { turnoId, atencionId: updated.atencionId, guiaId: actorGuiaId, actorUserId },
+      "[Turnos] check-out",
+    );
+
+    return updated;
+  }
+
+  /**
+   * PATCH /turnos/:id/no-show
+   * Reglas:
+   * - Solo si status = ASSIGNED
+   * - status = NO_SHOW
+   * - reason opcional (guardamos en observaciones para no tocar Prisma ahora)
+   */
+  static async noShow(turnoId: number, reason: string | undefined, actorUserId: string) {
+    const current = await prisma.turno.findUnique({
+      where: { id: turnoId },
+      select: {
+        id: true,
+        atencionId: true,
+        guiaId: true,
+        status: true,
+        observaciones: true,
+        atencion: {
+          select: {
+            status: true,
+            operationalStatus: true,
+            recalada: { select: { status: true, operationalStatus: true } },
+          },
+        },
+      },
+    });
+
+    if (!current) throw new NotFoundError("Turno no encontrado");
+
+    assertOperacionPermitida({
+      atencion: {
+        status: current.atencion.status,
+        operationalStatus: current.atencion.operationalStatus,
+      },
+      recalada: {
+        status: current.atencion.recalada.status,
+        operationalStatus: current.atencion.recalada.operationalStatus,
+      },
+    });
+
+    if (current.status !== "ASSIGNED") {
+      throw new ConflictError("Solo se puede marcar NO_SHOW si el turno está ASSIGNED");
+    }
+
+    // Guardamos razón en observaciones (sin migración)
+    const extra = buildNoShowObservacion(reason);
+    const mergedObs = current.observaciones?.trim()
+      ? `${current.observaciones.trim()} | ${extra}`
+      : extra;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.turno.updateMany({
+        where: {
+          id: turnoId,
+          status: "ASSIGNED",
+        },
+        data: {
+          status: "NO_SHOW",
+          observaciones: mergedObs,
+        },
+      });
+
+      if (result.count !== 1) {
+        throw new ConflictError("No fue posible marcar NO_SHOW: el turno ya no cumple condiciones");
+      }
+
+      return tx.turno.findUnique({
+        where: { id: turnoId },
+        select: turnoSelect,
+      });
+    });
+
+    if (!updated) throw new BadRequestError("No fue posible marcar NO_SHOW");
+
+    logger.info(
+      {
+        turnoId,
+        atencionId: updated.atencionId,
+        guiaId: current.guiaId,
+        actorUserId,
+        reason,
+      },
+      "[Turnos] no-show",
     );
 
     return updated;
