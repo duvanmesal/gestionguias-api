@@ -43,6 +43,20 @@ export const getAtencionByIdParamsSchema = z.object({
 });
 
 /**
+ * GET /atenciones/:id/turnos
+ */
+export const getAtencionTurnosParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+/**
+ * GET /atenciones/:id/summary
+ */
+export const getAtencionSummaryParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+/**
  * PATCH /atenciones/:id
  * Campos opcionales para edición de planificación.
  */
@@ -92,6 +106,9 @@ export const closeAtencionParamsSchema = z.object({
 export type CreateAtencionBody = z.infer<typeof createAtencionSchema>;
 export type ListAtencionesQuery = z.infer<typeof listAtencionesQuerySchema>;
 export type GetAtencionByIdParams = z.infer<typeof getAtencionByIdParamsSchema>;
+
+export type GetAtencionTurnosParams = z.infer<typeof getAtencionTurnosParamsSchema>;
+export type GetAtencionSummaryParams = z.infer<typeof getAtencionSummaryParamsSchema>;
 
 export type UpdateAtencionParams = z.infer<typeof updateAtencionParamsSchema>;
 export type UpdateAtencionBody = z.infer<typeof updateAtencionBodySchema>;

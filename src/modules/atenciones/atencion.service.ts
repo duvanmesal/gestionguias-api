@@ -90,6 +90,16 @@ function toISO(d?: Date) {
   return d ? d.toISOString() : undefined;
 }
 
+export type AtencionTurnosSummary = {
+  turnosTotal: number;
+  availableCount: number;
+  assignedCount: number;
+  inProgressCount: number;
+  completedCount: number;
+  canceledCount: number;
+  noShowCount: number;
+};
+
 export class AtencionService {
   /**
    * Crea una Atención (ventana + cupo).
@@ -499,5 +509,116 @@ export class AtencionService {
     logger.info({ atencionId: id, actorUserId }, "[Atenciones] closed");
 
     return updated;
+  }
+
+  /**
+   * GET /atenciones/:id/turnos
+   * Turnero UI: lista slots por número ASC (sin inflar payload).
+   *
+   * Incluye recomendado:
+   * id, numero, status, guiaId, checkInAt, checkOutAt, canceledAt
+   * opcional: mini info del guía si está asignado (nombre/email)
+   */
+  static async listTurnosByAtencionId(atencionId: number) {
+    // 1) validar atención existe (para 404 claro)
+    const atencion = await prisma.atencion.findUnique({
+      where: { id: atencionId },
+      select: { id: true },
+    });
+    if (!atencion) throw new NotFoundError("Atención no encontrada");
+
+    // 2) traer turnos
+    const items = await prisma.turno.findMany({
+      where: { atencionId },
+      orderBy: { numero: "asc" },
+      select: {
+        id: true,
+        numero: true,
+        status: true,
+        guiaId: true,
+        checkInAt: true,
+        checkOutAt: true,
+        canceledAt: true,
+        guia: {
+          select: {
+            id: true,
+            usuario: {
+              select: {
+                id: true,
+                email: true,
+                nombres: true,
+                apellidos: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // 3) devolver plano (sin nesting raro)
+    return items.map((t) => ({
+      id: t.id,
+      numero: t.numero,
+      status: t.status,
+      guiaId: t.guiaId,
+      checkInAt: t.checkInAt,
+      checkOutAt: t.checkOutAt,
+      canceledAt: t.canceledAt,
+      guia: t.guia
+        ? {
+            id: t.guia.id,
+            email: t.guia.usuario.email,
+            nombres: t.guia.usuario.nombres,
+            apellidos: t.guia.usuario.apellidos,
+          }
+        : null,
+    }));
+  }
+
+  /**
+   * GET /atenciones/:id/summary
+   * Resumen de cupos por estado.
+   *
+   * Devuelve:
+   * turnosTotal,
+   * availableCount, assignedCount, inProgressCount, completedCount, canceledCount, noShowCount
+   */
+  static async getSummaryByAtencionId(atencionId: number): Promise<AtencionTurnosSummary> {
+    // 1) validar atención existe y obtener turnosTotal
+    const atencion = await prisma.atencion.findUnique({
+      where: { id: atencionId },
+      select: { id: true, turnosTotal: true },
+    });
+    if (!atencion) throw new NotFoundError("Atención no encontrada");
+
+    // 2) contar por status (usa groupBy para 1 sola query)
+    // Nota: status es enum del modelo Turno. No lo tipamos explícitamente aquí para no pelear con TS.
+    const grouped = await prisma.turno.groupBy({
+      by: ["status"],
+      where: { atencionId },
+      _count: { _all: true },
+    });
+
+    const counts = new Map<string, number>();
+    for (const g of grouped) {
+      counts.set(String(g.status), g._count._all);
+    }
+
+    // Helper: lee count o 0
+    const c = (key: string) => counts.get(key) ?? 0;
+
+    // Mapeo esperado por tu UI
+    // Ajusta estos strings si tu enum de TurnoStatus se llama distinto.
+    const summary: AtencionTurnosSummary = {
+      turnosTotal: atencion.turnosTotal,
+      availableCount: c("AVAILABLE"),
+      assignedCount: c("ASSIGNED"),
+      inProgressCount: c("IN_PROGRESS"),
+      completedCount: c("COMPLETED"),
+      canceledCount: c("CANCELED"),
+      noShowCount: c("NO_SHOW"),
+    };
+
+    return summary;
   }
 }

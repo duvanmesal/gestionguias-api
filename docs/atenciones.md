@@ -1043,28 +1043,418 @@ Cancela una atención operativa conservando historia, con auditoría.
 
 ---
 
-### 2.4.7 Cierre de atención (finalización operativa)
+Listo Duvan. A partir de tu documento, tú ya tienes **hasta 2.4.6** (y 2.4.7 era `PATCH /atenciones/:id/close`).
+Ahora vamos a **modificar 2.4.7** y agregar **2.4.8 y 2.4.9** para los nuevos endpoints:
 
-#### PATCH `/atenciones/:id/close`
+* `GET /atenciones/:id/turnos`
+* `GET /atenciones/:id/summary`
 
-Cierra una atención, marcándola como finalizada sin borrarla.
-
-**Auth requerida:** ✅ Sí (**SUPERVISOR / SUPER_ADMIN**)
-
-**Body:** vacío
-
-**Efectos:**
-
-* `operationalStatus` → `CLOSED`
-
-**Reglas:**
-
-* Si está cancelada: conflicto/validación
-* Si ya está cerrada: responde exitoso (idempotente)
+Abajo te dejo **solo los apartados que debes agregar/modificar** desde **2.4.7 en adelante**, en el mismo estilo “fase 2” que vienes usando.
 
 ---
 
-## 7. Resultado de la fase
+## ✅ 2.4.7 Cierre de atención (finalización operativa)
+
+#### PATCH `/atenciones/:id/close`
+
+Cierra una atención, marcándola como finalizada operativamente.
+
+Este endpoint **no elimina datos** y se usa para indicar que la ventana terminó y ya no debe usarse para operaciones activas.
+
+---
+
+### Auth requerida
+
+✅ Sí
+
+**Roles permitidos:**
+
+* `SUPER_ADMIN`
+* `SUPERVISOR`
+
+> La restricción se aplica con `requireSupervisor` en routes.
+
+---
+
+### Headers obligatorios
+
+| Header              | Valor            |
+| ------------------- | ---------------- |
+| `Authorization`     | `Bearer <token>` |
+| `X-Client-Platform` | `WEB` / `MOBILE` |
+
+---
+
+### Path params
+
+| Parámetro | Tipo   | Descripción                |
+| --------- | ------ | -------------------------- |
+| `id`      | number | ID de la Atención a cerrar |
+
+---
+
+### Body
+
+❌ No requiere body.
+
+---
+
+### Reglas de negocio (implementadas)
+
+1. **La atención debe existir**
+
+* Si no existe → `404 Not Found`.
+
+2. **No se puede cerrar si está cancelada**
+
+* Si `operationalStatus = CANCELED` → `409 Conflict`.
+
+3. **Idempotencia**
+
+* Si ya está `CLOSED`, el endpoint responde con éxito devolviendo la entidad actual.
+
+4. **Efecto del cierre**
+
+* `operationalStatus` pasa a `CLOSED`.
+
+---
+
+### Respuesta 200 (ejemplo)
+
+```json
+{
+  "data": {
+    "id": 10,
+    "operationalStatus": "CLOSED",
+    "updatedAt": "2026-02-02T18:50:00.000Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+> Nota: en tu implementación se devuelve la entidad completa con `atencionSelect` (incluye relaciones), no solo los campos mostrados arriba.
+
+---
+
+### Errores posibles
+
+| Código | Motivo                               |
+| -----: | ------------------------------------ |
+|  `401` | Token inválido o ausente             |
+|  `403` | Rol sin permisos (requireSupervisor) |
+|  `404` | Atención no encontrada               |
+|  `409` | No se puede cerrar si está cancelada |
+
+---
+
+### Motivo de existencia
+
+* Marcar una atención como “histórica” sin borrar datos.
+* Evitar acciones sobre ventanas que ya cerraron.
+* Preparar lógica futura de Turnos (por ejemplo: impedir check-in si la atención está cerrada).
+
+---
+
+## ✅ 2.4.8 Turnero UI: listado de slots de una atención
+
+#### GET `/atenciones/:id/turnos`
+
+Este endpoint devuelve el “**turnero**” de una atención:
+una lista de todos los **slots (turnos)** materializados para esa atención, ordenados por `numero ASC`.
+
+📌 Este es el endpoint base para la pantalla del front:
+**“cupos/turnero de la atención”**.
+
+---
+
+### Auth requerida
+
+✅ Sí
+
+**Roles permitidos:**
+
+* `SUPER_ADMIN`
+* `SUPERVISOR`
+* `GUIA`
+
+---
+
+### Headers obligatorios
+
+| Header              | Valor            |
+| ------------------- | ---------------- |
+| `Authorization`     | `Bearer <token>` |
+| `X-Client-Platform` | `WEB` / `MOBILE` |
+
+---
+
+### Path params
+
+| Parámetro | Tipo   | Descripción                             |
+| --------- | ------ | --------------------------------------- |
+| `id`      | number | ID de la Atención propietaria de turnos |
+
+---
+
+### Qué devuelve
+
+Lista ordenada de turnos con los campos recomendados para UI:
+
+* `id`
+* `numero`
+* `status`
+* `guiaId`
+* `checkInAt`
+* `checkOutAt`
+* `canceledAt`
+
+Y opcionalmente:
+
+* mini info del guía (si hay asignación), recomendado:
+
+  * `email`, `nombres`, `apellidos`
+
+---
+
+### Ejemplo de uso
+
+```
+GET /atenciones/10/turnos
+```
+
+---
+
+### Respuesta 200 (ejemplo)
+
+```json
+{
+  "data": [
+    {
+      "id": 501,
+      "numero": 1,
+      "status": "AVAILABLE",
+      "guiaId": null,
+      "checkInAt": null,
+      "checkOutAt": null,
+      "canceledAt": null,
+      "guia": null
+    },
+    {
+      "id": 502,
+      "numero": 2,
+      "status": "ASSIGNED",
+      "guiaId": "g-123",
+      "checkInAt": null,
+      "checkOutAt": null,
+      "canceledAt": null,
+      "guia": {
+        "id": "g-123",
+        "email": "guia@test.com",
+        "nombres": "Ana",
+        "apellidos": "Pérez"
+      }
+    }
+  ],
+  "meta": null,
+  "error": null
+}
+```
+
+> Nota: si aún no existe asignación de guía (Fase 3/Turnos), `guiaId` y `guia` serán `null`, pero el endpoint sigue siendo útil para pintar los cupos.
+
+---
+
+### Reglas de negocio (implementadas)
+
+1. **La atención debe existir**
+
+* Si `id` no existe → `404 Not Found`.
+* Esto evita devolver “turnero vacío” por error de ID.
+
+2. **Orden fijo**
+
+* Los turnos siempre se devuelven ordenados por:
+
+  * `numero ASC`
+
+3. **El front NO calcula cupos**
+
+* El front no infiere turnos por `turnosTotal`.
+* Si se ajusta el cupo (PATCH /atenciones/:id), este endpoint refleja los cambios reales.
+
+---
+
+### Validación
+
+* `id` validado por Zod como:
+
+  * integer positivo
+* errores de validación → `400`
+
+---
+
+### Errores posibles
+
+| Código | Motivo                       |
+| -----: | ---------------------------- |
+|  `401` | Token inválido o ausente     |
+|  `400` | Error de validación (params) |
+|  `404` | Atención no encontrada       |
+
+---
+
+### Motivo de existencia (por qué existe)
+
+* Es la pantalla base del front: **“cupos/turnero”**.
+* Evita que el front “invente” cupos con cálculos.
+* Permite UI fluida para asignar/desasignar en Fase 3 sin depender de múltiples endpoints.
+
+---
+
+## ✅ 2.4.9 Resumen de cupos por estado (cards/contadores)
+
+#### GET `/atenciones/:id/summary`
+
+Devuelve un resumen rápido de la atención, agregando los turnos por estado para renderizar:
+
+* contadores tipo cards
+* indicadores de ocupación
+* estado operativo general de la atención
+
+Está diseñado para reducir llamadas y lógica en el front.
+
+---
+
+### Auth requerida
+
+✅ Sí
+
+**Roles permitidos:**
+
+* `SUPER_ADMIN`
+* `SUPERVISOR`
+* `GUIA`
+
+---
+
+### Headers obligatorios
+
+| Header              | Valor            |
+| ------------------- | ---------------- |
+| `Authorization`     | `Bearer <token>` |
+| `X-Client-Platform` | `WEB` / `MOBILE` |
+
+---
+
+### Path params
+
+| Parámetro | Tipo   | Descripción                 |
+| --------- | ------ | --------------------------- |
+| `id`      | number | ID de la Atención a resumir |
+
+---
+
+### Qué devuelve
+
+Campos definidos por contrato:
+
+* `turnosTotal`
+* `availableCount`
+* `assignedCount`
+* `inProgressCount`
+* `completedCount`
+* `canceledCount`
+* `noShowCount`
+
+---
+
+### Ejemplo de uso
+
+```
+GET /atenciones/10/summary
+```
+
+---
+
+### Respuesta 200 (ejemplo)
+
+```json
+{
+  "data": {
+    "turnosTotal": 6,
+    "availableCount": 4,
+    "assignedCount": 1,
+    "inProgressCount": 1,
+    "completedCount": 0,
+    "canceledCount": 0,
+    "noShowCount": 0
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### Cómo se calcula (implementación)
+
+* Se obtiene `turnosTotal` desde `Atencion.turnosTotal`
+* Los demás contadores se calculan con una agregación por estado usando Prisma (`groupBy`):
+
+  * se agrupa por `Turno.status`
+  * se mapea cada estado al contador correspondiente
+
+Esto garantiza:
+
+* 1 sola consulta de agregación (eficiente)
+* consistencia con los estados reales en DB
+
+---
+
+### Reglas de negocio (implementadas)
+
+1. **La atención debe existir**
+
+* Si no existe → `404`
+
+2. **Consistencia con DB**
+
+* Los contadores reflejan estados reales, no inferencias.
+
+3. **Preparado para reportes**
+
+* Cuando Turnos crezca, este endpoint sirve como base para métricas y reportes sin tocar el front.
+
+---
+
+### Validación
+
+* `id` validado con Zod
+* params inválidos → `400`
+
+---
+
+### Errores posibles
+
+| Código | Motivo                       |
+| -----: | ---------------------------- |
+|  `401` | Token inválido o ausente     |
+|  `400` | Error de validación (params) |
+|  `404` | Atención no encontrada       |
+
+---
+
+### Motivo de existencia (por qué existe)
+
+* UI rápida (cards/contadores) sin múltiples llamadas.
+* Reduce lógica del front.
+* Base del “estado operativo” de atención.
+* Útil para reportes y control de operación.
+
+---
+
+## ✅ 2.5 Resultado de la fase (actualización)
 
 ✅ **Fase 1 (Prisma + Seeds) cerrada**
 ✅ **Fase 2 (Servicios + Endpoints) para Atenciones implementada y validada en Postman**
@@ -1079,3 +1469,15 @@ A partir de aquí el módulo Atenciones permite:
 * Cancelar con auditoría
 * Cerrar operativamente sin perder historial
 * Consultar atenciones por recalada para el tab “Atenciones” en detalle de recalada
+* * ✅ Se agregó endpoint base de UI para “turnero”:
+
+  * `GET /atenciones/:id/turnos`
+* ✅ Se agregó endpoint de resumen operativo:
+
+  * `GET /atenciones/:id/summary`
+* ✅ El front ya puede pintar:
+
+  * slots reales (sin cálculos)
+  * contadores operativos por estado
+* ✅ Base lista para endpoints de Turnos (asignación, check-in/out, no-show)
+

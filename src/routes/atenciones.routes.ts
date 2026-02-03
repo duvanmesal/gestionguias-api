@@ -14,11 +14,35 @@ import {
   cancelAtencionParamsSchema,
   cancelAtencionBodySchema,
   closeAtencionParamsSchema,
+  getAtencionTurnosParamsSchema,
+  getAtencionSummaryParamsSchema,
 } from "../modules/atenciones/atencion.schemas";
 
 const router = Router();
 
 router.use(requireAuth);
+
+/**
+ * GET /atenciones/:id/turnos
+ * Lista todos los slots (turnos) de una atención, ordenados por numero ASC.
+ * Auth: GUIA / SUPERVISOR / SUPER_ADMIN
+ */
+router.get(
+  "/:id/turnos",
+  validate({ params: getAtencionTurnosParamsSchema }),
+  AtencionController.listTurnos
+);
+
+/**
+ * GET /atenciones/:id/summary
+ * Resumen de cupos por estado (para UI rápida: cards/contadores)
+ * Auth: GUIA / SUPERVISOR / SUPER_ADMIN
+ */
+router.get(
+  "/:id/summary",
+  validate({ params: getAtencionSummaryParamsSchema }),
+  AtencionController.getSummary
+);
 
 /**
  * GET /atenciones/:id
