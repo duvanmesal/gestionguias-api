@@ -47,29 +47,23 @@ async function resolveUserIdOrThrow(email: string) {
   return user.id
 }
 
-async function resolveSupervisorIdOrThrow(emailSupervisor: string) {
-  const user = await prisma.usuario.findUnique({ where: { email: emailSupervisor } })
-  if (!user) throw new Error(`No existe usuario con email=${emailSupervisor}`)
-  const sup = await prisma.supervisor.findUnique({ where: { usuarioId: user.id } })
-  if (!sup) throw new Error(`No existe supervisor para usuarioId=${user.id} (email=${emailSupervisor})`)
-  return sup.id
-}
-
-// Genera código estilo RA-YYYY-000123 (determinístico)
-function buildCodigoRecalada(fechaLlegada: Date, id: number) {
-  const year = fechaLlegada.getUTCFullYear()
-  const seq = String(id).padStart(6, "0")
-  return `RA-${year}-${seq}`
-}
-
-// Crea un código temporal ÚNICO (para cumplir @unique en insert)
-function tempCodigoRecalada() {
-  return `TEMP-${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
-
 // Helper: suma horas
 function addHours(date: Date, hours: number) {
   return new Date(date.getTime() + hours * 60 * 60 * 1000)
+}
+
+// ✅ Colombia (Bogotá) es UTC-05:00.
+// Construye una Date en UTC a partir de una fecha/hora local de Bogotá.
+function bogotaDate(y: number, m: number, d: number, hh: number, mm = 0, ss = 0) {
+  // Bogotá = UTC-5, por tanto UTC = local + 5h
+  return new Date(Date.UTC(y, m - 1, d, hh + 5, mm, ss))
+}
+
+function formatYMD(date: Date) {
+  const y = date.getUTCFullYear()
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0")
+  const d = String(date.getUTCDate()).padStart(2, "0")
+  return `${y}${m}${d}`
 }
 
 // ✅ Helper: normaliza código de buque
@@ -92,16 +86,12 @@ async function main() {
   await fixShipsPaisIdIfNull()
 
   if (NODE_ENV === "development") {
-    await upsertTestUsers()
+    // HOY: 11/02/2026 12:30 (Bogotá)
+    const NOW_BOGOTA = bogotaDate(2026, 2, 11, 12, 30, 0)
 
-    // ✅ Datos dev para Recaladas (para probar el módulo)
-    const recaladas = await upsertDevRecaladas()
-
-    // ✅ NUEVO: Atenciones + Turnos slots 1..N
-    await upsertDevAtencionesAndTurnos({
-      recaladas,
-      supervisorEmail: "duvanmesa1516@gmail.com.com",
-      createdByEmail: SUPER_EMAIL, // auditoría: quien crea en seed (SuperAdmin)
+    await upsertDevWorkflows({
+      nowBogota: NOW_BOGOTA,
+      superAdminEmail: SUPER_EMAIL,
     })
   }
 
@@ -120,6 +110,7 @@ async function upsertSuperAdmin(email: string, password: string) {
       rol: RolType.SUPER_ADMIN,
       activo: true,
       profileStatus: ProfileStatus.COMPLETE,
+      emailVerifiedAt: new Date(),
     },
     create: {
       email,
@@ -129,6 +120,7 @@ async function upsertSuperAdmin(email: string, password: string) {
       rol: RolType.SUPER_ADMIN,
       activo: true,
       profileStatus: ProfileStatus.COMPLETE,
+      emailVerifiedAt: new Date(),
     },
   })
 
@@ -156,8 +148,6 @@ async function upsertCountries() {
 }
 
 async function upsertShips() {
-  // ✅ Ahora incluye codigo (REQUIRED en prisma)
-  // Mantén estos códigos únicos
   const ships = [
     {
       codigo: "B-001",
@@ -188,7 +178,6 @@ async function upsertShips() {
     await prisma.buque.upsert({
       where: { nombre: s.nombre },
       update: {
-        // ✅ también actualizamos codigo para mantener consistencia
         codigo: normalizeShipCode(s.codigo),
         naviera: s.naviera,
         capacidad: s.capacidad,
@@ -196,7 +185,7 @@ async function upsertShips() {
         status: StatusType.ACTIVO,
       },
       create: {
-        codigo: normalizeShipCode(s.codigo), // ✅ REQUIRED
+        codigo: normalizeShipCode(s.codigo),
         nombre: s.nombre,
         naviera: s.naviera,
         capacidad: s.capacidad,
@@ -210,13 +199,11 @@ async function upsertShips() {
 }
 
 async function fixShipsPaisIdIfNull() {
-  // 1) Inferir paisId por “modo” desde Recaladas (paisOrigenId más frecuente por buque)
   const grupos = await prisma.recalada.groupBy({
     by: ["buqueId", "paisOrigenId"],
     _count: { _all: true },
   })
 
-  // Mapa buqueId -> paisId inferido (mayor frecuencia)
   const bestByBuque: Record<number, { paisOrigenId: number; count: number }> = {}
   for (const g of grupos) {
     const curr = bestByBuque[g.buqueId]
@@ -248,7 +235,6 @@ async function fixShipsPaisIdIfNull() {
   })
   if (inferred > 0) console.log(`🔎 Inferred paisId from recaladas for ${inferred} ship(s)`)
 
-  // 2) Asignar país por defecto si aún quedan NULL
   const remaining = await prisma.buque.count({ where: { paisId: null } })
   if (remaining > 0) {
     const defaultPais = await prisma.pais.findUnique({ where: { codigo: "CO" } })
@@ -263,19 +249,73 @@ async function fixShipsPaisIdIfNull() {
     }
   }
 
-  // 3) Verificación final
   const finalNulls = await prisma.buque.count({ where: { paisId: null } })
   if (finalNulls > 0) {
     throw new Error(`Aún quedan ${finalNulls} buques con paisId NULL — revisa datos de origen`)
   }
 }
 
-async function upsertTestUsers() {
-  const users = [
-    { email: "duvanmesa1516@gmail.com.com", password: "Test123!", nombres: "María", apellidos: "González", rol: RolType.SUPERVISOR },
-    { email: "chonchipro123@gmail.com", password: "Test123!", nombres: "Carlos", apellidos: "Rodríguez", rol: RolType.GUIA },
-    { email: "guia2@test.com", password: "Test123!", nombres: "Ana", apellidos: "Martínez", rol: RolType.GUIA },
+type DevWorkflowInput = {
+  nowBogota: Date
+  superAdminEmail: string
+}
+
+type SeedUser = {
+  email: string
+  password: string
+  nombres: string
+  apellidos: string
+  rol: RolType
+}
+
+async function upsertSeedUsers(input: { nowBogota: Date }) {
+  // ✅ Cuentas listas para entrar sin verificación de correo
+  const users: SeedUser[] = [
+    {
+      email: env.SEED_SUPERVISOR_1_EMAIL ?? "supervisor1@test.com",
+      password: env.SEED_SUPERVISOR_1_PASS ?? "Test123!",
+      nombres: "María",
+      apellidos: "González",
+      rol: RolType.SUPERVISOR,
+    },
+    {
+      email: env.SEED_SUPERVISOR_2_EMAIL ?? "supervisor2@test.com",
+      password: env.SEED_SUPERVISOR_2_PASS ?? "Test123!",
+      nombres: "Julián",
+      apellidos: "Pérez",
+      rol: RolType.SUPERVISOR,
+    },
+    {
+      email: env.SEED_GUIA_1_EMAIL ?? "guia1@test.com",
+      password: env.SEED_GUIA_1_PASS ?? "Test123!",
+      nombres: "Carlos",
+      apellidos: "Rodríguez",
+      rol: RolType.GUIA,
+    },
+    {
+      email: env.SEED_GUIA_2_EMAIL ?? "guia2@test.com",
+      password: env.SEED_GUIA_2_PASS ?? "Test123!",
+      nombres: "Ana",
+      apellidos: "Martínez",
+      rol: RolType.GUIA,
+    },
+    {
+      email: env.SEED_GUIA_3_EMAIL ?? "guia3@test.com",
+      password: env.SEED_GUIA_3_PASS ?? "Test123!",
+      nombres: "Sofía",
+      apellidos: "López",
+      rol: RolType.GUIA,
+    },
+    {
+      email: env.SEED_GUIA_4_EMAIL ?? "guia4@test.com",
+      password: env.SEED_GUIA_4_PASS ?? "Test123!",
+      nombres: "Mateo",
+      apellidos: "García",
+      rol: RolType.GUIA,
+    },
   ]
+
+  const created: Record<string, { userId: string; guiaId?: string; supervisorId?: string }> = {}
 
   for (const u of users) {
     const passwordHash = await hashPassword(u.password)
@@ -289,6 +329,8 @@ async function upsertTestUsers() {
         rol: u.rol,
         activo: true,
         profileStatus: ProfileStatus.COMPLETE,
+        profileCompletedAt: input.nowBogota,
+        emailVerifiedAt: input.nowBogota,
       },
       create: {
         email: u.email,
@@ -298,258 +340,466 @@ async function upsertTestUsers() {
         rol: u.rol,
         activo: true,
         profileStatus: ProfileStatus.COMPLETE,
+        profileCompletedAt: input.nowBogota,
+        emailVerifiedAt: input.nowBogota,
       },
     })
 
     if (u.rol === RolType.SUPERVISOR) {
-      await prisma.supervisor.upsert({
+      const sup = await prisma.supervisor.upsert({
         where: { usuarioId: user.id },
         update: { telefono: "+57 300 123 4567" },
         create: { usuarioId: user.id, telefono: "+57 300 123 4567" },
       })
+      created[u.email] = { userId: user.id, supervisorId: sup.id }
     }
 
     if (u.rol === RolType.GUIA) {
-      await prisma.guia.upsert({
+      const guia = await prisma.guia.upsert({
         where: { usuarioId: user.id },
-        update: {
-          telefono: `+57 300 ${Math.floor(Math.random() * 9000000) + 1000000}`,
-          direccion: "Cartagena, Colombia",
-        },
-        create: {
-          usuarioId: user.id,
-          telefono: `+57 300 ${Math.floor(Math.random() * 9000000) + 1000000}`,
-          direccion: "Cartagena, Colombia",
-        },
+        update: { telefono: "+57 300 555 0000", direccion: "Cartagena, Colombia" },
+        create: { usuarioId: user.id, telefono: "+57 300 555 0000", direccion: "Cartagena, Colombia" },
       })
+      created[u.email] = { userId: user.id, guiaId: guia.id }
     }
-
-    console.log(`👤 User ready: ${u.email} (${u.rol})`)
   }
 
-  console.log("🧪 Test users upserted")
+  console.log("🧪 Seed users ready (emailVerifiedAt + profile COMPLETE)")
+  return created
 }
 
-// ✅ Recaladas de ejemplo (DEV) con codigoRecalada y operationalStatus
-// Devuelve las recaladas creadas para encadenar atenciones.
-async function upsertDevRecaladas() {
-  const supervisorId = await resolveSupervisorIdOrThrow("duvanmesa1516@gmail.com.com")
+async function upsertDevWorkflows(input: DevWorkflowInput) {
+  const now = input.nowBogota
+  const ymd = formatYMD(now)
 
+  // --- usuarios ---
+  const seedUsers = await upsertSeedUsers({ nowBogota: now })
+  const supervisor1Id = seedUsers[env.SEED_SUPERVISOR_1_EMAIL ?? "supervisor1@test.com"]?.supervisorId
+  const supervisor2Id = seedUsers[env.SEED_SUPERVISOR_2_EMAIL ?? "supervisor2@test.com"]?.supervisorId
+  if (!supervisor1Id || !supervisor2Id) throw new Error("No se pudieron resolver supervisores del seed")
+
+  const guiaIds = [
+    seedUsers[env.SEED_GUIA_1_EMAIL ?? "guia1@test.com"]?.guiaId,
+    seedUsers[env.SEED_GUIA_2_EMAIL ?? "guia2@test.com"]?.guiaId,
+    seedUsers[env.SEED_GUIA_3_EMAIL ?? "guia3@test.com"]?.guiaId,
+    seedUsers[env.SEED_GUIA_4_EMAIL ?? "guia4@test.com"]?.guiaId,
+  ].filter(Boolean) as string[]
+  if (guiaIds.length < 4) throw new Error("No se pudieron resolver guías del seed")
+
+  const createdById = await resolveUserIdOrThrow(input.superAdminEmail)
+
+  // --- catálogos base ---
   const buque1 = await resolveBuqueIdOrThrow("Wonder of the Seas")
   const buque2 = await resolveBuqueIdOrThrow("MSC Meraviglia")
+  const buque3 = await resolveBuqueIdOrThrow("Norwegian Epic")
 
   const paisUS = await resolvePaisIdOrThrow("US")
   const paisIT = await resolvePaisIdOrThrow("IT")
+  const paisES = await resolvePaisIdOrThrow("ES")
 
-  const now = new Date()
+  // --- recaladas: 4 estados ---
+  const recaladaArrivedCode = `RA-2026-90${ymd}01`
+  const recaladaScheduledCode = `RA-2026-90${ymd}02`
+  const recaladaDepartedCode = `RA-2026-90${ymd}03`
+  const recaladaCanceledCode = `RA-2026-90${ymd}04`
 
-  const in2Days = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000)
-  const in3Days = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000)
-
-  const in7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
-  const in8Days = new Date(now.getTime() + 8 * 24 * 60 * 60 * 1000)
-
-  const r1 = await prisma.recalada.create({
-    data: {
+  const rArrived = await prisma.recalada.upsert({
+    where: { codigoRecalada: recaladaArrivedCode },
+    update: {
       buqueId: buque1,
       paisOrigenId: paisUS,
-      supervisorId,
-      codigoRecalada: tempCodigoRecalada(),
-      fechaLlegada: in2Days,
-      fechaSalida: in3Days,
+      supervisorId: supervisor1Id,
+      fechaLlegada: bogotaDate(2026, 2, 11, 9, 30),
+      fechaSalida: bogotaDate(2026, 2, 11, 18, 0),
+      arrivedAt: bogotaDate(2026, 2, 11, 9, 45),
+      departedAt: null,
       status: StatusType.ACTIVO,
-      operationalStatus: RecaladaOperativeStatus.SCHEDULED,
-      fuente: RecaladaSource.MANUAL,
+      operationalStatus: RecaladaOperativeStatus.ARRIVED,
       terminal: "Terminal de Cruceros",
       muelle: "Muelle 1",
-      pasajerosEstimados: 5000,
-      tripulacionEstimada: 1800,
-      observaciones: "Recalada de prueba (programada).",
+      pasajerosEstimados: 5200,
+      tripulacionEstimada: 1900,
+      observaciones: "[SEED] Recalada ARRIVED hoy. Ideal para probar dashboard/agenda.",
+      fuente: RecaladaSource.MANUAL,
+      canceledAt: null,
+      cancelReason: null,
+    },
+    create: {
+      codigoRecalada: recaladaArrivedCode,
+      buqueId: buque1,
+      paisOrigenId: paisUS,
+      supervisorId: supervisor1Id,
+      fechaLlegada: bogotaDate(2026, 2, 11, 9, 30),
+      fechaSalida: bogotaDate(2026, 2, 11, 18, 0),
+      arrivedAt: bogotaDate(2026, 2, 11, 9, 45),
+      status: StatusType.ACTIVO,
+      operationalStatus: RecaladaOperativeStatus.ARRIVED,
+      terminal: "Terminal de Cruceros",
+      muelle: "Muelle 1",
+      pasajerosEstimados: 5200,
+      tripulacionEstimada: 1900,
+      observaciones: "[SEED] Recalada ARRIVED hoy. Ideal para probar dashboard/agenda.",
+      fuente: RecaladaSource.MANUAL,
     },
   })
 
-  const r2 = await prisma.recalada.create({
-    data: {
+  const rScheduled = await prisma.recalada.upsert({
+    where: { codigoRecalada: recaladaScheduledCode },
+    update: {
       buqueId: buque2,
       paisOrigenId: paisIT,
-      supervisorId,
-      codigoRecalada: tempCodigoRecalada(),
-      fechaLlegada: in7Days,
-      fechaSalida: in8Days,
+      supervisorId: supervisor2Id,
+      fechaLlegada: bogotaDate(2026, 2, 11, 16, 0),
+      fechaSalida: bogotaDate(2026, 2, 12, 6, 0),
+      arrivedAt: null,
+      departedAt: null,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.SCHEDULED,
-      fuente: RecaladaSource.MANUAL,
       terminal: "Terminal de Cruceros",
       muelle: "Muelle 2",
-      pasajerosEstimados: 4200,
+      pasajerosEstimados: 4300,
       tripulacionEstimada: 1500,
-      observaciones: "Otra recalada dev.",
+      observaciones: "[SEED] Recalada SCHEDULED hoy en la tarde.",
+      fuente: RecaladaSource.MANUAL,
+      canceledAt: null,
+      cancelReason: null,
+    },
+    create: {
+      codigoRecalada: recaladaScheduledCode,
+      buqueId: buque2,
+      paisOrigenId: paisIT,
+      supervisorId: supervisor2Id,
+      fechaLlegada: bogotaDate(2026, 2, 11, 16, 0),
+      fechaSalida: bogotaDate(2026, 2, 12, 6, 0),
+      status: StatusType.ACTIVO,
+      operationalStatus: RecaladaOperativeStatus.SCHEDULED,
+      terminal: "Terminal de Cruceros",
+      muelle: "Muelle 2",
+      pasajerosEstimados: 4300,
+      tripulacionEstimada: 1500,
+      observaciones: "[SEED] Recalada SCHEDULED hoy en la tarde.",
+      fuente: RecaladaSource.MANUAL,
     },
   })
 
-  const r1Final = await prisma.recalada.update({
-    where: { id: r1.id },
-    data: { codigoRecalada: buildCodigoRecalada(r1.fechaLlegada, r1.id) },
+  const rDeparted = await prisma.recalada.upsert({
+    where: { codigoRecalada: recaladaDepartedCode },
+    update: {
+      buqueId: buque3,
+      paisOrigenId: paisES,
+      supervisorId: supervisor1Id,
+      fechaLlegada: bogotaDate(2026, 2, 10, 7, 0),
+      fechaSalida: bogotaDate(2026, 2, 10, 19, 0),
+      arrivedAt: bogotaDate(2026, 2, 10, 7, 20),
+      departedAt: bogotaDate(2026, 2, 10, 18, 45),
+      status: StatusType.ACTIVO,
+      operationalStatus: RecaladaOperativeStatus.DEPARTED,
+      terminal: "Terminal de Cruceros",
+      muelle: "Muelle 3",
+      pasajerosEstimados: 3900,
+      tripulacionEstimada: 1350,
+      observaciones: "[SEED] Recalada DEPARTED ayer.",
+      fuente: RecaladaSource.MANUAL,
+      canceledAt: null,
+      cancelReason: null,
+    },
+    create: {
+      codigoRecalada: recaladaDepartedCode,
+      buqueId: buque3,
+      paisOrigenId: paisES,
+      supervisorId: supervisor1Id,
+      fechaLlegada: bogotaDate(2026, 2, 10, 7, 0),
+      fechaSalida: bogotaDate(2026, 2, 10, 19, 0),
+      arrivedAt: bogotaDate(2026, 2, 10, 7, 20),
+      departedAt: bogotaDate(2026, 2, 10, 18, 45),
+      status: StatusType.ACTIVO,
+      operationalStatus: RecaladaOperativeStatus.DEPARTED,
+      terminal: "Terminal de Cruceros",
+      muelle: "Muelle 3",
+      pasajerosEstimados: 3900,
+      tripulacionEstimada: 1350,
+      observaciones: "[SEED] Recalada DEPARTED ayer.",
+      fuente: RecaladaSource.MANUAL,
+    },
   })
 
-  const r2Final = await prisma.recalada.update({
-    where: { id: r2.id },
-    data: { codigoRecalada: buildCodigoRecalada(r2.fechaLlegada, r2.id) },
+  const rCanceled = await prisma.recalada.upsert({
+    where: { codigoRecalada: recaladaCanceledCode },
+    update: {
+      buqueId: buque2,
+      paisOrigenId: paisIT,
+      supervisorId: supervisor2Id,
+      fechaLlegada: bogotaDate(2026, 2, 12, 9, 0),
+      fechaSalida: bogotaDate(2026, 2, 12, 17, 0),
+      arrivedAt: null,
+      departedAt: null,
+      status: StatusType.ACTIVO,
+      operationalStatus: RecaladaOperativeStatus.CANCELED,
+      terminal: "Terminal de Cruceros",
+      muelle: "Muelle 2",
+      pasajerosEstimados: 4100,
+      tripulacionEstimada: 1400,
+      observaciones: "[SEED] Recalada CANCELED (para probar chips/badges).",
+      fuente: RecaladaSource.MANUAL,
+      canceledAt: now,
+      cancelReason: "[SEED] Cancelación de ejemplo",
+    },
+    create: {
+      codigoRecalada: recaladaCanceledCode,
+      buqueId: buque2,
+      paisOrigenId: paisIT,
+      supervisorId: supervisor2Id,
+      fechaLlegada: bogotaDate(2026, 2, 12, 9, 0),
+      fechaSalida: bogotaDate(2026, 2, 12, 17, 0),
+      status: StatusType.ACTIVO,
+      operationalStatus: RecaladaOperativeStatus.CANCELED,
+      terminal: "Terminal de Cruceros",
+      muelle: "Muelle 2",
+      pasajerosEstimados: 4100,
+      tripulacionEstimada: 1400,
+      observaciones: "[SEED] Recalada CANCELED (para probar chips/badges).",
+      fuente: RecaladaSource.MANUAL,
+      canceledAt: now,
+      cancelReason: "[SEED] Cancelación de ejemplo",
+    },
   })
 
-  console.log("🧭 Dev Recaladas created (2) with codigoRecalada")
+  console.log("🧭 Recaladas seed ready (SCHEDULED/ARRIVED/DEPARTED/CANCELED)")
 
-  return [r1Final, r2Final]
-}
-
-type DevAtencionesInput = {
-  recaladas: Array<{ id: number; fechaLlegada: Date; fechaSalida: Date | null }>
-  supervisorEmail: string
-  createdByEmail: string
-}
-
-// ✅ NUEVO: crea Atenciones DEV y materializa Turnos 1..N como slots
-async function upsertDevAtencionesAndTurnos(input: DevAtencionesInput) {
-  const supervisorId = await resolveSupervisorIdOrThrow(input.supervisorEmail)
-  const createdById = await resolveUserIdOrThrow(input.createdByEmail)
-
-  for (const r of input.recaladas) {
-    if (!r.fechaSalida) {
-      console.log(`⚠️ Recalada id=${r.id} no tiene fechaSalida, se omiten atenciones dev.`)
-      continue
-    }
-
-    const baseStart = addHours(r.fechaLlegada, 1)
-    const baseEnd = addHours(baseStart, 4)
-
-    const secondStart = addHours(baseEnd, 1)
-    const secondEnd = addHours(secondStart, 3)
-
-    const a1End = baseEnd > r.fechaSalida ? r.fechaSalida : baseEnd
-    const a2End = secondEnd > r.fechaSalida ? r.fechaSalida : secondEnd
-
-    if (a1End <= baseStart) {
-      console.log(`⚠️ Ventana inválida para atención 1 en recalada id=${r.id}. Se omite.`)
-      continue
-    }
-    if (a2End <= secondStart) {
-      console.log(`⚠️ Ventana inválida para atención 2 en recalada id=${r.id}. Se omite.`)
-      continue
-    }
-
-    const desired = [
+  // --- atenciones + turnos ---
+  await upsertAtencionWithSlots({
+    recaladaId: rArrived.id,
+    supervisorId: supervisor1Id,
+    createdById,
+    descripcion: "[SEED] Atención CERRADA (mañana)",
+    fechaInicio: bogotaDate(2026, 2, 11, 8, 0),
+    fechaFin: bogotaDate(2026, 2, 11, 10, 0),
+    operationalStatus: AtencionOperativeStatus.CLOSED,
+    turnosTotal: 4,
+    slotPlan: [
       {
-        descripcion: "Atención Dev A (slots materializados)",
-        fechaInicio: baseStart,
-        fechaFin: a1End,
-        turnosTotal: 6,
+        numero: 1,
+        status: TurnoStatus.COMPLETED,
+        guiaId: guiaIds[0],
+        checkInAt: bogotaDate(2026, 2, 11, 8, 5),
+        checkOutAt: bogotaDate(2026, 2, 11, 9, 55),
       },
       {
-        descripcion: "Atención Dev B (slots materializados)",
-        fechaInicio: secondStart,
-        fechaFin: a2End,
-        turnosTotal: 4,
+        numero: 2,
+        status: TurnoStatus.COMPLETED,
+        guiaId: guiaIds[1],
+        checkInAt: bogotaDate(2026, 2, 11, 8, 10),
+        checkOutAt: bogotaDate(2026, 2, 11, 9, 50),
       },
-    ]
+      { numero: 3, status: TurnoStatus.NO_SHOW, guiaId: guiaIds[2] },
+      {
+        numero: 4,
+        status: TurnoStatus.CANCELED,
+        guiaId: null,
+        canceledAt: bogotaDate(2026, 2, 11, 9, 0),
+        cancelReason: "[SEED] Cancelado de ejemplo",
+      },
+    ],
+  })
 
-    for (const d of desired) {
-      const existing = await prisma.atencion.findFirst({
-        where: {
-          recaladaId: r.id,
-          fechaInicio: d.fechaInicio,
-          fechaFin: d.fechaFin,
+  await upsertAtencionWithSlots({
+    recaladaId: rArrived.id,
+    supervisorId: supervisor1Id,
+    createdById,
+    descripcion: "[SEED] Atención ABIERTA (en curso 11:00-13:00)",
+    fechaInicio: bogotaDate(2026, 2, 11, 11, 0),
+    fechaFin: bogotaDate(2026, 2, 11, 13, 0),
+    operationalStatus: AtencionOperativeStatus.OPEN,
+    turnosTotal: 6,
+    slotPlan: [
+      { numero: 1, status: TurnoStatus.IN_PROGRESS, guiaId: guiaIds[3], checkInAt: bogotaDate(2026, 2, 11, 11, 5) },
+      { numero: 2, status: TurnoStatus.ASSIGNED, guiaId: guiaIds[2] },
+      { numero: 3, status: TurnoStatus.AVAILABLE, guiaId: null },
+      { numero: 4, status: TurnoStatus.AVAILABLE, guiaId: null },
+      { numero: 5, status: TurnoStatus.AVAILABLE, guiaId: null },
+      { numero: 6, status: TurnoStatus.CANCELED, guiaId: null, canceledAt: bogotaDate(2026, 2, 11, 12, 0), cancelReason: "[SEED] Cupo cancelado" },
+    ],
+  })
+
+  await upsertAtencionWithSlots({
+    recaladaId: rScheduled.id,
+    supervisorId: supervisor2Id,
+    createdById,
+    descripcion: "[SEED] Atención PROGRAMADA (asignaciones previas)",
+    fechaInicio: bogotaDate(2026, 2, 11, 17, 0),
+    fechaFin: bogotaDate(2026, 2, 11, 20, 0),
+    operationalStatus: AtencionOperativeStatus.OPEN,
+    turnosTotal: 3,
+    slotPlan: [
+      { numero: 1, status: TurnoStatus.ASSIGNED, guiaId: guiaIds[0] },
+      { numero: 2, status: TurnoStatus.AVAILABLE, guiaId: null },
+      { numero: 3, status: TurnoStatus.AVAILABLE, guiaId: null },
+    ],
+  })
+
+  await upsertAtencionWithSlots({
+    recaladaId: rDeparted.id,
+    supervisorId: supervisor1Id,
+    createdById,
+    descripcion: "[SEED] Atención histórica (cerrada ayer)",
+    fechaInicio: bogotaDate(2026, 2, 10, 12, 0),
+    fechaFin: bogotaDate(2026, 2, 10, 15, 0),
+    operationalStatus: AtencionOperativeStatus.CLOSED,
+    turnosTotal: 2,
+    slotPlan: [
+      {
+        numero: 1,
+        status: TurnoStatus.COMPLETED,
+        guiaId: guiaIds[1],
+        checkInAt: bogotaDate(2026, 2, 10, 12, 10),
+        checkOutAt: bogotaDate(2026, 2, 10, 14, 55),
+      },
+      {
+        numero: 2,
+        status: TurnoStatus.COMPLETED,
+        guiaId: guiaIds[2],
+        checkInAt: bogotaDate(2026, 2, 10, 12, 15),
+        checkOutAt: bogotaDate(2026, 2, 10, 14, 50),
+      },
+    ],
+  })
+
+  await upsertAtencionWithSlots({
+    recaladaId: rCanceled.id,
+    supervisorId: supervisor2Id,
+    createdById,
+    descripcion: "[SEED] Atención CANCELADA",
+    fechaInicio: bogotaDate(2026, 2, 12, 10, 0),
+    fechaFin: bogotaDate(2026, 2, 12, 12, 0),
+    operationalStatus: AtencionOperativeStatus.CANCELED,
+    turnosTotal: 2,
+    slotPlan: [
+      { numero: 1, status: TurnoStatus.CANCELED, guiaId: null, canceledAt: now, cancelReason: "[SEED] Atención cancelada" },
+      { numero: 2, status: TurnoStatus.CANCELED, guiaId: null, canceledAt: now, cancelReason: "[SEED] Atención cancelada" },
+    ],
+    canceledAt: now,
+    cancelReason: "[SEED] Cancelación de atención",
+    canceledById: createdById,
+  })
+
+  console.log("🧩 Atenciones + Turnos seed ready (OPEN/CLOSED/CANCELED + múltiples estados de turnos)")
+}
+
+type SlotPlanItem = {
+  numero: number
+  status: TurnoStatus
+  guiaId: string | null
+  checkInAt?: Date
+  checkOutAt?: Date
+  canceledAt?: Date
+  cancelReason?: string
+}
+
+type UpsertAtencionInput = {
+  recaladaId: number
+  supervisorId: string
+  createdById: string
+  descripcion: string
+  fechaInicio: Date
+  fechaFin: Date
+  operationalStatus: AtencionOperativeStatus
+  turnosTotal: number
+  slotPlan: SlotPlanItem[]
+  canceledAt?: Date
+  cancelReason?: string
+  canceledById?: string
+}
+
+async function upsertAtencionWithSlots(input: UpsertAtencionInput) {
+  // Atencion no tiene un unique compuesto, así que la clave práctica es (recaladaId + fechaInicio + fechaFin)
+  const existing = await prisma.atencion.findFirst({
+    where: { recaladaId: input.recaladaId, fechaInicio: input.fechaInicio, fechaFin: input.fechaFin },
+    select: { id: true },
+  })
+
+  const atencion = existing
+    ? await prisma.atencion.update({
+        where: { id: existing.id },
+        data: {
+          supervisorId: input.supervisorId,
+          turnosTotal: input.turnosTotal,
+          descripcion: input.descripcion,
+          status: StatusType.ACTIVO,
+          operationalStatus: input.operationalStatus,
+          canceledAt: input.canceledAt ?? null,
+          cancelReason: input.cancelReason ?? null,
+          canceledById: input.canceledById ?? null,
         },
-        select: { id: true, turnosTotal: true },
+      })
+    : await prisma.atencion.create({
+        data: {
+          recaladaId: input.recaladaId,
+          supervisorId: input.supervisorId,
+          turnosTotal: input.turnosTotal,
+          descripcion: input.descripcion,
+          fechaInicio: input.fechaInicio,
+          fechaFin: input.fechaFin,
+          status: StatusType.ACTIVO,
+          operationalStatus: input.operationalStatus,
+          createdById: input.createdById,
+          canceledAt: input.canceledAt,
+          cancelReason: input.cancelReason,
+          canceledById: input.canceledById,
+        },
       })
 
-      const atencion = existing
-        ? await prisma.atencion.update({
-            where: { id: existing.id },
-            data: {
-              supervisorId,
-              descripcion: d.descripcion,
-              turnosTotal: d.turnosTotal,
-              status: StatusType.ACTIVO,
-              operationalStatus: AtencionOperativeStatus.OPEN,
-            },
-          })
-        : await prisma.atencion.create({
-            data: {
-              recaladaId: r.id,
-              supervisorId,
-              turnosTotal: d.turnosTotal,
-              descripcion: d.descripcion,
-              fechaInicio: d.fechaInicio,
-              fechaFin: d.fechaFin,
-              status: StatusType.ACTIVO,
-              operationalStatus: AtencionOperativeStatus.OPEN,
-              createdById,
-            },
-          })
-
-      await prisma.$transaction(async (tx) => {
-        const current = await tx.turno.findMany({
-          where: { atencionId: atencion.id },
-          select: { id: true, numero: true, status: true, guiaId: true },
-          orderBy: { numero: "asc" },
-        })
-
-        const currentMax = current.length > 0 ? current[current.length - 1]!.numero : 0
-
-        for (let n = currentMax + 1; n <= d.turnosTotal; n++) {
-          await tx.turno.create({
-            data: {
-              atencionId: atencion.id,
-              numero: n,
-              status: TurnoStatus.AVAILABLE,
-              guiaId: null,
-              fechaInicio: d.fechaInicio,
-              fechaFin: d.fechaFin,
-              createdById,
-            },
-          })
-        }
-
-        for (const t of current) {
-          if (t.status === TurnoStatus.AVAILABLE && !t.guiaId) {
-            await tx.turno.update({
-              where: { id: t.id },
-              data: {
-                fechaInicio: d.fechaInicio,
-                fechaFin: d.fechaFin,
-              },
-            })
-          }
-        }
-
-        const toDelete = current
-          .filter((t) => t.numero > d.turnosTotal)
-          .filter((t) => t.status === TurnoStatus.AVAILABLE && !t.guiaId)
-
-        if (toDelete.length > 0) {
-          await tx.turno.deleteMany({
-            where: { id: { in: toDelete.map((x) => x.id) } },
-          })
-        }
-
-        const blocked = current
-          .filter((t) => t.numero > d.turnosTotal)
-          .filter((t) => !(t.status === TurnoStatus.AVAILABLE && !t.guiaId))
-
-        if (blocked.length > 0) {
-          console.log(
-            `⚠️ Atencion id=${atencion.id}: cupo bajó a ${d.turnosTotal}, pero ${blocked.length} turno(s) > cupo no se pueden borrar (no están libres).`,
-          )
-        }
+  await prisma.$transaction(async (tx) => {
+    // 1) Ajusta slots 1..turnosTotal
+    for (let n = 1; n <= input.turnosTotal; n++) {
+      await tx.turno.upsert({
+        where: { atencionId_numero: { atencionId: atencion.id, numero: n } },
+        update: { fechaInicio: input.fechaInicio, fechaFin: input.fechaFin },
+        create: {
+          atencionId: atencion.id,
+          numero: n,
+          status: TurnoStatus.AVAILABLE,
+          guiaId: null,
+          fechaInicio: input.fechaInicio,
+          fechaFin: input.fechaFin,
+          createdById: input.createdById,
+        },
       })
-
-      console.log(
-        `🎫 Atencion ready id=${atencion.id} (recaladaId=${r.id}) ventana=${d.fechaInicio.toISOString()} -> ${d.fechaFin.toISOString()} cupo=${d.turnosTotal}`,
-      )
     }
-  }
 
-  console.log("🧩 Dev Atenciones + Turnos slots ready")
+    // 2) Aplica plan (sin repetir guía dentro de la misma atención: @@unique([atencionId, guiaId]))
+    for (const p of input.slotPlan) {
+      if (p.numero < 1 || p.numero > input.turnosTotal) continue
+
+      const turno = await tx.turno.findUnique({
+        where: { atencionId_numero: { atencionId: atencion.id, numero: p.numero } },
+        select: { id: true },
+      })
+      if (!turno) continue
+
+      await tx.turno.update({
+        where: { id: turno.id },
+        data: {
+          status: p.status,
+          guiaId: p.guiaId,
+          checkInAt: p.checkInAt ?? null,
+          checkOutAt: p.checkOutAt ?? null,
+          canceledAt: p.canceledAt ?? null,
+          cancelReason: p.cancelReason ?? null,
+        },
+      })
+    }
+
+    // 3) Si hay turnos > cupo, borrar solo si están libres
+    const extras = await tx.turno.findMany({
+      where: { atencionId: atencion.id, numero: { gt: input.turnosTotal } },
+      select: { id: true, status: true, guiaId: true },
+    })
+    const toDelete = extras.filter((t) => t.status === TurnoStatus.AVAILABLE && !t.guiaId).map((t) => t.id)
+    if (toDelete.length > 0) await tx.turno.deleteMany({ where: { id: { in: toDelete } } })
+  })
+
+  console.log(`🎫 Atencion seed ok id=${atencion.id} recaladaId=${input.recaladaId} status=${input.operationalStatus} cupo=${input.turnosTotal}`)
+  return atencion
 }
 
 main()

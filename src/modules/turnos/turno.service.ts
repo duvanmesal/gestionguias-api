@@ -7,6 +7,8 @@ import type {
   AtencionOperativeStatus,
   StatusType,
 } from "@prisma/client";
+import type { ListTurnosQuery } from "./turno.schemas";
+
 
 const turnoSelect = {
   id: true,
@@ -120,6 +122,97 @@ function buildNoShowObservacion(reason?: string): string {
 }
 
 export class TurnoService {
+    /**
+   * GET /turnos
+   * Lista global para panel con filtros + paginación
+   */
+  static async list(query: ListTurnosQuery) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+
+    // Default: hoy si no mandan dateFrom/dateTo
+    const hasAnyDate = !!query.dateFrom || !!query.dateTo;
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const dateFrom = query.dateFrom ?? (hasAnyDate ? undefined : todayStart);
+    const dateTo = query.dateTo ?? (hasAnyDate ? undefined : todayEnd);
+
+    const where: Prisma.TurnoWhereInput = {
+      ...(query.atencionId ? { atencionId: query.atencionId } : {}),
+      ...(query.status ? { status: query.status } : {}),
+      ...(typeof query.assigned === "boolean"
+        ? query.assigned
+          ? { guiaId: { not: null } }
+          : { guiaId: null }
+        : {}),
+      ...(query.recaladaId
+        ? { atencion: { recaladaId: query.recaladaId } }
+        : {}),
+    };
+
+    const and: Prisma.TurnoWhereInput[] = [];
+
+    // Filtro por solapamiento en el rango (turno [inicio, fin] intersecta [dateFrom, dateTo])
+    // - si dateFrom: fin >= dateFrom
+    // - si dateTo:   inicio <= dateTo
+    if (dateFrom || dateTo) {
+      and.push({ fechaInicio: { not: null } });
+      and.push({ fechaFin: { not: null } });
+
+      if (dateFrom) and.push({ fechaFin: { gte: dateFrom } });
+      if (dateTo) and.push({ fechaInicio: { lte: dateTo } });
+    }
+
+    const finalWhere: Prisma.TurnoWhereInput =
+      and.length > 0 ? { ...where, AND: and } : where;
+
+    const [total, items] = await prisma.$transaction([
+      prisma.turno.count({ where: finalWhere }),
+      prisma.turno.findMany({
+        where: finalWhere,
+        select: turnoSelect,
+        orderBy: [
+          { fechaInicio: "asc" },
+          { atencionId: "asc" },
+          { numero: "asc" },
+        ],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+    return {
+      items,
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+      },
+    };
+  }
+
+  /**
+   * GET /turnos/:id
+   * Detalle
+   */
+  static async getById(turnoId: number) {
+    const item = await prisma.turno.findUnique({
+      where: { id: turnoId },
+      select: turnoSelect,
+    });
+
+    if (!item) throw new NotFoundError("Turno no encontrado");
+
+    return item;
+  }
+
   /**
    * PATCH /turnos/:id/assign
    * Asignación controlada por supervisor.

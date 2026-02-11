@@ -168,6 +168,10 @@ export class UserService {
           profileStatus: true,
           createdAt: true,
           updatedAt: true,
+
+          // ✅ IDs operativos (para UI: asignar turnos, paneles, etc.)
+          guia: { select: { id: true } },
+          supervisor: { select: { id: true } },
         },
         orderBy: [{ [orderByField]: orderDir }],
         skip,
@@ -175,11 +179,26 @@ export class UserService {
       }),
     ]);
 
+    const normalized = users.map((u: any) => ({
+      id: u.id,
+      email: u.email,
+      nombres: u.nombres,
+      apellidos: u.apellidos,
+      rol: u.rol,
+      activo: u.activo,
+      profileStatus: u.profileStatus,
+      createdAt: u.createdAt,
+      updatedAt: u.updatedAt,
+
+      guiaId: u.guia?.id ?? null,
+      supervisorId: u.supervisor?.id ?? null,
+    }));
+
     // ¡Importante!: usar el pageSize EFECTIVO para coherencia con 'take'
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
     return {
-      data: users,
+      data: normalized,
       meta: {
         page,
         pageSize,

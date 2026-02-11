@@ -11,9 +11,62 @@ import type {
   CheckOutTurnoParams,
   NoShowTurnoBody,
   NoShowTurnoParams,
+  ListTurnosQuery,
+  GetTurnoByIdParams
 } from "./turno.schemas";
 
 export class TurnoController {
+
+    /**
+   * GET /turnos
+   * Lista global (panel)
+   * Auth: SUPERVISOR / SUPER_ADMIN (en routes)
+   */
+  static async list(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.user?.userId) {
+        throw new UnauthorizedError("Authentication required");
+      }
+
+      const query = req.query as unknown as ListTurnosQuery;
+
+      const result = await TurnoService.list(query);
+
+      res.status(200).json({
+        data: result.items,
+        meta: result.meta,
+        error: null,
+      });
+      return;
+    } catch (err) {
+      next(err);
+      return;
+    }
+  }
+
+  /**
+   * GET /turnos/:id
+   * Detalle
+   * Auth: SUPERVISOR / SUPER_ADMIN (en routes)
+   */
+  static async getById(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.user?.userId) {
+        throw new UnauthorizedError("Authentication required");
+      }
+
+      const params = req.params as unknown as GetTurnoByIdParams;
+
+      const item = await TurnoService.getById(params.id);
+
+      res.status(200).json({ data: item, meta: null, error: null });
+      return;
+    } catch (err) {
+      next(err);
+      return;
+    }
+  }
+
   /**
    * PATCH /turnos/:id/assign
    * Asigna un turno a un guía (modo supervisor)
