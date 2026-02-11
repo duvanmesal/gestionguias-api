@@ -79,15 +79,80 @@ model RefreshToken {
 
 ## 1.4 Contratos HTTP (envelope `{data, meta, error}`)
 
-### POST `/auth/login`
+---
 
-* **Body:**
+## 1.4.1 Login
+
+### **POST `/auth/login`**
+
+Inicia sesión con email y contraseña.
+Crea una **sesión** en base de datos y emite:
+
+* **Access Token (JWT)** para consumir endpoints protegidos
+* **Refresh Token** (opaco) para rotación
+
+📌 **Comportamiento por plataforma:**
+
+* **WEB:** el refresh token **NO** viaja en el JSON, se guarda en **cookie HttpOnly `rt`**
+* **MOBILE:** el refresh token **SÍ** viaja en el JSON (porque no hay cookies HttpOnly confiables)
+
+---
+
+### **Auth requerida**
+
+❌ No
+
+---
+
+### **Headers obligatorios**
+
+| Header              | Valores          | Descripción                               |
+| ------------------- | ---------------- | ----------------------------------------- |
+| `X-Client-Platform` | `WEB` | `MOBILE` | Define el comportamiento de sesión/tokens |
+
+---
+
+### **Body**
 
 ```json
-{ "email": "user@example.com", "password": "Str0ngP@ss!" }
+{
+  "email": "user@example.com",
+  "password": "Str0ngP@ss!",
+  "deviceId": "optional-string"
+}
 ```
 
-* **Respuesta 200:**
+📌 Reglas del body:
+
+* `email`: formato email válido
+* `password`: mínimo 8, máximo 72
+* `deviceId`:
+
+  * **obligatorio si `X-Client-Platform = MOBILE`**
+  * opcional en WEB
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida `req.body` con **Zod**
+2. Verifica que el usuario exista y esté **activo**
+3. Verifica la contraseña
+4. Crea una **Session** con:
+
+   * `platform`, `deviceId`, `ip`, `userAgent`
+   * `refreshTokenHash` + `refreshExpiresAt`
+5. Firma `accessToken` con:
+
+   * `userId`, `email`, `rol`, `sid` (sessionId), `aud`
+6. Devuelve tokens:
+
+   * **WEB:** setea cookie `rt` y devuelve solo access token en JSON
+   * **MOBILE:** devuelve access + refresh en JSON
+
+---
+
+### **Respuesta 200 (MOBILE)**
 
 ```json
 {
@@ -95,15 +160,24 @@ model RefreshToken {
     "user": {
       "id": "cus_123",
       "email": "user@example.com",
-      "rol": "SUPERVISOR",
       "nombres": "Ana",
-      "apellidos": "Pérez"
+      "apellidos": "Pérez",
+      "rol": "SUPERVISOR",
+      "activo": true,
+      "emailVerifiedAt": null,
+      "createdAt": "2026-01-26T20:40:07.423Z",
+      "updatedAt": "2026-01-26T20:40:07.423Z"
     },
     "tokens": {
       "accessToken": "JWT...",
       "accessTokenExpiresIn": 900,
       "refreshToken": "rt_...",
-      "refreshTokenExpiresAt": "2025-10-28T00:00:00Z"
+      "refreshTokenExpiresAt": "2026-03-06T01:21:04.776Z"
+    },
+    "session": {
+      "id": "ses_123",
+      "platform": "MOBILE",
+      "createdAt": "2026-02-04T01:21:04.776Z"
     }
   },
   "meta": null,
@@ -111,60 +185,26 @@ model RefreshToken {
 }
 ```
 
-* **Errores posibles:** `401` credenciales inválidas, `423` usuario inactivo.
-
 ---
 
-### POST `/auth/refresh`
+### **Respuesta 200 (WEB)**
 
-* **Body:**
-
-```json
-{ "refreshToken": "rt_..." }
-```
-
-* **Respuesta 200:** entrega nuevos access y refresh tokens.
-* **Errores posibles:**
-
-  * `401` → token inválido o expirado.
-  * `409` → token reutilizado (indica posible robo; se revoca toda la cadena).
-
----
-
-### POST `/auth/logout`
-
-* **Body:**
-
-```json
-{ "refreshToken": "rt_current" }
-```
-
-* Acción: marca `revokedAt` del refresh actual.
-* Respuesta: `204 No Content`.
-
----
-
-### POST `/auth/logout-all`
-
-* **Auth requerida:** `Authorization: Bearer <accessToken>`.
-* Acción: revoca **todos** los refresh tokens asociados al usuario.
-* Respuesta: `204 No Content`.
-
----
-
-### GET `/auth/me`
-
-* **Auth:** `Authorization: Bearer <accessToken>`.
-* Respuesta 200:
+📌 En **WEB**, el refresh token se entrega como **cookie HttpOnly** llamada `rt` con `SameSite=Strict` y `Path=<API_PREFIX>/auth/refresh` (ej: `/api/v1/auth/refresh`).
 
 ```json
 {
   "data": {
-    "id": "cus_123",
-    "email": "user@example.com",
-    "rol": "GUIA",
-    "nombres": "Luisa",
-    "apellidos": "Gómez"
+    "user": { "...": "..." },
+    "tokens": {
+      "accessToken": "JWT...",
+      "accessTokenExpiresIn": 900,
+      "refreshTokenExpiresAt": "2026-03-06T01:21:04.776Z"
+    },
+    "session": {
+      "id": "ses_123",
+      "platform": "WEB",
+      "createdAt": "2026-02-04T01:21:04.776Z"
+    }
   },
   "meta": null,
   "error": null
@@ -173,13 +213,857 @@ model RefreshToken {
 
 ---
 
+### **Errores posibles**
+
+| Código | Motivo                                           |
+| ------ | ------------------------------------------------ |
+| `400`  | Falta `X-Client-Platform` o tiene valor inválido |
+| `400`  | `deviceId` faltante cuando es `MOBILE`           |
+| `401`  | Credenciales inválidas                           |
+| `400`  | Body inválido según Zod                          |
+
+---
+
+## 1.4.2 Refresh (rotación de sesión)
+
+### **POST `/auth/refresh`**
+
+Renueva tokens usando el refresh token actual y ejecuta **rotación**.
+Si detecta reuso de token revocado, revoca **todas** las sesiones del usuario.
+
+📌 **Comportamiento por plataforma:**
+
+* **WEB:** toma el refresh token desde cookie HttpOnly `rt` (sin body)
+* **MOBILE:** toma el refresh token desde el body `{ refreshToken }`
+
+---
+
+### **Auth requerida**
+
+❌ No (pero requiere refresh token válido)
+
+---
+
+### **Headers obligatorios**
+
+| Header              | Valores          | Descripción                    |
+| ------------------- | ---------------- | ------------------------------ |
+| `X-Client-Platform` | `WEB` | `MOBILE` | Define si se lee cookie o body |
+
+---
+
+### **Body**
+
+**Solo aplica para MOBILE**
+
+```json
+{
+  "refreshToken": "rt_..."
+}
+```
+
+📌 En **WEB** el body no se usa.
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida `X-Client-Platform`
+2. Obtiene el refresh token:
+
+   * WEB: `cookies.rt`
+   * MOBILE: `body.refreshToken`
+3. Busca la sesión por `refreshTokenHash`
+4. Reglas:
+
+   * si no existe → `401`
+   * si está revocada → revoca todas las sesiones y responde `409`
+   * si expiró → `401`
+5. Rota:
+
+   * genera nuevo refresh
+   * actualiza la sesión con el nuevo hash y fechas
+6. Firma nuevo access token
+7. Responde:
+
+   * WEB: setea nueva cookie `rt` y no devuelve refresh en JSON
+   * MOBILE: devuelve refresh en JSON
+
+---
+
+### **Respuesta 200 (MOBILE)**
+
+```json
+{
+  "data": {
+    "tokens": {
+      "accessToken": "JWT...",
+      "accessTokenExpiresIn": 900,
+      "refreshToken": "rt_new...",
+      "refreshTokenExpiresAt": "2026-03-06T01:21:04.776Z"
+    },
+    "session": { "id": "ses_123" }
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Respuesta 200 (WEB)**
+
+📌 Devuelve access token en JSON y manda el refresh por cookie `rt`.
+
+```json
+{
+  "data": {
+    "tokens": {
+      "accessToken": "JWT...",
+      "accessTokenExpiresIn": 900,
+      "refreshTokenExpiresAt": "2026-03-06T01:21:04.776Z"
+    },
+    "session": { "id": "ses_123" }
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                                                            |
+| ------ | ----------------------------------------------------------------- |
+| `400`  | Falta o es inválido `X-Client-Platform`                           |
+| `400`  | WEB: no existe cookie `rt`                                        |
+| `400`  | MOBILE: no viene `refreshToken` en body                           |
+| `401`  | Token inválido / no existe / expirado                             |
+| `409`  | Reuso de token revocado (posible robo). Revoca todas las sesiones |
+
+---
+
+## 1.4.3 Logout (cerrar sesión actual)
+
+### **POST `/auth/logout`**
+
+Cierra la sesión actual (la del access token con `sid`).
+Revoca la sesión en BD y, en WEB, intenta limpiar la cookie `rt`.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+
+`Authorization: Bearer <accessToken>`
+
+---
+
+### **Headers obligatorios**
+
+| Header              | Valores          | Descripción                                |
+| ------------------- | ---------------- | ------------------------------------------ |
+| `X-Client-Platform` | `WEB` | `MOBILE` | Necesario para decidir si se limpia cookie |
+
+---
+
+### **Body**
+
+❌ No usa body
+
+---
+
+### **Qué hace exactamente**
+
+1. Lee `sid` desde el access token (`req.user.sid`)
+2. Revoca la sesión asociada (`logout(sessionId)`)
+3. Si es WEB:
+
+   * limpia cookie `rt`
+4. Responde `204 No Content`
+
+---
+
+### **Respuesta 204**
+
+Sin body.
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                                      |
+| ------ | ------------------------------------------- |
+| `401`  | Access token ausente o inválido             |
+| `400`  | No existe `sid` dentro del token            |
+| `400`  | Falta/valor inválido de `X-Client-Platform` |
+
+---
+
+## 1.4.4 Logout de todas las sesiones
+
+### **POST `/auth/logout-all`**
+
+Cierra **todas** las sesiones activas del usuario (WEB y MOBILE) en todos los dispositivos.
+Útil si el usuario sospecha robo de sesión, perdió el celular, o quiere “salir de todo”.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+
+`Authorization: Bearer <accessToken>`
+
+---
+
+### **Headers obligatorios**
+
+| Header              | Valores          | Descripción                           |
+| ------------------- | ---------------- | ------------------------------------- |
+| `X-Client-Platform` | `WEB` | `MOBILE` | Se usa para limpieza de cookie en WEB |
+
+---
+
+### **Body**
+
+❌ No usa body
+
+---
+
+### **Qué hace exactamente**
+
+1. Extrae el `userId` del access token.
+2. Revoca **todas** las sesiones del usuario en base de datos (incluye la actual).
+3. En **WEB**, limpia la cookie `rt` para evitar que el navegador siga intentando refresh.
+4. Responde `204 No Content`.
+
+📌 Importante:
+
+* Después de esto, cualquier access token que aún “no haya expirado” puede seguir siendo válido si tu sistema no valida sesión por request.
+  Pero en tu flujo real, al expirar el access token, **ya no habrá refresh posible** y el usuario queda fuera.
+* Si tu middleware valida que el `sid` exista/esté activo, el logout-all invalida todo de inmediato.
+
+---
+
+### **Respuesta 204**
+
+Sin body.
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                                     |
+| ------ | ------------------------------------------ |
+| `401`  | Access token inválido o ausente            |
+| `400`  | Falta `X-Client-Platform` o valor inválido |
+
+---
+
+### **Consideraciones de diseño**
+
+* Recomendado exponerlo en UI como: **“Cerrar sesión en todos los dispositivos”**
+* Para MOBILE: después de `204`, el cliente debe **borrar** cualquier refresh token guardado en Secure Storage.
+
+---
+
+## 1.4.5 Perfil del usuario autenticado
+
+### **GET `/auth/me`**
+
+Devuelve la información del usuario autenticado a partir del access token.
+Se usa para:
+
+* hidratar el estado de sesión en front
+* validar rol/permisos
+* mostrar perfil y estado de verificación
+
+📌 Ojo: este endpoint **no renueva tokens**. Solo lee “quién soy”.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+
+`Authorization: Bearer <accessToken>`
+
+---
+
+### **Headers obligatorios**
+
+| Header              | Valores          | Descripción                               |
+| ------------------- | ---------------- | ----------------------------------------- |
+| `X-Client-Platform` | `WEB` | `MOBILE` | Mantiene consistencia en auditoría / logs |
+
+---
+
+### **Query params**
+
+Ninguno.
+
+---
+
+### **Body**
+
+❌ No usa body.
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida access token y extrae `userId` (y opcionalmente `sid`).
+2. Busca el usuario en base de datos.
+3. Verifica reglas mínimas:
+
+   * usuario existe
+   * usuario activo
+4. Devuelve el perfil “safe” (sin password hash, sin secretos).
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "id": "cus_123",
+    "email": "user@example.com",
+    "nombres": "Ana",
+    "apellidos": "Pérez",
+    "rol": "SUPERVISOR",
+    "activo": true,
+    "profileStatus": "COMPLETE",
+    "emailVerifiedAt": "2026-01-26T20:40:07.423Z",
+    "createdAt": "2026-01-26T20:40:07.423Z",
+    "updatedAt": "2026-02-03T20:10:00.000Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                                                    |
+| ------ | --------------------------------------------------------- |
+| `401`  | Access token inválido o ausente                           |
+| `404`  | Usuario no existe (token viejo o data inconsistente)      |
+| `403`  | Usuario inactivo/bloqueado (si lo manejas como forbidden) |
+
+---
+
+### **Consideraciones para FRONT / MOBILE**
+
+* Úsalo al iniciar la app si ya tienes un access token en memoria.
+* Si `/auth/me` responde `401`, intenta:
+
+  1. `POST /auth/refresh`
+  2. luego reintenta `GET /auth/me`
+  3. si falla, limpia sesión y manda a login
+
+---
+
 ### CRUD Usuarios (RBAC)
 
-* `GET /users` → solo **SUPER_ADMIN**.
-* `POST /users` → solo **SUPER_ADMIN**.
-* `GET /users/:id` → **SUPER_ADMIN** o propietario.
-* `PATCH /users/:id` → **SUPER_ADMIN** o propietario (limitado).
-* `DELETE /users/:id` → solo **SUPER_ADMIN** (o desactivar con `activo=false`).
+## 1.4.6 Listado administrativo de usuarios
+
+### **GET `/users`**
+
+Obtiene un listado **paginado** de usuarios con filtros combinables, búsqueda textual, rango de fechas y ordenamiento.
+
+📌 Este endpoint es la **base** de `/users/search` (alias).
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPER_ADMIN`
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Query params disponibles**
+
+Todos opcionales y combinables:
+
+| Parámetro       | Tipo    | Descripción                                                 |
+| --------------- | ------- | ----------------------------------------------------------- |
+| `page`          | number  | Página (default `1`)                                        |
+| `pageSize`      | number  | Tamaño (1–100, default `20`)                                |
+| `search`        | string  | Busca en `nombres`, `apellidos`, `email` (case-insensitive) |
+| `rol`           | enum    | `SUPER_ADMIN` | `SUPERVISOR` | `GUIA`                       |
+| `activo`        | boolean | `true` / `false`                                            |
+| `profileStatus` | enum    | `INCOMPLETE` | `COMPLETE`                                   |
+| `createdFrom`   | date    | `createdAt >=`                                              |
+| `createdTo`     | date    | `createdAt <=`                                              |
+| `updatedFrom`   | date    | `updatedAt >=`                                              |
+| `updatedTo`     | date    | `updatedAt <=`                                              |
+| `orderBy`       | enum    | `createdAt` | `updatedAt` | `email`                         |
+| `orderDir`      | enum    | `asc` | `desc`                                              |
+
+📌 Fechas: `YYYY-MM-DD` o ISO.
+
+---
+
+### **Ejemplos**
+
+**Buscar por texto**
+
+```
+GET /users?search=ana
+```
+
+**Filtrar guías activos**
+
+```
+GET /users?rol=GUIA&activo=true
+```
+
+**Ordenar por email**
+
+```
+GET /users?orderBy=email&orderDir=asc
+```
+
+---
+
+### **Reglas de negocio**
+
+* Solo accesible por `SUPER_ADMIN`.
+* Paginación siempre aplicada (aunque no mandes params).
+* Ordenamiento solo por campos permitidos (whitelist).
+* Validación estricta con Zod sobre `req.query` (coerción a number/boolean/date).
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": [
+    {
+      "id": "cus_123",
+      "email": "guia1@test.com",
+      "nombres": "Carlos",
+      "apellidos": "Rodríguez",
+      "rol": "GUIA",
+      "activo": true,
+      "profileStatus": "COMPLETE",
+      "createdAt": "2026-01-26T20:40:07.423Z",
+      "updatedAt": "2026-01-26T20:40:07.423Z"
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "pageSize": 20,
+    "total": 2,
+    "totalPages": 1
+  },
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                       |
+| ------ | ---------------------------- |
+| `401`  | Token inválido o ausente     |
+| `403`  | No es `SUPER_ADMIN`          |
+| `400`  | Query params inválidos (Zod) |
+
+---
+
+## 1.4.7 Creación de usuario (admin)
+
+### **POST `/users`**
+
+Crea un usuario desde administración (RBAC).
+Se usa para crear Supervisores/Guías (o SuperAdmin si lo permites) y dejarlo listo para completar perfil.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPER_ADMIN`
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Body**
+
+```json
+{
+  "email": "nuevo@gestionguias.com",
+  "password": "Str0ngP@ss!",
+  "nombres": "Ana",
+  "apellidos": "Pérez",
+  "rol": "GUIA",
+  "activo": true
+}
+```
+
+📌 Reglas típicas (según tu estándar):
+
+* `email` válido y único (case-insensitive recomendado).
+* `password` válido (mín/max; si aplicas política).
+* `rol` dentro de enum permitido.
+* `activo` opcional (default `true`).
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida body con **Zod**.
+2. Verifica si existe usuario con ese email:
+
+   * si existe → `409 Conflict`.
+3. Hashea contraseña.
+4. Crea usuario con estado inicial:
+
+   * `profileStatus` usualmente `INCOMPLETE` (hasta completar perfil).
+5. Devuelve el usuario “safe” (sin password).
+
+---
+
+### **Respuesta 201**
+
+```json
+{
+  "data": {
+    "id": "cus_999",
+    "email": "nuevo@gestionguias.com",
+    "nombres": "Ana",
+    "apellidos": "Pérez",
+    "rol": "GUIA",
+    "activo": true,
+    "profileStatus": "INCOMPLETE",
+    "createdAt": "2026-02-04T02:10:00.000Z",
+    "updatedAt": "2026-02-04T02:10:00.000Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                   |
+| ------ | ------------------------ |
+| `401`  | Token inválido o ausente |
+| `403`  | No es `SUPER_ADMIN`      |
+| `400`  | Body inválido (Zod)      |
+| `409`  | Email ya registrado      |
+
+---
+
+### **Consideraciones**
+
+* Este endpoint es “admin-only”. Para onboarding externo, tu sistema usa **Invitations** (más seguro).
+* Si quieres forzar verificación email, puedes crear con `emailVerifiedAt = null` y disparar flujo de verificación/invitación.
+
+---
+
+## 1.4.8 Obtener usuario por ID (admin)
+
+### **GET `/users/:id`**
+
+Obtiene el detalle de un usuario específico para administración.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPER_ADMIN`
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Path params**
+
+| Param | Tipo   | Descripción    |
+| ----- | ------ | -------------- |
+| `id`  | string | ID del usuario |
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida `id` (formato esperado).
+2. Busca el usuario.
+3. Si no existe → `404`.
+4. Devuelve el usuario “safe”.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "id": "cus_123",
+    "email": "guia1@test.com",
+    "nombres": "Carlos",
+    "apellidos": "Rodríguez",
+    "rol": "GUIA",
+    "activo": true,
+    "profileStatus": "COMPLETE",
+    "emailVerifiedAt": "2026-01-26T20:40:07.423Z",
+    "createdAt": "2026-01-26T20:40:07.423Z",
+    "updatedAt": "2026-02-03T20:10:00.000Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                   |
+| ------ | ------------------------ |
+| `401`  | Token inválido o ausente |
+| `403`  | No es `SUPER_ADMIN`      |
+| `404`  | Usuario no existe        |
+| `400`  | `id` inválido            |
+
+---
+
+## 1.4.9 Actualización de usuario (admin)
+
+### **PATCH `/users/:id`**
+
+Actualiza campos administrativos de un usuario existente (perfil básico, rol, estado activo, etc.) sin exponer datos sensibles.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPER_ADMIN`
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Path params**
+
+| Param | Tipo   | Descripción    |
+| ----- | ------ | -------------- |
+| `id`  | string | ID del usuario |
+
+---
+
+### **Body**
+
+Todos los campos son opcionales (se actualiza solo lo enviado):
+
+```json
+{
+  "email": "nuevo@email.com",
+  "nombres": "Carlos",
+  "apellidos": "Rodríguez",
+  "rol": "GUIA",
+  "activo": true,
+  "profileStatus": "COMPLETE"
+}
+```
+
+📌 Reglas típicas:
+
+* `email` si se envía: debe ser válido y no estar ocupado por otro usuario.
+* `rol`: solo valores del enum.
+* `activo`: boolean real.
+* `profileStatus`: solo enum permitido.
+* No se actualiza contraseña aquí (eso va por flujo dedicado: change-password o reset).
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida `id` y `body` con **Zod**.
+2. Busca el usuario:
+
+   * si no existe → `404`.
+3. Si se envía `email`, valida unicidad:
+
+   * si ya existe en otro usuario → `409 Conflict`.
+4. Aplica el update solo de los campos presentes.
+5. Devuelve el usuario “safe” (sin password hash ni tokens).
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "id": "cus_123",
+    "email": "nuevo@email.com",
+    "nombres": "Carlos",
+    "apellidos": "Rodríguez",
+    "rol": "GUIA",
+    "activo": true,
+    "profileStatus": "COMPLETE",
+    "createdAt": "2026-01-26T20:40:07.423Z",
+    "updatedAt": "2026-02-04T02:20:00.000Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                              |
+| ------ | ----------------------------------- |
+| `401`  | Token inválido o ausente            |
+| `403`  | No es `SUPER_ADMIN`                 |
+| `404`  | Usuario no existe                   |
+| `400`  | Body inválido (Zod)                 |
+| `409`  | Email ya registrado en otro usuario |
+
+---
+
+### **Consideraciones de negocio**
+
+* Cambiar `rol` puede afectar permisos inmediatamente.
+* Cambiar `activo=false` debería impedir login y/o consumo de endpoints si tu middleware lo valida.
+* Si tu sistema tiene auditoría, este endpoint debería registrar quién actualizó y qué cambió.
+
+---
+
+## 1.4.10 Eliminación de usuario (admin)
+
+### **DELETE `/users/:id`**
+
+Elimina un usuario desde administración.
+
+📌 Nota importante (define el comportamiento real del sistema):
+
+* Si tu implementación es **borrado lógico**, normalmente hace `activo=false` (y opcionalmente marca `deletedAt`).
+* Si es **borrado físico**, elimina el registro (menos recomendable si hay auditoría/relaciones).
+
+Mimi lo documenta como “admin delete” y tú ajustas una línea según cómo lo tengas en el service.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPER_ADMIN`
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Path params**
+
+| Param | Tipo   | Descripción    |
+| ----- | ------ | -------------- |
+| `id`  | string | ID del usuario |
+
+---
+
+### **Body**
+
+❌ No usa body.
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida `id`.
+2. Busca el usuario:
+
+   * si no existe → `404`.
+3. Aplica eliminación según estrategia:
+
+   * **Soft delete (recomendado):** marca `activo=false` (y opcional `deletedAt`).
+   * **Hard delete:** elimina registro.
+4. (Recomendado) Revoca sesiones del usuario si existe `logout-all` interno por seguridad.
+5. Responde `204 No Content`.
+
+---
+
+### **Respuesta 204**
+
+Sin body.
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                   |
+| ------ | ------------------------ |
+| `401`  | Token inválido o ausente |
+| `403`  | No es `SUPER_ADMIN`      |
+| `404`  | Usuario no existe        |
+| `400`  | `id` inválido            |
+
+---
+
+### **Consideraciones de diseño**
+
+* Soft delete suele ser mejor para:
+
+  * auditoría
+  * integridad referencial (Turnos/Atenciones/Recaladas ligadas al usuario)
+  * evitar “agujeros” históricos en reportes
+* Si haces hard delete, asegura que Prisma no te bloquee por relaciones (o define cascadas con cuidado).
 
 ---
 
@@ -693,8 +1577,6 @@ model EmailVerificationToken {
 4. Backend responde **200 OK** siempre.
 5. El frontend recibe el token desde el link para llamar luego a `POST /auth/verify-email/confirm`.
 
-Listo. Mimi te deja el bloque **1.12.2 (Confirmación)** ya redactado para pegarlo tal cual, y luego el **Definition of Done** actualizado con lo nuevo ✅
-
 ---
 
 ## **1.12.2 Confirmación de verificación (implementado)**
@@ -1077,15 +1959,6 @@ GET /users/search?page=1&pageSize=10&rol=GUIA&activo=true&profileStatus=COMPLETE
 
 ---
 
-Perfecto, Duvan. Aquí va la actualización **por partes** tal como la quieres:
-
-* ✅ **1.15** ahora será el nuevo endpoint **GET `/users/me`**
-* ✅ El **Definition of Done** baja a **1.16** y se actualiza con este endpoint (siguiendo tu estilo)
-
-Te lo dejo listo para pegar en tu `auth_usuarios.md` (o donde estés llevando ese bloque).
-
----
-
 # **1.15 Perfil del usuario autenticado (implementado)**
 
 Este endpoint permite obtener el **perfil del usuario actualmente autenticado**, sin necesidad de conocer su `id`, y sin depender de endpoints administrativos.
@@ -1204,7 +2077,7 @@ Ninguno adicional.
 
 ---
 
-# ✅ **1.16 Definition of Done (actualizado)**
+# **1.16 Definition of Done (actualizado)**
 
 * Login / Refresh / Logout / Logout-all funcionando correctamente.
 * CRUD de usuarios con RBAC activo.

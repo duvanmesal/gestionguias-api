@@ -1,6 +1,7 @@
 import { Router } from "express"
 import { validate } from "../libs/zod-mw"
 import { requireAuth } from "../libs/auth"
+import { conditionalValidate } from "../libs/conditional-validate"
 import { detectClientPlatform } from "../middlewares/clientPlatform"
 import { authController } from "../modules/auth/auth.controller"
 import {
@@ -28,7 +29,10 @@ router.post(
 router.post(
   "/refresh",
   detectClientPlatform,
-  validate({ body: refreshSchema }),
+  conditionalValidate({
+    WEB: undefined,
+    MOBILE: { body: refreshSchema },
+  }),
   authController.refresh.bind(authController),
 )
 

@@ -72,6 +72,11 @@ function addHours(date: Date, hours: number) {
   return new Date(date.getTime() + hours * 60 * 60 * 1000)
 }
 
+// ✅ Helper: normaliza código de buque
+function normalizeShipCode(code: string) {
+  return code.trim().toUpperCase()
+}
+
 async function main() {
   console.log("🌱 Starting database seeding...")
 
@@ -95,7 +100,7 @@ async function main() {
     // ✅ NUEVO: Atenciones + Turnos slots 1..N
     await upsertDevAtencionesAndTurnos({
       recaladas,
-      supervisorEmail: "supervisor@test.com",
+      supervisorEmail: "duvanmesa1516@gmail.com.com",
       createdByEmail: SUPER_EMAIL, // auditoría: quien crea en seed (SuperAdmin)
     })
   }
@@ -143,7 +148,7 @@ async function upsertCountries() {
   for (const c of countries) {
     await prisma.pais.upsert({
       where: { codigo: c.codigo },
-      update: { nombre: c.nombre }, // por si cambiaste el nombre
+      update: { nombre: c.nombre },
       create: c,
     })
   }
@@ -151,11 +156,30 @@ async function upsertCountries() {
 }
 
 async function upsertShips() {
-  // Añadimos codigoPais para resolver paisId en create/update
+  // ✅ Ahora incluye codigo (REQUIRED en prisma)
+  // Mantén estos códigos únicos
   const ships = [
-    { nombre: "Wonder of the Seas", naviera: "Royal Caribbean", capacidad: 7084, codigoPais: "US" },
-    { nombre: "MSC Meraviglia", naviera: "MSC Cruises", capacidad: 5714, codigoPais: "IT" },
-    { nombre: "Norwegian Epic", naviera: "Norwegian Cruise Line", capacidad: 5183, codigoPais: "US" },
+    {
+      codigo: "B-001",
+      nombre: "Wonder of the Seas",
+      naviera: "Royal Caribbean",
+      capacidad: 7084,
+      codigoPais: "US",
+    },
+    {
+      codigo: "B-002",
+      nombre: "MSC Meraviglia",
+      naviera: "MSC Cruises",
+      capacidad: 5714,
+      codigoPais: "IT",
+    },
+    {
+      codigo: "B-003",
+      nombre: "Norwegian Epic",
+      naviera: "Norwegian Cruise Line",
+      capacidad: 5183,
+      codigoPais: "US",
+    },
   ]
 
   for (const s of ships) {
@@ -164,18 +188,24 @@ async function upsertShips() {
     await prisma.buque.upsert({
       where: { nombre: s.nombre },
       update: {
+        // ✅ también actualizamos codigo para mantener consistencia
+        codigo: normalizeShipCode(s.codigo),
         naviera: s.naviera,
         capacidad: s.capacidad,
-        paisId, // corrige si ya existía sin paisId
+        paisId,
+        status: StatusType.ACTIVO,
       },
       create: {
+        codigo: normalizeShipCode(s.codigo), // ✅ REQUIRED
         nombre: s.nombre,
         naviera: s.naviera,
         capacidad: s.capacidad,
-        paisId, // crea ya vinculado al país
+        paisId,
+        status: StatusType.ACTIVO,
       },
     })
   }
+
   console.log(`🚢 Ships upserted: ${ships.length}`)
 }
 
@@ -242,8 +272,8 @@ async function fixShipsPaisIdIfNull() {
 
 async function upsertTestUsers() {
   const users = [
-    { email: "supervisor@test.com", password: "Test123!", nombres: "María", apellidos: "González", rol: RolType.SUPERVISOR },
-    { email: "guia1@test.com", password: "Test123!", nombres: "Carlos", apellidos: "Rodríguez", rol: RolType.GUIA },
+    { email: "duvanmesa1516@gmail.com.com", password: "Test123!", nombres: "María", apellidos: "González", rol: RolType.SUPERVISOR },
+    { email: "chonchipro123@gmail.com", password: "Test123!", nombres: "Carlos", apellidos: "Rodríguez", rol: RolType.GUIA },
     { email: "guia2@test.com", password: "Test123!", nombres: "Ana", apellidos: "Martínez", rol: RolType.GUIA },
   ]
 
@@ -303,7 +333,7 @@ async function upsertTestUsers() {
 // ✅ Recaladas de ejemplo (DEV) con codigoRecalada y operationalStatus
 // Devuelve las recaladas creadas para encadenar atenciones.
 async function upsertDevRecaladas() {
-  const supervisorId = await resolveSupervisorIdOrThrow("supervisor@test.com")
+  const supervisorId = await resolveSupervisorIdOrThrow("duvanmesa1516@gmail.com.com")
 
   const buque1 = await resolveBuqueIdOrThrow("Wonder of the Seas")
   const buque2 = await resolveBuqueIdOrThrow("MSC Meraviglia")
@@ -324,7 +354,7 @@ async function upsertDevRecaladas() {
       buqueId: buque1,
       paisOrigenId: paisUS,
       supervisorId,
-      codigoRecalada: tempCodigoRecalada(), // ✅ único en el insert
+      codigoRecalada: tempCodigoRecalada(),
       fechaLlegada: in2Days,
       fechaSalida: in3Days,
       status: StatusType.ACTIVO,
@@ -343,7 +373,7 @@ async function upsertDevRecaladas() {
       buqueId: buque2,
       paisOrigenId: paisIT,
       supervisorId,
-      codigoRecalada: tempCodigoRecalada(), // ✅ único en el insert
+      codigoRecalada: tempCodigoRecalada(),
       fechaLlegada: in7Days,
       fechaSalida: in8Days,
       status: StatusType.ACTIVO,
@@ -357,7 +387,6 @@ async function upsertDevRecaladas() {
     },
   })
 
-  // Backfill determinístico: RA-YYYY-000123
   const r1Final = await prisma.recalada.update({
     where: { id: r1.id },
     data: { codigoRecalada: buildCodigoRecalada(r1.fechaLlegada, r1.id) },
@@ -384,8 +413,6 @@ async function upsertDevAtencionesAndTurnos(input: DevAtencionesInput) {
   const supervisorId = await resolveSupervisorIdOrThrow(input.supervisorEmail)
   const createdById = await resolveUserIdOrThrow(input.createdByEmail)
 
-  // Para evitar solapes, generamos 2 atenciones por recalada, en ventanas separadas
-  // (y siempre dentro de [fechaLlegada, fechaSalida])
   for (const r of input.recaladas) {
     if (!r.fechaSalida) {
       console.log(`⚠️ Recalada id=${r.id} no tiene fechaSalida, se omiten atenciones dev.`)
@@ -393,16 +420,14 @@ async function upsertDevAtencionesAndTurnos(input: DevAtencionesInput) {
     }
 
     const baseStart = addHours(r.fechaLlegada, 1)
-    const baseEnd = addHours(baseStart, 4) // 4h
+    const baseEnd = addHours(baseStart, 4)
 
-    const secondStart = addHours(baseEnd, 1) // gap 1h
-    const secondEnd = addHours(secondStart, 3) // 3h
+    const secondStart = addHours(baseEnd, 1)
+    const secondEnd = addHours(secondStart, 3)
 
-    // Asegurar que no se pase de fechaSalida
     const a1End = baseEnd > r.fechaSalida ? r.fechaSalida : baseEnd
     const a2End = secondEnd > r.fechaSalida ? r.fechaSalida : secondEnd
 
-    // Si por ajustes quedan inválidas, saltar
     if (a1End <= baseStart) {
       console.log(`⚠️ Ventana inválida para atención 1 en recalada id=${r.id}. Se omite.`)
       continue
@@ -412,8 +437,6 @@ async function upsertDevAtencionesAndTurnos(input: DevAtencionesInput) {
       continue
     }
 
-    // Creamos/actualizamos por “huella” estable: recaladaId + fechas.
-    // Como no tenemos unique en prisma para eso, hacemos findFirst.
     const desired = [
       {
         descripcion: "Atención Dev A (slots materializados)",
@@ -448,7 +471,6 @@ async function upsertDevAtencionesAndTurnos(input: DevAtencionesInput) {
               turnosTotal: d.turnosTotal,
               status: StatusType.ACTIVO,
               operationalStatus: AtencionOperativeStatus.OPEN,
-              // no tocamos createdById en update para mantener historial
             },
           })
         : await prisma.atencion.create({
@@ -465,8 +487,6 @@ async function upsertDevAtencionesAndTurnos(input: DevAtencionesInput) {
             },
           })
 
-      // Materializar cupo: garantizar turnos 1..N como AVAILABLE
-      // Si se aumentó cupo, crea faltantes; si se disminuyó, borra sobrantes SOLO si están AVAILABLE y sin guia.
       await prisma.$transaction(async (tx) => {
         const current = await tx.turno.findMany({
           where: { atencionId: atencion.id },
@@ -476,7 +496,6 @@ async function upsertDevAtencionesAndTurnos(input: DevAtencionesInput) {
 
         const currentMax = current.length > 0 ? current[current.length - 1]!.numero : 0
 
-        // 1) Aumentar: crear turnos faltantes
         for (let n = currentMax + 1; n <= d.turnosTotal; n++) {
           await tx.turno.create({
             data: {
@@ -484,15 +503,13 @@ async function upsertDevAtencionesAndTurnos(input: DevAtencionesInput) {
               numero: n,
               status: TurnoStatus.AVAILABLE,
               guiaId: null,
-              fechaInicio: d.fechaInicio, // heredamos por defecto
+              fechaInicio: d.fechaInicio,
               fechaFin: d.fechaFin,
               createdById,
             },
           })
         }
 
-        // 2) Alinear existentes (si el seed se corrió antes con otras fechas/estados)
-        //    Solo tocamos slots libres para no romper datos si ya probaste cosas.
         for (const t of current) {
           if (t.status === TurnoStatus.AVAILABLE && !t.guiaId) {
             await tx.turno.update({
@@ -505,7 +522,6 @@ async function upsertDevAtencionesAndTurnos(input: DevAtencionesInput) {
           }
         }
 
-        // 3) Disminuir: eliminar sobrantes (solo libres)
         const toDelete = current
           .filter((t) => t.numero > d.turnosTotal)
           .filter((t) => t.status === TurnoStatus.AVAILABLE && !t.guiaId)
@@ -516,20 +532,19 @@ async function upsertDevAtencionesAndTurnos(input: DevAtencionesInput) {
           })
         }
 
-        // Si hay sobrantes NO eliminables, lo reportamos (y no rompemos la seed)
         const blocked = current
           .filter((t) => t.numero > d.turnosTotal)
           .filter((t) => !(t.status === TurnoStatus.AVAILABLE && !t.guiaId))
 
         if (blocked.length > 0) {
           console.log(
-            `⚠️ Atencion id=${atencion.id}: cupo bajó a ${d.turnosTotal}, pero ${blocked.length} turno(s) > cupo no se pueden borrar (no están libres).`
+            `⚠️ Atencion id=${atencion.id}: cupo bajó a ${d.turnosTotal}, pero ${blocked.length} turno(s) > cupo no se pueden borrar (no están libres).`,
           )
         }
       })
 
       console.log(
-        `🎫 Atencion ready id=${atencion.id} (recaladaId=${r.id}) ventana=${d.fechaInicio.toISOString()} -> ${d.fechaFin.toISOString()} cupo=${d.turnosTotal}`
+        `🎫 Atencion ready id=${atencion.id} (recaladaId=${r.id}) ventana=${d.fechaInicio.toISOString()} -> ${d.fechaFin.toISOString()} cupo=${d.turnosTotal}`,
       )
     }
   }

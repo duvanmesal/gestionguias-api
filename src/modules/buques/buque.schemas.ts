@@ -14,8 +14,8 @@ export const listBuqueQuerySchema = z.object({
 })
 
 export const createBuqueSchema = z.object({
+  codigo: z.string().trim().min(2).max(20),
   nombre: z.string().trim().min(2),
-  // tu schema actual tiene paisId como Int? (opcional)
   paisId: z.coerce.number().int().positive().optional(),
   capacidad: z.coerce.number().int().positive().max(200000).optional(),
   naviera: z.string().trim().min(2).max(80).optional(),
@@ -23,6 +23,7 @@ export const createBuqueSchema = z.object({
 })
 
 export const updateBuqueSchema = z.object({
+  codigo: z.string().trim().min(2).max(20).optional(),
   nombre: z.string().trim().min(2).optional(),
   paisId: z.coerce.number().int().positive().optional(),
   capacidad: z.coerce.number().int().positive().max(200000).optional(),

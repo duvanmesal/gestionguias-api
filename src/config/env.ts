@@ -50,7 +50,7 @@ const Env = z.object({
   // CORS
   CORS_ALLOWED_ORIGINS: z
     .string()
-    .default("http://localhost:3001,http://localhost:5173"),
+    .default("http://localhost:3001,http://localhost:5173,http://localhost:8081"),
   CORS_ALLOW_CREDENTIALS: z.coerce.boolean().default(true),
 })
 

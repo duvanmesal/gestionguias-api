@@ -145,7 +145,7 @@ export class AuthController {
           httpOnly: true,
           secure: process.env.NODE_ENV === "production",
           sameSite: "strict",
-          path: "/",
+          path: "/api/v1/auth/refresh",
         });
       }
 

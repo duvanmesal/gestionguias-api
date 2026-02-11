@@ -17,7 +17,7 @@ export class BuqueService {
     const page = Math.max(Number(query.page) || DEFAULT_PAGE, 1);
     const pageSize = Math.min(
       Math.max(Number(query.pageSize) || DEFAULT_SIZE, 1),
-      100
+      100,
     );
 
     const where: Prisma.BuqueWhereInput = {
@@ -28,6 +28,7 @@ export class BuqueService {
             OR: [
               { nombre: { contains: query.q, mode: "insensitive" } },
               { naviera: { contains: query.q, mode: "insensitive" } },
+              { codigo: { contains: query.q, mode: "insensitive" } },
             ],
           }
         : {}),
@@ -42,11 +43,12 @@ export class BuqueService {
         take: pageSize,
         select: {
           id: true,
+          codigo: true,
           nombre: true,
           status: true,
           capacidad: true,
           naviera: true,
-          pais: { select: { id: true, codigo: true, nombre: true } }, // relación opcional en tu schema actual
+          pais: { select: { id: true, codigo: true, nombre: true } },
           createdAt: true,
           updatedAt: true,
         },
@@ -61,6 +63,7 @@ export class BuqueService {
       where: { id },
       select: {
         id: true,
+        codigo: true,
         nombre: true,
         status: true,
         capacidad: true,
@@ -73,12 +76,14 @@ export class BuqueService {
   }
 
   static async create(data: {
+    codigo: string;
     nombre: string;
     paisId?: number;
     capacidad?: number | null;
     naviera?: string | null;
     status?: "ACTIVO" | "INACTIVO";
   }) {
+    // Validación país si viene
     if (data.paisId !== undefined) {
       const exists = await prisma.pais.findUnique({
         where: { id: data.paisId },
@@ -93,14 +98,16 @@ export class BuqueService {
 
     return prisma.buque.create({
       data: {
+        codigo: data.codigo,
         nombre: data.nombre,
-        paisId: data.paisId ?? null, // opcional en tu schema actual
+        paisId: data.paisId ?? null,
         capacidad: data.capacidad ?? null,
         naviera: data.naviera ?? null,
         status: (data.status as any) ?? "ACTIVO",
       },
       select: {
         id: true,
+        codigo: true,
         nombre: true,
         status: true,
         capacidad: true,
@@ -115,12 +122,13 @@ export class BuqueService {
   static async update(
     id: number,
     data: Partial<{
+      codigo: string;
       nombre: string;
       paisId: number;
       capacidad: number | null;
       naviera: string | null;
       status: "ACTIVO" | "INACTIVO";
-    }>
+    }>,
   ) {
     if (data.paisId !== undefined) {
       const exists = await prisma.pais.findUnique({
@@ -137,6 +145,7 @@ export class BuqueService {
     return prisma.buque.update({
       where: { id },
       data: {
+        ...(data.codigo !== undefined ? { codigo: data.codigo } : {}),
         ...(data.nombre !== undefined ? { nombre: data.nombre } : {}),
         ...(data.paisId !== undefined ? { paisId: data.paisId } : {}),
         ...(data.capacidad !== undefined ? { capacidad: data.capacidad } : {}),
@@ -145,6 +154,7 @@ export class BuqueService {
       },
       select: {
         id: true,
+        codigo: true, 
         nombre: true,
         status: true,
         capacidad: true,
@@ -172,7 +182,13 @@ export class BuqueService {
     return prisma.buque.update({
       where: { id },
       data: { status: "INACTIVO" },
-      select: { id: true, nombre: true, status: true, updatedAt: true },
+      select: {
+        id: true,
+        codigo: true,
+        nombre: true,
+        status: true,
+        updatedAt: true,
+      },
     });
   }
 
@@ -182,6 +198,7 @@ export class BuqueService {
       orderBy: [{ nombre: "asc" }],
       select: {
         id: true,
+        codigo: true,
         nombre: true,
         pais: { select: { id: true, codigo: true } },
       },

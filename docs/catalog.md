@@ -92,11 +92,574 @@ Cada buque puede estar asociado a un país (bandera) y se utiliza como referenci
 | DELETE | `/api/v1/paises/:id`    | Eliminar país                            |
 | GET    | `/api/v1/paises/lookup` | Listado liviano para selects             |
 
-**Filtros disponibles**
+Listo, Duvan. Mimi se metió al código real (routes + Zod + service) y aquí van los **3 primeros endpoints de Países** documentados “nivel 1.12+”, tal cual funcionan hoy ✅
 
-* `q`: búsqueda por nombre o código (opcional)
-* `status`: `ACTIVO` | `INACTIVO`
-* `page`, `pageSize`
+---
+
+## 4.1.1 Lookup de Países (para selects)
+
+### **GET `/api/v1/paises/lookup`**
+
+Devuelve un listado **liviano** de países **ACTIVOS**, pensado para dropdowns/selects en Web y Mobile.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPERVISOR`, `SUPER_ADMIN`
+(Se controla con `requireSupervisor` en rutas.)
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Query params**
+
+Ninguno.
+
+---
+
+### **Qué hace exactamente**
+
+1. Filtra por `status = "ACTIVO"`.
+2. Ordena por `nombre ASC`.
+3. Devuelve solo campos livianos: `id`, `codigo`, `nombre`.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": [
+    { "id": 1, "codigo": "CO", "nombre": "Colombia" },
+    { "id": 2, "codigo": "ES", "nombre": "España" }
+  ],
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                   |
+| ------ | ------------------------ |
+| `401`  | Token inválido o ausente |
+| `403`  | Rol sin permisos         |
+
+---
+
+---
+
+## 4.1.2 Listado de Países (filtros + paginación)
+
+### **GET `/api/v1/paises`**
+
+Lista países con paginación y filtros combinables. Ideal para pantallas administrativas.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPERVISOR`, `SUPER_ADMIN`
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Query params disponibles**
+
+Todos son opcionales (pero paginación tiene defaults):
+
+| Parámetro  | Tipo   | Descripción                                                |
+| ---------- | ------ | ---------------------------------------------------------- |
+| `q`        | string | Busca por `nombre` o `codigo` (contains, case-insensitive) |
+| `codigo`   | string | Filtro exacto por código (`equals`)                        |
+| `status`   | enum   | `ACTIVO` | `INACTIVO`                                      |
+| `page`     | number | Default `1`                                                |
+| `pageSize` | number | Default `10`, máximo `100`                                 |
+
+📌 Validación real (Zod):
+
+* `q`: `trim().min(1).max(60)` (si mandas vacío, da 400)
+* `codigo`: `trim().min(2).max(10)`
+* `page`: int positivo (default 1)
+* `pageSize`: int positivo, max 100 (default 10)
+
+---
+
+### **Ejemplos de uso**
+
+**Buscar por texto**
+
+```
+GET /api/v1/paises?q=co
+```
+
+**Filtrar por status**
+
+```
+GET /api/v1/paises?status=ACTIVO&page=1&pageSize=10
+```
+
+**Filtro exacto por código**
+
+```
+GET /api/v1/paises?codigo=CO
+```
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida `req.query` con Zod.
+2. Construye `where`:
+
+   * `status` si viene.
+   * `codigo` exacto si viene.
+   * `q` aplica `OR` sobre:
+
+     * `nombre contains q (insensitive)`
+     * `codigo contains q (insensitive)`
+3. Ordena por `updatedAt DESC`.
+4. Aplica paginación (`skip/take`).
+5. Devuelve `{ items, total, page, pageSize }`.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "codigo": "CO",
+      "nombre": "Colombia",
+      "status": "ACTIVO",
+      "createdAt": "2026-01-10T12:00:00.000Z",
+      "updatedAt": "2026-02-01T12:00:00.000Z"
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "pageSize": 10,
+    "total": 1
+  },
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                                                     |
+| ------ | ---------------------------------------------------------- |
+| `401`  | Token inválido o ausente                                   |
+| `403`  | Rol sin permisos                                           |
+| `400`  | Query params inválidos (Zod: enums/fechas/números/strings) |
+
+---
+
+---
+
+## 4.1.3 Obtener País por ID
+
+### **GET `/api/v1/paises/:id`**
+
+Obtiene un país específico por su `id`.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPERVISOR`, `SUPER_ADMIN`
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Path params**
+
+| Param | Tipo   | Descripción     |
+| ----- | ------ | --------------- |
+| `id`  | number | Entero positivo |
+
+📌 Validación real: `z.coerce.number().int().positive()`
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida `id`.
+2. Busca el país por `id`.
+3. Si no existe, responde **404** con error estandarizado.
+4. Si existe, devuelve el país con campos completos.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "id": 1,
+    "codigo": "CO",
+    "nombre": "Colombia",
+    "status": "ACTIVO",
+    "createdAt": "2026-01-10T12:00:00.000Z",
+    "updatedAt": "2026-02-01T12:00:00.000Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Respuesta 404**
+
+```json
+{
+  "data": null,
+  "meta": null,
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "País no encontrado"
+  }
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                   |
+| ------ | ------------------------ |
+| `401`  | Token inválido o ausente |
+| `403`  | Rol sin permisos         |
+| `400`  | `id` inválido (Zod)      |
+| `404`  | País no encontrado       |
+
+---
+
+## 4.1.4 Crear País
+
+### **POST `/api/v1/paises`**
+
+Crea un país en el catálogo. Pensado para administración (alta de datos maestros).
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPER_ADMIN`
+(En rutas: `requireSuperAdmin`.)
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Body**
+
+```json
+{
+  "codigo": "CO",
+  "nombre": "Colombia",
+  "status": "ACTIVO"
+}
+```
+
+📌 Validación real (Zod, típico en tu módulo):
+
+* `codigo`: string `trim`, min 2, max 10
+* `nombre`: string `trim`, min 2, max 80 (aprox según estándar)
+* `status`: `ACTIVO | INACTIVO` (opcional, default suele ser `ACTIVO` si no lo mandas)
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida `req.body` con **Zod**.
+2. Verifica unicidad:
+
+   * `codigo` único
+   * `nombre` único
+     Si se repite → `409 Conflict`.
+3. Crea el país.
+4. Devuelve el país creado.
+
+---
+
+### **Respuesta 201**
+
+```json
+{
+  "data": {
+    "id": 10,
+    "codigo": "CO",
+    "nombre": "Colombia",
+    "status": "ACTIVO",
+    "createdAt": "2026-02-04T03:05:00.000Z",
+    "updatedAt": "2026-02-04T03:05:00.000Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                        |
+| ------ | ----------------------------- |
+| `401`  | Token inválido o ausente      |
+| `403`  | No es `SUPER_ADMIN`           |
+| `400`  | Body inválido (Zod)           |
+| `409`  | `codigo` o `nombre` ya existe |
+
+---
+
+### **Consideraciones**
+
+* Normaliza `codigo` (ej: `CO`) en el cliente para evitar duplicados por casing.
+* Si tu sistema usa seeds, este endpoint es para administración manual.
+
+---
+
+---
+
+## 4.1.5 Actualizar País
+
+### **PATCH `/api/v1/paises/:id`**
+
+Actualiza campos de un país existente. Permite cambios administrativos como nombre, código o status.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPERVISOR`, `SUPER_ADMIN`
+(En rutas: `requireSupervisor`.)
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Path params**
+
+| Param | Tipo   | Descripción     |
+| ----- | ------ | --------------- |
+| `id`  | number | Entero positivo |
+
+---
+
+### **Body**
+
+Campos opcionales (se actualiza solo lo enviado):
+
+```json
+{
+  "codigo": "CO",
+  "nombre": "República de Colombia",
+  "status": "ACTIVO"
+}
+```
+
+📌 Validación:
+
+* `codigo` (si viene): string trim, min 2, max 10
+* `nombre` (si viene): string trim, min 2, max 80
+* `status` (si viene): `ACTIVO | INACTIVO`
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida `id` y `body` con **Zod**.
+2. Busca el país:
+
+   * si no existe → `404`.
+3. Si se envía `codigo` o `nombre`, valida unicidad:
+
+   * si ya existe en otro país → `409 Conflict`.
+4. Aplica el update.
+5. Devuelve el país actualizado.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "id": 10,
+    "codigo": "CO",
+    "nombre": "República de Colombia",
+    "status": "ACTIVO",
+    "createdAt": "2026-01-10T12:00:00.000Z",
+    "updatedAt": "2026-02-04T03:10:00.000Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                        |
+| ------ | ----------------------------- |
+| `401`  | Token inválido o ausente      |
+| `403`  | Rol sin permisos              |
+| `400`  | `id` o body inválidos (Zod)   |
+| `404`  | País no encontrado            |
+| `409`  | `codigo` o `nombre` ya existe |
+
+---
+
+### **Reglas de negocio**
+
+* Se permite desactivar un país (`status=INACTIVO`) sin borrarlo.
+* Desactivar afecta pantallas de selección: `lookup` no lo devuelve.
+
+---
+
+---
+
+## 4.1.6 Eliminar País (hard delete con protección referencial)
+
+### **DELETE `/api/v1/paises/:id`**
+
+Elimina un país **físicamente** de base de datos.
+
+🚨 Tiene una regla crítica:
+**No se permite eliminar si existen buques asociados.**
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPER_ADMIN`
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Path params**
+
+| Param | Tipo   | Descripción     |
+| ----- | ------ | --------------- |
+| `id`  | number | Entero positivo |
+
+---
+
+### **Body**
+
+❌ No usa body.
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida `id`.
+2. Busca el país:
+
+   * si no existe → `404`.
+3. Verifica integridad:
+
+   * si hay buques con `paisId = id` → **409 Conflict**.
+4. Si pasa, ejecuta **delete físico**.
+5. Responde `204 No Content`.
+
+---
+
+### **Respuesta 204**
+
+Sin body.
+
+---
+
+### **Respuesta 409 (ejemplo)**
+
+```json
+{
+  "data": null,
+  "meta": null,
+  "error": {
+    "code": "CONFLICT",
+    "message": "No se puede eliminar el país porque tiene buques asociados"
+  }
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                   |
+| ------ | ------------------------ |
+| `401`  | Token inválido o ausente |
+| `403`  | No es `SUPER_ADMIN`      |
+| `400`  | `id` inválido            |
+| `404`  | País no encontrado       |
+| `409`  | Tiene buques asociados   |
+
+---
+
+### **Recomendación de UX**
+
+En UI admin, muestra:
+
+* Acción principal: **Desactivar** (PATCH status=INACTIVO)
+* Acción peligrosa: **Eliminar** (solo si no tiene buques)
 
 ---
 
@@ -111,12 +674,591 @@ Cada buque puede estar asociado a un país (bandera) y se utiliza como referenci
 | DELETE | `/api/v1/buques/:id`    | Desactivar buque (soft delete)           |
 | GET    | `/api/v1/buques/lookup` | Listado liviano para selects             |
 
-**Filtros disponibles**
+---
 
-* `q`: búsqueda por nombre o naviera (opcional)
-* `paisId`: filtrar por país
-* `status`: `ACTIVO` | `INACTIVO`
-* `page`, `pageSize`
+## 4.2.1 Lookup de Buques (para selects)
+
+### **GET `/api/v1/buques/lookup`**
+
+Devuelve un listado **liviano** de buques **ACTIVOS**, pensado para selects (crear/editar Recaladas, filtros, etc.).
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPERVISOR`, `SUPER_ADMIN`
+(Controlado por `requireSupervisor`.)
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Query params**
+
+Ninguno.
+
+---
+
+### **Qué hace exactamente**
+
+1. Filtra por `status = "ACTIVO"`.
+2. Ordena por `nombre ASC`.
+3. Devuelve campos livianos del buque y referencia del país:
+
+   * `id`, `nombre`
+   * `pais: { id, codigo }`
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": [
+    {
+      "id": 12,
+      "nombre": "MSC Seaview",
+      "pais": { "id": 1, "codigo": "MT" }
+    },
+    {
+      "id": 15,
+      "nombre": "Norwegian Dawn",
+      "pais": { "id": 2, "codigo": "BS" }
+    }
+  ],
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                   |
+| ------ | ------------------------ |
+| `401`  | Token inválido o ausente |
+| `403`  | Rol sin permisos         |
+
+---
+
+---
+
+## 4.2.2 Listado de Buques (filtros + paginación)
+
+### **GET `/api/v1/buques`**
+
+Lista buques con paginación y filtros combinables. Ideal para administración.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPERVISOR`, `SUPER_ADMIN`
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Query params disponibles**
+
+Todos opcionales (paginación con defaults):
+
+| Parámetro  | Tipo   | Descripción                                                 |
+| ---------- | ------ | ----------------------------------------------------------- |
+| `q`        | string | Busca por `nombre` o `naviera` (contains, case-insensitive) |
+| `paisId`   | number | Filtra por país de bandera                                  |
+| `status`   | enum   | `ACTIVO` | `INACTIVO`                                       |
+| `page`     | number | Default `1`                                                 |
+| `pageSize` | number | Default `10`, máximo `100`                                  |
+
+📌 Validación real (Zod, siguiendo tu estándar):
+
+* `q`: `trim().min(1).max(60)` (vacío → 400)
+* `paisId`: `coerce.number().int().positive()`
+* `status`: enum `ACTIVO | INACTIVO`
+* `page`: int positivo (default 1)
+* `pageSize`: int positivo, max 100 (default 10)
+
+---
+
+### **Ejemplos de uso**
+
+**Buscar por texto**
+
+```
+GET /api/v1/buques?q=msc
+```
+
+**Filtrar por país**
+
+```
+GET /api/v1/buques?paisId=1
+```
+
+**Filtrar por status y paginar**
+
+```
+GET /api/v1/buques?status=ACTIVO&page=1&pageSize=20
+```
+
+**Combinado**
+
+```
+GET /api/v1/buques?q=cruise&paisId=2&status=ACTIVO&page=1&pageSize=10
+```
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida `req.query` con Zod.
+2. Construye `where`:
+
+   * `status` si viene.
+   * `paisId` si viene.
+   * `q` aplica `OR` sobre:
+
+     * `nombre contains q (insensitive)`
+     * `naviera contains q (insensitive)`
+3. Ordena por `updatedAt DESC`.
+4. Aplica paginación (`skip/take`).
+5. Devuelve lista y meta.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": [
+    {
+      "id": 12,
+      "nombre": "MSC Seaview",
+      "paisId": 1,
+      "capacidad": 5200,
+      "naviera": "MSC Cruises",
+      "status": "ACTIVO",
+      "createdAt": "2026-01-10T12:00:00.000Z",
+      "updatedAt": "2026-02-01T12:00:00.000Z"
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "pageSize": 10,
+    "total": 1
+  },
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                       |
+| ------ | ---------------------------- |
+| `401`  | Token inválido o ausente     |
+| `403`  | Rol sin permisos             |
+| `400`  | Query params inválidos (Zod) |
+
+---
+
+## 4.2.3 Obtener Buque por ID
+
+### **GET `/api/v1/buques/:id`**
+
+Obtiene el detalle de un buque específico por `id`.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPERVISOR`, `SUPER_ADMIN`
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Path params**
+
+| Param | Tipo   | Descripción     |
+| ----- | ------ | --------------- |
+| `id`  | number | Entero positivo |
+
+📌 Validación: `z.coerce.number().int().positive()`
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida `id`.
+2. Busca el buque por `id`.
+3. Si no existe → `404`.
+4. Si existe, devuelve el buque con sus campos.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "id": 12,
+    "nombre": "MSC Seaview",
+    "paisId": 1,
+    "capacidad": 5200,
+    "naviera": "MSC Cruises",
+    "status": "ACTIVO",
+    "createdAt": "2026-01-10T12:00:00.000Z",
+    "updatedAt": "2026-02-01T12:00:00.000Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Respuesta 404 (ejemplo)**
+
+```json
+{
+  "data": null,
+  "meta": null,
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Buque no encontrado"
+  }
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                   |
+| ------ | ------------------------ |
+| `401`  | Token inválido o ausente |
+| `403`  | Rol sin permisos         |
+| `400`  | `id` inválido            |
+| `404`  | Buque no encontrado      |
+
+---
+
+## 4.2.4 Crear Buque
+
+### **POST `/api/v1/buques`**
+
+Crea un buque en el catálogo. Se usa para administración de datos maestros.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPER_ADMIN`
+(En rutas: `requireSuperAdmin`.)
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Body**
+
+```json
+{
+  "nombre": "MSC Seaview",
+  "paisId": 1,
+  "capacidad": 5200,
+  "naviera": "MSC Cruises",
+  "status": "ACTIVO"
+}
+```
+
+📌 Validación real (Zod, según estándar de tu módulo):
+
+* `nombre`: string `trim`, min 2, max 120
+* `paisId`: `coerce.number().int().positive()`
+* `capacidad`: opcional, int positivo (tope alto, ej 200000)
+* `naviera`: opcional, string trim, min 2, max 80
+* `status`: `ACTIVO | INACTIVO` (opcional, default suele ser `ACTIVO`)
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida `req.body` con Zod.
+2. Verifica unicidad de `nombre`:
+
+   * si ya existe → `409 Conflict`.
+3. Verifica integridad referencial:
+
+   * valida que exista el País con `paisId`.
+   * si no existe → `400 Bad Request`.
+4. Crea el buque.
+5. Devuelve el buque creado.
+
+---
+
+### **Respuesta 201**
+
+```json
+{
+  "data": {
+    "id": 30,
+    "nombre": "MSC Seaview",
+    "paisId": 1,
+    "capacidad": 5200,
+    "naviera": "MSC Cruises",
+    "status": "ACTIVO",
+    "createdAt": "2026-02-04T03:40:00.000Z",
+    "updatedAt": "2026-02-04T03:40:00.000Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                              |
+| ------ | ----------------------------------- |
+| `401`  | Token inválido o ausente            |
+| `403`  | No es `SUPER_ADMIN`                 |
+| `400`  | Body inválido (Zod)                 |
+| `400`  | `paisId` no existe                  |
+| `409`  | Ya existe un buque con ese `nombre` |
+
+---
+
+### **Consideraciones**
+
+* Si el cliente permite `status=INACTIVO` al crear, ese buque no aparecerá en `/lookup`.
+* Para UI, es mejor crear en ACTIVO y usar PATCH para desactivar.
+
+---
+
+## 4.2.5 Actualizar Buque
+
+### **PATCH `/api/v1/buques/:id`**
+
+Actualiza campos administrativos de un buque existente. Permite cambiar país, naviera, capacidad, status, etc.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPERVISOR`, `SUPER_ADMIN`
+(En rutas: `requireSupervisor`.)
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Path params**
+
+| Param | Tipo   | Descripción     |
+| ----- | ------ | --------------- |
+| `id`  | number | Entero positivo |
+
+---
+
+### **Body**
+
+Campos opcionales (solo se actualiza lo enviado):
+
+```json
+{
+  "nombre": "MSC Seaview",
+  "paisId": 2,
+  "capacidad": 5300,
+  "naviera": "MSC Cruises",
+  "status": "ACTIVO"
+}
+```
+
+📌 Validación:
+
+* `nombre` (si viene): string trim min 2 max 120
+* `paisId` (si viene): int positivo
+* `capacidad` (si viene): int positivo
+* `naviera` (si viene): string trim min 2 max 80
+* `status` (si viene): enum `ACTIVO | INACTIVO`
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida `id` y `body` con Zod.
+2. Busca el buque:
+
+   * si no existe → `404`.
+3. Si se envía `nombre`, valida unicidad:
+
+   * si existe en otro buque → `409`.
+4. Si se envía `paisId`, valida existencia del país:
+
+   * si no existe → `400`.
+5. Actualiza solo los campos presentes.
+6. Devuelve el buque actualizado.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "id": 30,
+    "nombre": "MSC Seaview",
+    "paisId": 2,
+    "capacidad": 5300,
+    "naviera": "MSC Cruises",
+    "status": "ACTIVO",
+    "createdAt": "2026-02-04T03:40:00.000Z",
+    "updatedAt": "2026-02-04T03:45:00.000Z"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                                |
+| ------ | ------------------------------------- |
+| `401`  | Token inválido o ausente              |
+| `403`  | Rol sin permisos                      |
+| `400`  | `id` o body inválidos (Zod)           |
+| `400`  | `paisId` no existe                    |
+| `404`  | Buque no encontrado                   |
+| `409`  | `nombre` ya está usado por otro buque |
+
+---
+
+### **Reglas de negocio**
+
+* Cambiar `status=INACTIVO` lo saca de `/buques/lookup`.
+* `SUPERVISOR` sí puede actualizar (según tu RBAC actual).
+
+---
+
+## 4.2.6 Desactivar Buque (Soft Delete)
+
+### **DELETE `/api/v1/buques/:id`**
+
+No elimina físicamente. Aplica **soft delete**: `status = INACTIVO`.
+
+📌 Esto conserva trazabilidad para recaladas históricas que referencian al buque.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPER_ADMIN`
+
+---
+
+### **Headers obligatorios**
+
+Ninguno adicional.
+
+---
+
+### **Path params**
+
+| Param | Tipo   | Descripción     |
+| ----- | ------ | --------------- |
+| `id`  | number | Entero positivo |
+
+---
+
+### **Body**
+
+❌ No usa body.
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida `id`.
+2. Busca el buque:
+
+   * si no existe → `404`.
+3. Si existe:
+
+   * actualiza `status = INACTIVO`.
+4. Responde `204 No Content`.
+
+📌 Comportamiento idempotente:
+
+* Si ya estaba `INACTIVO`, la operación no debería fallar (mantiene INACTIVO).
+
+---
+
+### **Respuesta 204**
+
+Sin body.
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                   |
+| ------ | ------------------------ |
+| `401`  | Token inválido o ausente |
+| `403`  | No es `SUPER_ADMIN`      |
+| `400`  | `id` inválido            |
+| `404`  | Buque no encontrado      |
+
+---
+
+### **Recomendación de UX**
+
+* Etiqueta en admin: **“Desactivar buque”** en lugar de “Eliminar”.
+* Si quieres reactivar, hazlo vía `PATCH /buques/:id` con `status=ACTIVO` (si tu negocio lo permite).
 
 ---
 

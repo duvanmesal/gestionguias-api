@@ -464,5 +464,3 @@ Estos **ejemplos son mínimos** y sirven para **arrancar**. Para producción, **
 * DX (tests, lint, pre-commit),
 * despliegue confiable (migraciones atómicas, health/readiness, rollback),
 * hardening de Docker (usuario no root, multi-stage, SBOM).
-
-¿Te armo ahora el **scaffold inicial** con estos archivos (nombres exactos) para que copies/pegues y partamos con el **Apartado 1 (Auth + Usuarios/Roles)** sobre esta base?

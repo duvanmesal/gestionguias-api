@@ -56,6 +56,7 @@ export class UserService {
         telefono: true,
         rol: true,
         activo: true,
+        emailVerifiedAt: true,
         profileStatus: true,
         profileCompletedAt: true,
         documentType: true,
