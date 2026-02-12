@@ -846,6 +846,159 @@ Marca un turno como **NO_SHOW** cuando el guía no se presenta.
 
 ---
 
+## ✅ 3.7 Endpoints de Turnos para el rol GUIA (operación real)
+
+Estos endpoints existen para soportar el flujo real del guía en la operación diaria, sin depender de endpoints de panel (supervisor) ni de validaciones que obliguen a conocer IDs específicos.
+
+Principio:  
+> El backend fuerza el `guiaId` a partir del usuario autenticado (JWT).  
+> El front no “dice” qué guía es, solo pregunta por “mis turnos”.
+
+---
+
+### ✅ 3.7.1 Listar mis turnos
+
+#### GET `/turnos/me`
+
+Lista los turnos del guía autenticado con filtros simples (hoy por defecto, o por rango).
+
+**Auth requerida:** ✅ Sí  
+**Roles permitidos:** `GUIA`  
+**Headers obligatorios:**
+
+| Header              | Valor            |
+|-------------------|------------------|
+| Authorization      | Bearer `<token>` |
+| X-Client-Platform  | WEB / MOBILE     |
+
+**Query params (opcionales):**
+
+| Param      | Tipo     | Descripción |
+|-----------|----------|-------------|
+| dateFrom  | date     | Inicio del rango (por defecto: hoy 00:00 si no se envía ningún date) |
+| dateTo    | date     | Fin del rango (por defecto: hoy 23:59 si no se envía ningún date) |
+| status    | enum     | `AVAILABLE`, `ASSIGNED`, `IN_PROGRESS`, `COMPLETED`, `CANCELED`, `NO_SHOW` |
+| recaladaId| number   | Filtra por recalada de la atención |
+| atencionId| number   | Filtra por atención |
+| page      | number   | default 1 |
+| pageSize  | number   | default 20 (max 100) |
+
+**Reglas de negocio:**
+1. El `guiaId` **se fuerza** por el usuario autenticado.
+2. No existe `assigned` aquí (ese filtro es de panel). Este endpoint devuelve únicamente turnos del guía.
+3. Aplica filtro de solapamiento de fechas:
+   - `fechaFin >= dateFrom` (si dateFrom existe)
+   - `fechaInicio <= dateTo` (si dateTo existe)
+
+**Ejemplo de uso:**
+
+GET /turnos/me?status=ASSIGNED&dateFrom=2026-02-11&dateTo=2026-02-13
+
+**Respuesta 200 (ejemplo):**
+```json
+{
+  "data": [
+    {
+      "id": 43,
+      "numero": 2,
+      "status": "ASSIGNED",
+      "guiaId": "cml4abcd0000xxx999",
+      "atencionId": 8,
+      "fechaInicio": "2026-02-11T13:00:00.000Z",
+      "fechaFin": "2026-02-11T15:00:00.000Z"
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "pageSize": 20,
+    "total": 1,
+    "totalPages": 1
+  },
+  "error": null
+}
+````
+
+**Errores esperados:**
+
+* `401` si no hay sesión (requireAuth)
+* `403` si no es `GUIA` (requireGuia)
+* `409` si el usuario autenticado no está asociado a un guía (`Guia.usuarioId` no existe)
+
+---
+
+### ✅ 3.7.2 Obtener mi próximo turno
+
+#### GET `/turnos/me/next`
+
+Retorna el próximo turno del guía autenticado ordenado por `fechaInicio ASC` cuyo estado sea `ASSIGNED` o `IN_PROGRESS`.
+
+**Auth requerida:** ✅ Sí
+**Roles permitidos:** `GUIA`
+
+**Qué hace exactamente:**
+
+1. Obtiene el `guiaId` desde el usuario autenticado.
+2. Busca el primer turno con:
+
+   * `status IN (ASSIGNED, IN_PROGRESS)`
+   * `orderBy fechaInicio asc`
+
+**Respuesta 200:**
+
+* Si existe → `data = Turno`
+* Si no existe → `data = null`
+
+**Ejemplo:**
+
+GET /turnos/me/next
+
+**Respuesta 200 (sin turno):**
+
+```json
+{ "data": null, "meta": null, "error": null }
+```
+
+**Motivo de existencia (UX):**
+
+* Permite al Dashboard del guía mostrar: “Tu siguiente turno es…”
+* Reduce fricción al no depender de listas ni IDs.
+
+---
+
+### ✅ 3.7.3 Obtener mi turno activo
+
+#### GET `/turnos/me/active`
+
+Retorna el turno activo del guía autenticado (`status = IN_PROGRESS`) si existe.
+
+**Auth requerida:** ✅ Sí
+**Roles permitidos:** `GUIA`
+
+**Qué hace exactamente:**
+
+1. Obtiene el `guiaId` desde el usuario autenticado.
+2. Busca el primer turno con:
+
+   * `status = IN_PROGRESS`
+
+**Respuesta 200:**
+
+* Si existe → `data = Turno`
+* Si no existe → `data = null`
+
+**Ejemplo:**
+
+```
+GET /turnos/me/active
+```
+
+**Motivo de existencia (UX):**
+
+* Permite un botón grande “Continuar turno”
+* Evita que el guía se pierda buscando su turno en listas.
+
+---
+
 ## 🔐 4. Seguridad y concurrencia
 
 * Todas las operaciones críticas usan **transacciones Prisma**.

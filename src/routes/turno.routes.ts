@@ -7,6 +7,7 @@ import { TurnoController } from "../modules/turnos/turno.controller";
 
 import {
   listTurnosQuerySchema,
+  listTurnosMeQuerySchema,
   getTurnoByIdParamsSchema,
   assignTurnoParamsSchema,
   assignTurnoBodySchema,
@@ -33,6 +34,32 @@ router.get(
   validate({ query: listTurnosQuerySchema }),
   TurnoController.list,
 );
+
+/**
+ * GET /turnos/me
+ * Lista “mis turnos” (guía autenticado)
+ * Auth: GUIA
+ */
+router.get(
+  "/me",
+  requireGuia,
+  validate({ query: listTurnosMeQuerySchema }),
+  TurnoController.listMe,
+);
+
+/**
+ * GET /turnos/me/next
+ * Próximo turno del guía autenticado
+ * Auth: GUIA
+ */
+router.get("/me/next", requireGuia, TurnoController.getNextMe);
+
+/**
+ * GET /turnos/me/active
+ * Turno activo del guía autenticado (IN_PROGRESS)
+ * Auth: GUIA
+ */
+router.get("/me/active", requireGuia, TurnoController.getActiveMe);
 
 /**
  * GET /turnos/:id

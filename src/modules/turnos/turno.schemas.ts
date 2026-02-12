@@ -34,6 +34,29 @@ export const listTurnosQuerySchema = z
   });
 
 /**
+ * GET /turnos/me
+ * Igual que listTurnosQuerySchema, pero:
+ * - NO permite "assigned" (siempre es assigned al guía autenticado)
+ */
+export const listTurnosMeQuerySchema = z
+  .object({
+    dateFrom: z.coerce.date().optional(),
+    dateTo: z.coerce.date().optional(),
+
+    atencionId: z.coerce.number().int().positive().optional(),
+    recaladaId: z.coerce.number().int().positive().optional(),
+
+    status: z.nativeEnum(TurnoStatus).optional(),
+
+    page: z.coerce.number().int().positive().default(1),
+    pageSize: z.coerce.number().int().positive().max(100).default(20),
+  })
+  .refine((data) => !data.dateFrom || !data.dateTo || data.dateTo >= data.dateFrom, {
+    message: "dateTo debe ser mayor o igual a dateFrom",
+    path: ["dateTo"],
+  });
+
+/**
  * GET /turnos/:id
  */
 export const getTurnoByIdParamsSchema = z.object({
@@ -104,6 +127,8 @@ export const noShowTurnoBodySchema = z.object({
 
 // Types
 export type ListTurnosQuery = z.infer<typeof listTurnosQuerySchema>;
+export type ListTurnosMeQuery = z.infer<typeof listTurnosMeQuerySchema>;
+
 export type GetTurnoByIdParams = z.infer<typeof getTurnoByIdParamsSchema>;
 
 export type AssignTurnoParams = z.infer<typeof assignTurnoParamsSchema>;
