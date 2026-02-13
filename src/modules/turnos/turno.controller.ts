@@ -14,6 +14,7 @@ import type {
   ListTurnosQuery,
   ListTurnosMeQuery,
   GetTurnoByIdParams,
+  ClaimTurnoParams,
 } from "./turno.schemas";
 
 export class TurnoController {
@@ -47,7 +48,6 @@ export class TurnoController {
       if (!req.user?.userId) throw new UnauthorizedError("Authentication required");
 
       const query = req.query as unknown as ListTurnosMeQuery;
-
       const result = await TurnoService.listMe(req.user.userId, query);
 
       res.status(200).json({
@@ -103,14 +103,42 @@ export class TurnoController {
   /**
    * GET /turnos/:id
    * Detalle
-   * Auth: SUPERVISOR / SUPER_ADMIN (en routes)
+   * Auth:
+   * - SUPERVISOR / SUPER_ADMIN: cualquiera
+   * - GUIA: solo si turno.guiaId == miGuiaId
    */
   static async getById(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       if (!req.user?.userId) throw new UnauthorizedError("Authentication required");
 
       const params = req.params as unknown as GetTurnoByIdParams;
-      const item = await TurnoService.getById(params.id);
+
+      const item = await TurnoService.getByIdForActor(
+        params.id,
+        req.user.userId,
+        req.user.rol,
+      );
+
+      res.status(200).json({ data: item, meta: null, error: null });
+      return;
+    } catch (err) {
+      next(err);
+      return;
+    }
+  }
+
+  /**
+   * POST /turnos/:id/claim
+   * El guía toma un turno específico si está AVAILABLE
+   * Auth: GUIA (en routes)
+   */
+  static async claim(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.user?.userId) throw new UnauthorizedError("Authentication required");
+
+      const params = req.params as unknown as ClaimTurnoParams;
+
+      const item = await TurnoService.claim(params.id, req.user.userId);
 
       res.status(200).json({ data: item, meta: null, error: null });
       return;

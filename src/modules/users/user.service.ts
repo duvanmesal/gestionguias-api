@@ -12,7 +12,12 @@ import type {
   UpdateUserRequest,
   ChangePasswordRequest,
 } from "../auth/auth.schemas";
-import type { CompleteProfileRequest, UpdateMeRequest } from "./user.schemas";
+import type {
+  CompleteProfileRequest,
+  UpdateMeRequest,
+  ListGuidesQuery,
+} from "./user.schemas";
+
 import { RolType, ProfileStatus } from "@prisma/client";
 
 export interface PaginationOptions {
@@ -206,6 +211,71 @@ export class UserService {
         totalPages,
       },
     };
+  }
+
+  /**
+   * GET /users/guides
+   * Lookup seguro para supervisor: lista guías operativos (campos mínimos).
+   *
+   * Retorna: [{ guiaId, nombres, apellidos, email, activo }]
+   *
+   * Query:
+   * - activo (default true en schema)
+   * - search (opcional): filtra por nombres/apellidos/email
+   */
+  async listGuidesLookup(query: ListGuidesQuery) {
+    const activo =
+      typeof (query as any).activo === "boolean" ? (query as any).activo : true;
+
+    const q = (query.search ?? "").trim();
+
+    // Estrategia: partir de "guia" para garantizar guiaId siempre existe.
+    // Y de ahí ir a usuario (nombres, email, etc).
+    const whereUser: any = {
+      rol: RolType.GUIA,
+      ...(typeof activo === "boolean" ? { activo } : {}),
+      ...(q
+        ? {
+            OR: [
+              { nombres: { contains: q, mode: "insensitive" } },
+              { apellidos: { contains: q, mode: "insensitive" } },
+              { email: { contains: q, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    };
+
+    const rows = await prisma.guia.findMany({
+      where: {
+        // asegura que el usuario sea GUIA + activo + search
+        usuario: whereUser,
+      },
+      select: {
+        id: true, // guiaId
+        usuario: {
+          select: {
+            email: true,
+            nombres: true,
+            apellidos: true,
+            activo: true,
+          },
+        },
+      },
+      orderBy: [
+        { usuario: { nombres: "asc" } },
+        { usuario: { apellidos: "asc" } },
+        { id: "asc" },
+      ],
+      take: 500, // límite razonable para lookup UI (evita devolver 50k)
+    });
+
+    return rows.map((g) => ({
+      guiaId: g.id,
+      nombres: g.usuario.nombres,
+      apellidos: g.usuario.apellidos,
+      email: g.usuario.email,
+      activo: g.usuario.activo,
+    }));
   }
 
   async create(data: CreateUserRequest, createdBy: string): Promise<any> {

@@ -2077,6 +2077,195 @@ Ninguno adicional.
 
 ---
 
+# 👤 1.17 Lookup seguro de Guías (SUPERVISOR) — `GET /users/guides`
+
+Este endpoint existe para resolver un problema operativo real:
+
+* El **Supervisor** necesita **listar/seleccionar guías** (por ejemplo, para **asignar turnos**)
+* Pero **no debe tener** acceso a:
+
+  * listado completo de usuarios (`GET /users`)
+  * filtros peligrosos (rol=SUPER_ADMIN)
+  * CRUD administrativo
+
+✅ Solución: un endpoint **dedicado**, con **campos mínimos** y **filtros controlados**.
+
+---
+
+## ✅ 1.17.1 Listar guías (lookup operativo)
+
+### **GET `/users/guides`**
+
+Retorna un listado **paginado** (opcional) de usuarios cuyo rol es **GUIA**, pensado para UI de selección/autocomplete.
+
+---
+
+### Auth requerida
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+---
+
+### Roles permitidos
+
+* `SUPERVISOR`
+* `SUPER_ADMIN` (también puede usarlo)
+
+📌 **No** accesible por `GUIA`.
+
+---
+
+### Headers
+
+| Header        | Valor            |
+| ------------- | ---------------- |
+| Authorization | Bearer `<token>` |
+
+*(Si en tu API es estándar incluir `X-Client-Platform`, puedes mantenerlo, pero este endpoint no depende de plataforma.)*
+
+---
+
+### Query params (controlados)
+
+Todos opcionales:
+
+| Param      | Tipo    | Default                | Descripción                                                   |
+| ---------- | ------- | ---------------------- | ------------------------------------------------------------- |
+| `search`   | string  | —                      | Busca por `nombres`, `apellidos` o `email` (case-insensitive) |
+| `activo`   | boolean | `true` *(recomendado)* | Filtra guías activos                                          |
+| `page`     | number  | `1`                    | Paginación                                                    |
+| `pageSize` | number  | `20`                   | Tamaño (1–100 recomendado)                                    |
+
+📌 Importante (seguridad):
+
+* No se permite `rol` en query.
+* El servicio **fuerza** `rol = GUIA` internamente.
+
+---
+
+### Qué hace exactamente
+
+1. Valida query con **Zod** (`listGuidesQuerySchema`).
+2. Fuerza `rol = GUIA` (aunque el cliente intente colarse).
+3. Aplica búsqueda textual sobre:
+
+   * `nombres`
+   * `apellidos`
+   * `email`
+4. Aplica filtro `activo` si viene (o default `true`).
+5. Retorna solo campos mínimos, útiles para UI de asignación:
+
+   * `guiaId`
+   * `nombres`, `apellidos`
+   * `email`
+   * `activo`
+
+---
+
+### Respuesta 200 (ejemplo)
+
+```json
+{
+  "data": [
+    {
+      "guiaId": "cml4abcd0000xxx999",
+      "nombres": "Carlos",
+      "apellidos": "Rodríguez",
+      "email": "guia1@test.com",
+      "activo": true
+    },
+    {
+      "guiaId": "cml4abcd0000xxx998",
+      "nombres": "Laura",
+      "apellidos": "Pineda",
+      "email": "guia2@test.com",
+      "activo": true
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "pageSize": 20,
+    "total": 2,
+    "totalPages": 1
+  },
+  "error": null
+}
+```
+
+---
+
+### Ejemplos de uso
+
+**Autocomplete de guías activos**
+
+```
+GET /users/guides?search=car&page=1&pageSize=10
+```
+
+**Listar solo activos (default recomendado)**
+
+```
+GET /users/guides
+```
+
+**Ver también inactivos (si el UI lo requiere)**
+
+```
+GET /users/guides?activo=false
+```
+
+---
+
+### Errores posibles
+
+| Código | Motivo                                 |
+| -----: | -------------------------------------- |
+|  `401` | Token inválido o ausente               |
+|  `403` | Rol sin permisos (no supervisor/admin) |
+|  `400` | Query inválida (Zod)                   |
+
+---
+
+### Relación con el Front (caso Turnos)
+
+En UI de asignación de turnos (panel Supervisor):
+
+* Input “Seleccionar guía” (typeahead)
+* Llama a `GET /users/guides?search=...`
+* Usa `guiaId` para:
+
+  * `PATCH /turnos/:id/assign { guiaId }`
+
+✅ Con esto evitas usar `GET /users` (admin-only) y reduces exposición.
+
+---
+
+### Motivo de diseño (por qué este endpoint existe)
+
+* Evita dar CRUD a Supervisores solo para poder “seleccionar guías”.
+* Controla superficie de ataque (no hay filtro por rol ni datos sensibles).
+* Resuelve el caso real de operación (asignación rápida en turnero).
+
+---
+
+# 🔁 Ajuste recomendado en documentación existente
+
+En tu doc actual ya tienes:
+
+* `GET /users` y `GET /users/search` (SUPER_ADMIN)
+* `GET /users/me`, `PATCH /users/me`, `PATCH /users/me/profile`
+
+✅ Ahora agrega una sección “Lookup operativo” (esta 1.17), y en tu módulo Turnos, cuando menciones “seleccionar guía”, referencia `GET /users/guides`.
+
+---
+
+## Checklist Definition of Done (añadir a tu 1.16)
+
+
+
+---
+
 # **1.16 Definition of Done (actualizado)**
 
 * Login / Refresh / Logout / Logout-all funcionando correctamente.
@@ -2100,3 +2289,12 @@ Ninguno adicional.
 * **Pruebas en Postman cubriendo casos válidos, combinados y de error para filtros administrativos.** *29/01/2026*
 * **GET `/users/me` implementado y validado (consulta del usuario autenticado, incluye relaciones `guia`/`supervisor` si existen).** *03/02/2026*
 * **Pruebas en Postman verificando que GUIA obtiene `guia.id` para operar Turnos/Claim.** *03/02/2026*
+* * ✅ `GET /users/guides` implementado (SUPERVISOR/SUPER_ADMIN).
+* ✅ Query limitada por schema (sin filtros peligrosos).
+* ✅ Respuesta retorna `guiaId` (no solo `userId`) para flujos operativos.
+* ✅ Probado en Postman:
+
+  * 200 con supervisor
+  * 403 con guía
+  * búsqueda con `search`
+  * filtro `activo`

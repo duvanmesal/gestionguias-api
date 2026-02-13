@@ -64,6 +64,14 @@ export const getTurnoByIdParamsSchema = z.object({
 });
 
 /**
+ * POST /turnos/:id/claim
+ * Params: { id }
+ */
+export const claimTurnoParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+/**
  * PATCH /turnos/:id/assign
  * Body: { guiaId: string }
  */
@@ -130,6 +138,7 @@ export type ListTurnosQuery = z.infer<typeof listTurnosQuerySchema>;
 export type ListTurnosMeQuery = z.infer<typeof listTurnosMeQuerySchema>;
 
 export type GetTurnoByIdParams = z.infer<typeof getTurnoByIdParamsSchema>;
+export type ClaimTurnoParams = z.infer<typeof claimTurnoParamsSchema>;
 
 export type AssignTurnoParams = z.infer<typeof assignTurnoParamsSchema>;
 export type AssignTurnoBody = z.infer<typeof assignTurnoBodySchema>;

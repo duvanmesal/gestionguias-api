@@ -7,7 +7,12 @@ import type {
   UpdateUserRequest,
   ChangePasswordRequest,
 } from "../auth/auth.schemas";
-import type { CompleteProfileRequest, UpdateMeRequest } from "./user.schemas";
+import type {
+  CompleteProfileRequest,
+  UpdateMeRequest,
+  ListGuidesQuery,
+} from "./user.schemas";
+
 import type { RolType, ProfileStatus } from "@prisma/client";
 
 export class UserController {
@@ -65,6 +70,30 @@ export class UserController {
       const result = await userService.list(options);
 
       res.json(ok(result.data, result.meta));
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /users/guides
+   * Lookup seguro para operación (asignar turnos, turnero)
+   * Auth: SUPERVISOR / SUPER_ADMIN (en routes)
+   */
+  async guides(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { activo, search } = req.query as any;
+
+      const options: ListGuidesQuery = {
+        // Nota: con zod-mw ya debería venir boolean parseado,
+        // pero igual lo defendemos por si acaso.
+        activo: typeof activo === "boolean" ? activo : undefined,
+        search: typeof search === "string" ? search : undefined,
+      } as any;
+
+      const data = await userService.listGuidesLookup(options);
+
+      res.json(ok(data));
     } catch (error) {
       next(error);
     }

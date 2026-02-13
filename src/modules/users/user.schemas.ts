@@ -1,5 +1,5 @@
-import { z } from "zod"
-import { DocumentType } from "@prisma/client"
+import { z } from "zod";
+import { DocumentType } from "@prisma/client";
 
 export const completeProfileSchema = z.object({
   nombres: z.string().min(1, "First name is required").max(100, "First name too long").trim(),
@@ -19,8 +19,8 @@ export const completeProfileSchema = z.object({
     .max(20, "Document number too long")
     .regex(/^[A-Za-z0-9]+$/, "Document number can only contain letters and numbers")
     .trim()
-    .transform((val) => val.replace(/[\s\-.]/g, "").toUpperCase()), // Normalize: remove spaces, dashes, dots
-})
+    .transform((val) => val.replace(/[\s\-.]/g, "").toUpperCase()),
+});
 
 export const updateMeSchema = z
   .object({
@@ -36,8 +36,29 @@ export const updateMeSchema = z
   })
   .refine(
     (d) => d.nombres !== undefined || d.apellidos !== undefined || d.telefono !== undefined,
-    { message: "At least one field is required" }
-  )
+    { message: "At least one field is required" },
+  );
 
-export type UpdateMeRequest = z.infer<typeof updateMeSchema>
-export type CompleteProfileRequest = z.infer<typeof completeProfileSchema>
+/**
+ * GET /users/guides
+ * Query opcional:
+ * - activo=true|false (default true)
+ * - search=texto
+ */
+export const listGuidesQuerySchema = z.object({
+  activo: z
+    .union([z.literal("true"), z.literal("false"), z.boolean()])
+    .transform((v) => (v === true || v === "true" ? true : false))
+    .default(true),
+  search: z
+    .string()
+    .trim()
+    .min(1, "search must not be empty")
+    .max(100, "search too long")
+    .optional(),
+});
+
+export type UpdateMeRequest = z.infer<typeof updateMeSchema>;
+export type CompleteProfileRequest = z.infer<typeof completeProfileSchema>;
+
+export type ListGuidesQuery = z.infer<typeof listGuidesQuerySchema>;

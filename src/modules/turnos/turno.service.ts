@@ -3,6 +3,7 @@ import {
   BadRequestError,
   ConflictError,
   NotFoundError,
+  ForbiddenError,
 } from "../../libs/errors";
 import { logger } from "../../libs/logger";
 import type {
@@ -10,6 +11,7 @@ import type {
   RecaladaOperativeStatus,
   AtencionOperativeStatus,
   StatusType,
+  RolType,
 } from "@prisma/client";
 import type { ListTurnosQuery, ListTurnosMeQuery } from "./turno.schemas";
 
@@ -126,12 +128,12 @@ function buildNoShowObservacion(reason?: string): string {
   return `${base}: ${reason.trim()}`;
 }
 
-function buildDateOverlapAnd(dateFrom?: Date, dateTo?: Date): Prisma.TurnoWhereInput[] {
+function buildDateOverlapAnd(
+  dateFrom?: Date,
+  dateTo?: Date,
+): Prisma.TurnoWhereInput[] {
   const and: Prisma.TurnoWhereInput[] = [];
 
-  // Filtro por solapamiento en el rango (turno [inicio, fin] intersecta [dateFrom, dateTo])
-  // - si dateFrom: fin >= dateFrom
-  // - si dateTo:   inicio <= dateTo
   if (dateFrom || dateTo) {
     and.push({ fechaInicio: { not: null } });
     and.push({ fechaFin: { not: null } });
@@ -142,7 +144,6 @@ function buildDateOverlapAnd(dateFrom?: Date, dateTo?: Date): Prisma.TurnoWhereI
 
   return and;
 }
-
 
 export class TurnoService {
   /**
@@ -177,18 +178,7 @@ export class TurnoService {
         : {}),
     };
 
-    const and: Prisma.TurnoWhereInput[] = [];
-
-    // Filtro por solapamiento en el rango (turno [inicio, fin] intersecta [dateFrom, dateTo])
-    // - si dateFrom: fin >= dateFrom
-    // - si dateTo:   inicio <= dateTo
-    if (dateFrom || dateTo) {
-      and.push({ fechaInicio: { not: null } });
-      and.push({ fechaFin: { not: null } });
-
-      if (dateFrom) and.push({ fechaFin: { gte: dateFrom } });
-      if (dateTo) and.push({ fechaInicio: { lte: dateTo } });
-    }
+    const and = buildDateOverlapAnd(dateFrom, dateTo);
 
     const finalWhere: Prisma.TurnoWhereInput =
       and.length > 0 ? { ...where, AND: and } : where;
@@ -242,7 +232,7 @@ export class TurnoService {
     const dateTo = query.dateTo ?? (hasAnyDate ? undefined : todayEnd);
 
     const where: Prisma.TurnoWhereInput = {
-      guiaId: actorGuiaId, // 👈 forzado SIEMPRE
+      guiaId: actorGuiaId,
       ...(query.atencionId ? { atencionId: query.atencionId } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.recaladaId
@@ -300,7 +290,6 @@ export class TurnoService {
       ],
     });
 
-    // Para UX es mejor retornar null si no hay (en vez de 404)
     return item ?? null;
   }
 
@@ -329,7 +318,7 @@ export class TurnoService {
 
   /**
    * GET /turnos/:id
-   * Detalle
+   * Detalle (sin ACL)
    */
   static async getById(turnoId: number) {
     const item = await prisma.turno.findUnique({
@@ -340,6 +329,136 @@ export class TurnoService {
     if (!item) throw new NotFoundError("Turno no encontrado");
 
     return item;
+  }
+
+  /**
+   * GET /turnos/:id
+   * Detalle (con ACL por actor)
+   * - SUPERVISOR/SUPER_ADMIN: cualquiera
+   * - GUIA: solo si turno.guiaId == miGuiaId
+   */
+  static async getByIdForActor(
+    turnoId: number,
+    actorUserId: string,
+    actorRol: RolType,
+  ) {
+    const item = await this.getById(turnoId);
+
+    if (actorRol === "GUIA") {
+      const actorGuiaId = await getActorGuiaIdOrThrow(actorUserId);
+
+      // Importante: si el turno no está asignado a ese guía, no puede verlo
+      if (item.guiaId !== actorGuiaId) {
+        throw new ForbiddenError("No tienes permisos para ver este turno");
+      }
+    }
+
+    return item;
+  }
+
+  /**
+   * POST /turnos/:id/claim
+   * El guía toma un turno específico si está AVAILABLE.
+   * Reglas:
+   * - Turno debe estar AVAILABLE y guiaId = null
+   * - Atención/Recalada deben permitir operación
+   * - El guía NO debe tener otro turno en esa misma atención (unique atencionId+guiaId)
+   */
+  static async claim(turnoId: number, actorUserId: string) {
+    const actorGuiaId = await getActorGuiaIdOrThrow(actorUserId);
+
+    const current = await prisma.turno.findUnique({
+      where: { id: turnoId },
+      select: {
+        id: true,
+        atencionId: true,
+        guiaId: true,
+        status: true,
+        atencion: {
+          select: {
+            status: true,
+            operationalStatus: true,
+            recalada: { select: { status: true, operationalStatus: true } },
+          },
+        },
+      },
+    });
+
+    if (!current) throw new NotFoundError("Turno no encontrado");
+
+    assertOperacionPermitida({
+      atencion: {
+        status: current.atencion.status,
+        operationalStatus: current.atencion.operationalStatus,
+      },
+      recalada: {
+        status: current.atencion.recalada.status,
+        operationalStatus: current.atencion.recalada.operationalStatus,
+      },
+    });
+
+    if (current.status !== "AVAILABLE" || current.guiaId !== null) {
+      throw new ConflictError("El turno no está disponible para tomar");
+    }
+
+    // Conflicto explícito (mensaje limpio). Igual respaldado por @@unique(atencionId, guiaId)
+    const existing = await prisma.turno.findFirst({
+      where: {
+        atencionId: current.atencionId,
+        guiaId: actorGuiaId,
+      },
+      select: { id: true },
+    });
+
+    if (existing) {
+      throw new ConflictError("Ya tienes un turno asignado en esta atención");
+    }
+
+    try {
+      const updated = await prisma.$transaction(async (tx) => {
+        const result = await tx.turno.updateMany({
+          where: {
+            id: turnoId,
+            status: "AVAILABLE",
+            guiaId: null,
+          },
+          data: {
+            guiaId: actorGuiaId,
+            status: "ASSIGNED",
+          },
+        });
+
+        if (result.count !== 1) {
+          throw new ConflictError(
+            "No fue posible tomar: el turno ya no está disponible",
+          );
+        }
+
+        return tx.turno.findUnique({
+          where: { id: turnoId },
+          select: turnoSelect,
+        });
+      });
+
+      if (!updated) throw new BadRequestError("No fue posible tomar el turno");
+
+      logger.info(
+        {
+          turnoId,
+          atencionId: updated.atencionId,
+          guiaId: actorGuiaId,
+          actorUserId,
+        },
+        "[Turnos] claimed",
+      );
+
+      return updated;
+    } catch (err: any) {
+      if (err?.code === "P2002") {
+        throw new ConflictError("Ya tienes un turno asignado en esta atención");
+      }
+      throw err;
+    }
   }
 
   /**
@@ -355,7 +474,6 @@ export class TurnoService {
       throw new BadRequestError("guiaId es requerido");
     }
 
-    // Validar que exista el guía
     const guia = await prisma.guia.findUnique({
       where: { id: guiaId },
       select: { id: true },
@@ -364,7 +482,6 @@ export class TurnoService {
       throw new NotFoundError("Guía no encontrado (guiaId)");
     }
 
-    // Pre-cargar turno + gate operativo
     const current = await prisma.turno.findUnique({
       where: { id: turnoId },
       select: {
@@ -399,7 +516,6 @@ export class TurnoService {
       throw new ConflictError("El turno no está disponible para asignación");
     }
 
-    // Conflicto explícito (mensaje limpio). Igual está respaldado por @@unique(atencionId, guiaId)
     const existing = await prisma.turno.findFirst({
       where: {
         atencionId: current.atencionId,
@@ -416,7 +532,6 @@ export class TurnoService {
 
     try {
       const updated = await prisma.$transaction(async (tx) => {
-        // update condicional (anti-carreras): solo si sigue AVAILABLE y guiaId=null
         const result = await tx.turno.updateMany({
           where: {
             id: turnoId,
@@ -451,7 +566,6 @@ export class TurnoService {
 
       return updated;
     } catch (err: any) {
-      // Respaldo por si explota @@unique([atencionId, guiaId])
       if (err?.code === "P2002") {
         throw new ConflictError(
           "El guía ya tiene un turno asignado en esta atención",
@@ -463,11 +577,6 @@ export class TurnoService {
 
   /**
    * PATCH /turnos/:id/unassign
-   * Reglas:
-   * - Solo si turno está ASSIGNED
-   * - NO permitir si IN_PROGRESS o COMPLETED
-   * - Set guiaId=null, status=AVAILABLE
-   * - Auditoría por logs + reason (si aplica)
    */
   static async unassign(
     turnoId: number,
@@ -523,17 +632,10 @@ export class TurnoService {
 
   /**
    * PATCH /turnos/:id/check-in
-   * Reglas:
-   * - Solo si status = ASSIGNED
-   * - Solo el guía asignado (usuario autenticado -> guiaId) puede hacer check-in
-   * - checkInAt = now()
-   * - status = IN_PROGRESS
-   * - Opcional FIFO (enforce por numero dentro de la misma atención)
    */
   static async checkIn(turnoId: number, actorUserId: string) {
     const actorGuiaId = await getActorGuiaIdOrThrow(actorUserId);
 
-    // Cargar turno + gate operativo
     const current = await prisma.turno.findUnique({
       where: { id: turnoId },
       select: {
@@ -587,7 +689,6 @@ export class TurnoService {
         where: {
           atencionId: current.atencionId,
           status: "ASSIGNED",
-          // “antes” en orden
           numero: { lt: current.numero },
         },
         select: { id: true, numero: true },
@@ -604,7 +705,6 @@ export class TurnoService {
     const now = new Date();
 
     const updated = await prisma.$transaction(async (tx) => {
-      // anti-carreras: solo si sigue ASSIGNED y sigue siendo del mismo guía
       const result = await tx.turno.updateMany({
         where: {
           id: turnoId,
@@ -646,11 +746,6 @@ export class TurnoService {
 
   /**
    * PATCH /turnos/:id/check-out
-   * Reglas:
-   * - Solo si status = IN_PROGRESS
-   * - Solo el guía asignado puede hacer check-out
-   * - checkOutAt = now()
-   * - status = COMPLETED
    */
   static async checkOut(turnoId: number, actorUserId: string) {
     const actorGuiaId = await getActorGuiaIdOrThrow(actorUserId);
@@ -746,10 +841,6 @@ export class TurnoService {
 
   /**
    * PATCH /turnos/:id/no-show
-   * Reglas:
-   * - Solo si status = ASSIGNED
-   * - status = NO_SHOW
-   * - reason opcional (guardamos en observaciones para no tocar Prisma ahora)
    */
   static async noShow(
     turnoId: number,
@@ -793,7 +884,6 @@ export class TurnoService {
       );
     }
 
-    // Guardamos razón en observaciones (sin migración)
     const extra = buildNoShowObservacion(reason);
     const mergedObs = current.observaciones?.trim()
       ? `${current.observaciones.trim()} | ${extra}`

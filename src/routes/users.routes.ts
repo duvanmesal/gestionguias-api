@@ -2,6 +2,7 @@ import { Router } from "express";
 import { validate } from "../libs/zod-mw";
 import { requireAuth, requireOwnershipOrRole } from "../libs/auth";
 import { requireSuperAdmin } from "../libs/rbac";
+import { requireSupervisor } from "../libs/rbac";
 import { userController } from "../modules/users/user.controller";
 import {
   createUserSchema,
@@ -12,6 +13,7 @@ import {
 import {
   completeProfileSchema,
   updateMeSchema,
+  listGuidesQuerySchema,
 } from "../modules/users/user.schemas";
 import { RolType } from "@prisma/client";
 
@@ -23,10 +25,7 @@ router.use(requireAuth);
 // ─────────────────────────────────────────────────────────────
 // ME endpoints (SELF)
 // ─────────────────────────────────────────────────────────────
-router.get(
-  "/me",
-  userController.me.bind(userController),
-);
+router.get("/me", userController.me.bind(userController));
 
 router.patch(
   "/me/profile",
@@ -38,6 +37,29 @@ router.patch(
   "/me",
   validate({ body: updateMeSchema }),
   userController.updateMe.bind(userController),
+);
+
+// ─────────────────────────────────────────────────────────────
+// LOOKUPS (SUPERVISOR / SUPER_ADMIN)
+// ⚠️ Debe ir ANTES de "/:id"
+// ─────────────────────────────────────────────────────────────
+/**
+ * GET /users/guides
+ * Lookup seguro para operación (asignar turnos / turnero)
+ * Auth: SUPERVISOR / SUPER_ADMIN
+ *
+ * Devuelve campos mínimos:
+ * - guiaId, nombres, apellidos, email, activo
+ *
+ * Query opcional:
+ * - activo=true|false (default true)
+ * - search=texto (filtra por nombres/apellidos/email)
+ */
+router.get(
+  "/guides",
+  requireSupervisor,
+  validate({ query: listGuidesQuerySchema }),
+  userController.guides.bind(userController),
 );
 
 // ─────────────────────────────────────────────────────────────

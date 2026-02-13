@@ -9,6 +9,7 @@ import {
   listTurnosQuerySchema,
   listTurnosMeQuerySchema,
   getTurnoByIdParamsSchema,
+  claimTurnoParamsSchema,
   assignTurnoParamsSchema,
   assignTurnoBodySchema,
   unassignTurnoParamsSchema,
@@ -64,13 +65,26 @@ router.get("/me/active", requireGuia, TurnoController.getActiveMe);
 /**
  * GET /turnos/:id
  * Detalle
- * Auth: SUPERVISOR / SUPER_ADMIN
+ * Auth:
+ * - SUPERVISOR / SUPER_ADMIN: cualquiera
+ * - GUIA: solo si turno.guiaId == miGuiaId (se valida en controller/service)
  */
 router.get(
   "/:id",
-  requireSupervisor,
   validate({ params: getTurnoByIdParamsSchema }),
   TurnoController.getById,
+);
+
+/**
+ * POST /turnos/:id/claim
+ * El guía "toma" un turno específico si está AVAILABLE (y aplica validaciones de negocio)
+ * Auth: GUIA
+ */
+router.post(
+  "/:id/claim",
+  requireGuia,
+  validate({ params: claimTurnoParamsSchema }),
+  TurnoController.claim,
 );
 
 /**
