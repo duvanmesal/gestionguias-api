@@ -47,11 +47,6 @@ async function resolveUserIdOrThrow(email: string) {
   return user.id
 }
 
-// Helper: suma horas
-function addHours(date: Date, hours: number) {
-  return new Date(date.getTime() + hours * 60 * 60 * 1000)
-}
-
 // ✅ Colombia (Bogotá) es UTC-05:00.
 // Construye una Date en UTC a partir de una fecha/hora local de Bogotá.
 function bogotaDate(y: number, m: number, d: number, hh: number, mm = 0, ss = 0) {
@@ -59,11 +54,22 @@ function bogotaDate(y: number, m: number, d: number, hh: number, mm = 0, ss = 0)
   return new Date(Date.UTC(y, m - 1, d, hh + 5, mm, ss))
 }
 
-function formatYMD(date: Date) {
-  const y = date.getUTCFullYear()
-  const m = String(date.getUTCMonth() + 1).padStart(2, "0")
-  const d = String(date.getUTCDate()).padStart(2, "0")
-  return `${y}${m}${d}`
+// ✅ Devuelve la fecha calendario de Bogotá (y,m,d) para un instante dado.
+// Bogotá = UTC-5 => local = UTC - 5h
+function getBogotaYMD(now: Date) {
+  const bogotaMs = now.getTime() - 5 * 60 * 60 * 1000
+  const d = new Date(bogotaMs)
+  return { y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate() }
+}
+
+function ymdBogota(now: Date) {
+  const { y, m, d } = getBogotaYMD(now)
+  return `${y}${String(m).padStart(2, "0")}${String(d).padStart(2, "0")}`
+}
+
+// ✅ Suma minutos a un instante (UTC). Perfecto para "ahora +/- X".
+function addMinutes(date: Date, minutes: number) {
+  return new Date(date.getTime() + minutes * 60 * 1000)
 }
 
 // ✅ Helper: normaliza código de buque
@@ -86,11 +92,11 @@ async function main() {
   await fixShipsPaisIdIfNull()
 
   if (NODE_ENV === "development") {
-    // HOY: 11/02/2026 12:30 (Bogotá)
-    const NOW_BOGOTA = bogotaDate(2026, 2, 11, 12, 30, 0)
+    // ✅ NOW dinámico (instante real actual)
+    const NOW = new Date()
 
     await upsertDevWorkflows({
-      nowBogota: NOW_BOGOTA,
+      nowBogota: NOW,
       superAdminEmail: SUPER_EMAIL,
     })
   }
@@ -244,15 +250,11 @@ async function fixShipsPaisIdIfNull() {
       where: { paisId: null },
       data: { paisId: defaultPais.id },
     })
-    if (fixed.count > 0) {
-      console.log(`🩹 Assigned default paisId=CO to ${fixed.count} ship(s) still without country`)
-    }
+    if (fixed.count > 0) console.log(`🩹 Assigned default paisId=CO to ${fixed.count} ship(s) still without country`)
   }
 
   const finalNulls = await prisma.buque.count({ where: { paisId: null } })
-  if (finalNulls > 0) {
-    throw new Error(`Aún quedan ${finalNulls} buques con paisId NULL — revisa datos de origen`)
-  }
+  if (finalNulls > 0) throw new Error(`Aún quedan ${finalNulls} buques con paisId NULL — revisa datos de origen`)
 }
 
 type DevWorkflowInput = {
@@ -269,7 +271,6 @@ type SeedUser = {
 }
 
 async function upsertSeedUsers(input: { nowBogota: Date }) {
-  // ✅ Cuentas listas para entrar sin verificación de correo
   const users: SeedUser[] = [
     {
       email: env.SEED_SUPERVISOR_1_EMAIL ?? "supervisor1@test.com",
@@ -370,7 +371,8 @@ async function upsertSeedUsers(input: { nowBogota: Date }) {
 
 async function upsertDevWorkflows(input: DevWorkflowInput) {
   const now = input.nowBogota
-  const ymd = formatYMD(now)
+  const ymd = ymdBogota(now)
+  const { y: by } = getBogotaYMD(now)
 
   // --- usuarios ---
   const seedUsers = await upsertSeedUsers({ nowBogota: now })
@@ -397,11 +399,33 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
   const paisIT = await resolvePaisIdOrThrow("IT")
   const paisES = await resolvePaisIdOrThrow("ES")
 
+  // ==========================================================
+  // ✅ Ventanas temporales RELATIVAS A NOW:
+  // - “ARRIVED” ya llegó hace 3h, sale en 3h (siempre habrá upcoming)
+  // - “SCHEDULED” llega en 2h (upcoming garantizado)
+  // - “DEPARTED” ayer (histórico)
+  // - “CANCELED” mañana
+  // ==========================================================
+  const arrivedLlegada = addMinutes(now, -180)
+  const arrivedArrivedAt = addMinutes(now, -170)
+  const arrivedSalida = addMinutes(now, +180)
+
+  const schedLlegada = addMinutes(now, +120)
+  const schedSalida = addMinutes(now, +600)
+
+  const departedLlegada = addMinutes(now, -24 * 60 - 600) // ayer -10h
+  const departedArrivedAt = addMinutes(now, -24 * 60 - 590)
+  const departedSalida = addMinutes(now, -24 * 60 - 120) // ayer -2h
+  const departedDepartedAt = addMinutes(now, -24 * 60 - 125)
+
+  const canceledLlegada = addMinutes(now, +24 * 60 + 180) // mañana +3h
+  const canceledSalida = addMinutes(now, +24 * 60 + 540) // mañana +9h
+
   // --- recaladas: 4 estados ---
-  const recaladaArrivedCode = `RA-2026-90${ymd}01`
-  const recaladaScheduledCode = `RA-2026-90${ymd}02`
-  const recaladaDepartedCode = `RA-2026-90${ymd}03`
-  const recaladaCanceledCode = `RA-2026-90${ymd}04`
+  const recaladaArrivedCode = `RA-${by}-90${ymd}01`
+  const recaladaScheduledCode = `RA-${by}-90${ymd}02`
+  const recaladaDepartedCode = `RA-${by}-90${ymd}03`
+  const recaladaCanceledCode = `RA-${by}-90${ymd}04`
 
   const rArrived = await prisma.recalada.upsert({
     where: { codigoRecalada: recaladaArrivedCode },
@@ -409,9 +433,9 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       buqueId: buque1,
       paisOrigenId: paisUS,
       supervisorId: supervisor1Id,
-      fechaLlegada: bogotaDate(2026, 2, 11, 9, 30),
-      fechaSalida: bogotaDate(2026, 2, 11, 18, 0),
-      arrivedAt: bogotaDate(2026, 2, 11, 9, 45),
+      fechaLlegada: arrivedLlegada,
+      fechaSalida: arrivedSalida,
+      arrivedAt: arrivedArrivedAt,
       departedAt: null,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.ARRIVED,
@@ -419,7 +443,7 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       muelle: "Muelle 1",
       pasajerosEstimados: 5200,
       tripulacionEstimada: 1900,
-      observaciones: "[SEED] Recalada ARRIVED hoy. Ideal para probar dashboard/agenda.",
+      observaciones: "[SEED] Recalada ARRIVED (activa ahora). Ideal para dashboard/overview.",
       fuente: RecaladaSource.MANUAL,
       canceledAt: null,
       cancelReason: null,
@@ -429,16 +453,16 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       buqueId: buque1,
       paisOrigenId: paisUS,
       supervisorId: supervisor1Id,
-      fechaLlegada: bogotaDate(2026, 2, 11, 9, 30),
-      fechaSalida: bogotaDate(2026, 2, 11, 18, 0),
-      arrivedAt: bogotaDate(2026, 2, 11, 9, 45),
+      fechaLlegada: arrivedLlegada,
+      fechaSalida: arrivedSalida,
+      arrivedAt: arrivedArrivedAt,
       status: StatusType.ACTIVO,
-      operationalStatus: RecaladaOperativeStatus.ARRIVED,
+      operationalStatus: RecaladaOperiveStatusFallback(RecaladaOperativeStatus.ARRIVED),
       terminal: "Terminal de Cruceros",
       muelle: "Muelle 1",
       pasajerosEstimados: 5200,
       tripulacionEstimada: 1900,
-      observaciones: "[SEED] Recalada ARRIVED hoy. Ideal para probar dashboard/agenda.",
+      observaciones: "[SEED] Recalada ARRIVED (activa ahora). Ideal para dashboard/overview.",
       fuente: RecaladaSource.MANUAL,
     },
   })
@@ -449,8 +473,8 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       buqueId: buque2,
       paisOrigenId: paisIT,
       supervisorId: supervisor2Id,
-      fechaLlegada: bogotaDate(2026, 2, 11, 16, 0),
-      fechaSalida: bogotaDate(2026, 2, 12, 6, 0),
+      fechaLlegada: schedLlegada,
+      fechaSalida: schedSalida,
       arrivedAt: null,
       departedAt: null,
       status: StatusType.ACTIVO,
@@ -459,7 +483,7 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       muelle: "Muelle 2",
       pasajerosEstimados: 4300,
       tripulacionEstimada: 1500,
-      observaciones: "[SEED] Recalada SCHEDULED hoy en la tarde.",
+      observaciones: "[SEED] Recalada SCHEDULED (llega en ~2h). Upcoming garantizado.",
       fuente: RecaladaSource.MANUAL,
       canceledAt: null,
       cancelReason: null,
@@ -469,15 +493,15 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       buqueId: buque2,
       paisOrigenId: paisIT,
       supervisorId: supervisor2Id,
-      fechaLlegada: bogotaDate(2026, 2, 11, 16, 0),
-      fechaSalida: bogotaDate(2026, 2, 12, 6, 0),
+      fechaLlegada: schedLlegada,
+      fechaSalida: schedSalida,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.SCHEDULED,
       terminal: "Terminal de Cruceros",
       muelle: "Muelle 2",
       pasajerosEstimados: 4300,
       tripulacionEstimada: 1500,
-      observaciones: "[SEED] Recalada SCHEDULED hoy en la tarde.",
+      observaciones: "[SEED] Recalada SCHEDULED (llega en ~2h). Upcoming garantizado.",
       fuente: RecaladaSource.MANUAL,
     },
   })
@@ -488,17 +512,17 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       buqueId: buque3,
       paisOrigenId: paisES,
       supervisorId: supervisor1Id,
-      fechaLlegada: bogotaDate(2026, 2, 10, 7, 0),
-      fechaSalida: bogotaDate(2026, 2, 10, 19, 0),
-      arrivedAt: bogotaDate(2026, 2, 10, 7, 20),
-      departedAt: bogotaDate(2026, 2, 10, 18, 45),
+      fechaLlegada: departedLlegada,
+      fechaSalida: departedSalida,
+      arrivedAt: departedArrivedAt,
+      departedAt: departedDepartedAt,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.DEPARTED,
       terminal: "Terminal de Cruceros",
       muelle: "Muelle 3",
       pasajerosEstimados: 3900,
       tripulacionEstimada: 1350,
-      observaciones: "[SEED] Recalada DEPARTED ayer.",
+      observaciones: "[SEED] Recalada DEPARTED (histórica ayer).",
       fuente: RecaladaSource.MANUAL,
       canceledAt: null,
       cancelReason: null,
@@ -508,17 +532,17 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       buqueId: buque3,
       paisOrigenId: paisES,
       supervisorId: supervisor1Id,
-      fechaLlegada: bogotaDate(2026, 2, 10, 7, 0),
-      fechaSalida: bogotaDate(2026, 2, 10, 19, 0),
-      arrivedAt: bogotaDate(2026, 2, 10, 7, 20),
-      departedAt: bogotaDate(2026, 2, 10, 18, 45),
+      fechaLlegada: departedLlegada,
+      fechaSalida: departedSalida,
+      arrivedAt: departedArrivedAt,
+      departedAt: departedDepartedAt,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.DEPARTED,
       terminal: "Terminal de Cruceros",
       muelle: "Muelle 3",
       pasajerosEstimados: 3900,
       tripulacionEstimada: 1350,
-      observaciones: "[SEED] Recalada DEPARTED ayer.",
+      observaciones: "[SEED] Recalada DEPARTED (histórica ayer).",
       fuente: RecaladaSource.MANUAL,
     },
   })
@@ -529,8 +553,8 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       buqueId: buque2,
       paisOrigenId: paisIT,
       supervisorId: supervisor2Id,
-      fechaLlegada: bogotaDate(2026, 2, 12, 9, 0),
-      fechaSalida: bogotaDate(2026, 2, 12, 17, 0),
+      fechaLlegada: canceledLlegada,
+      fechaSalida: canceledSalida,
       arrivedAt: null,
       departedAt: null,
       status: StatusType.ACTIVO,
@@ -539,7 +563,7 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       muelle: "Muelle 2",
       pasajerosEstimados: 4100,
       tripulacionEstimada: 1400,
-      observaciones: "[SEED] Recalada CANCELED (para probar chips/badges).",
+      observaciones: "[SEED] Recalada CANCELED (mañana).",
       fuente: RecaladaSource.MANUAL,
       canceledAt: now,
       cancelReason: "[SEED] Cancelación de ejemplo",
@@ -549,15 +573,15 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       buqueId: buque2,
       paisOrigenId: paisIT,
       supervisorId: supervisor2Id,
-      fechaLlegada: bogotaDate(2026, 2, 12, 9, 0),
-      fechaSalida: bogotaDate(2026, 2, 12, 17, 0),
+      fechaLlegada: canceledLlegada,
+      fechaSalida: canceledSalida,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.CANCELED,
       terminal: "Terminal de Cruceros",
       muelle: "Muelle 2",
       pasajerosEstimados: 4100,
       tripulacionEstimada: 1400,
-      observaciones: "[SEED] Recalada CANCELED (para probar chips/badges).",
+      observaciones: "[SEED] Recalada CANCELED (mañana).",
       fuente: RecaladaSource.MANUAL,
       canceledAt: now,
       cancelReason: "[SEED] Cancelación de ejemplo",
@@ -566,14 +590,23 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
 
   console.log("🧭 Recaladas seed ready (SCHEDULED/ARRIVED/DEPARTED/CANCELED)")
 
-  // --- atenciones + turnos ---
+  // ==========================================================
+  // ✅ ATENCIONES:
+  // - 1 cerrada hoy temprano (histórico del día)
+  // - 1 OPEN activa ahora (para GUIA activeTurno)
+  // - 1 OPEN futura en ~2h (para upcoming supervisor)
+  // - 1 OPEN asociada a la recalada scheduled (para “agenda”)
+  // - 1 CANCELADA mañana (variedad)
+  // ==========================================================
+
+  // 1) Cerrada: hace 6h → hace 4h
   await upsertAtencionWithSlots({
     recaladaId: rArrived.id,
     supervisorId: supervisor1Id,
     createdById,
-    descripcion: "[SEED] Atención CERRADA (mañana)",
-    fechaInicio: bogotaDate(2026, 2, 11, 8, 0),
-    fechaFin: bogotaDate(2026, 2, 11, 10, 0),
+    descripcion: "[SEED] Atención CERRADA (hoy temprano)",
+    fechaInicio: addMinutes(now, -360),
+    fechaFin: addMinutes(now, -240),
     operationalStatus: AtencionOperativeStatus.CLOSED,
     turnosTotal: 4,
     slotPlan: [
@@ -581,53 +614,72 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
         numero: 1,
         status: TurnoStatus.COMPLETED,
         guiaId: guiaIds[0],
-        checkInAt: bogotaDate(2026, 2, 11, 8, 5),
-        checkOutAt: bogotaDate(2026, 2, 11, 9, 55),
+        checkInAt: addMinutes(now, -355),
+        checkOutAt: addMinutes(now, -245),
       },
       {
         numero: 2,
         status: TurnoStatus.COMPLETED,
         guiaId: guiaIds[1],
-        checkInAt: bogotaDate(2026, 2, 11, 8, 10),
-        checkOutAt: bogotaDate(2026, 2, 11, 9, 50),
+        checkInAt: addMinutes(now, -350),
+        checkOutAt: addMinutes(now, -250),
       },
       { numero: 3, status: TurnoStatus.NO_SHOW, guiaId: guiaIds[2] },
       {
         numero: 4,
         status: TurnoStatus.CANCELED,
         guiaId: null,
-        canceledAt: bogotaDate(2026, 2, 11, 9, 0),
+        canceledAt: addMinutes(now, -300),
         cancelReason: "[SEED] Cancelado de ejemplo",
       },
     ],
   })
 
+  // 2) OPEN activa ahora: -30min → +90min
   await upsertAtencionWithSlots({
     recaladaId: rArrived.id,
     supervisorId: supervisor1Id,
     createdById,
-    descripcion: "[SEED] Atención ABIERTA (en curso 11:00-13:00)",
-    fechaInicio: bogotaDate(2026, 2, 11, 11, 0),
-    fechaFin: bogotaDate(2026, 2, 11, 13, 0),
+    descripcion: "[SEED] Atención ABIERTA (activa ahora)",
+    fechaInicio: addMinutes(now, -30),
+    fechaFin: addMinutes(now, +90),
     operationalStatus: AtencionOperativeStatus.OPEN,
     turnosTotal: 6,
     slotPlan: [
-      { numero: 1, status: TurnoStatus.IN_PROGRESS, guiaId: guiaIds[3], checkInAt: bogotaDate(2026, 2, 11, 11, 5) },
+      { numero: 1, status: TurnoStatus.IN_PROGRESS, guiaId: guiaIds[3], checkInAt: addMinutes(now, -25) },
       { numero: 2, status: TurnoStatus.ASSIGNED, guiaId: guiaIds[2] },
       { numero: 3, status: TurnoStatus.AVAILABLE, guiaId: null },
       { numero: 4, status: TurnoStatus.AVAILABLE, guiaId: null },
       { numero: 5, status: TurnoStatus.AVAILABLE, guiaId: null },
-      { numero: 6, status: TurnoStatus.CANCELED, guiaId: null, canceledAt: bogotaDate(2026, 2, 11, 12, 0), cancelReason: "[SEED] Cupo cancelado" },
+      { numero: 6, status: TurnoStatus.CANCELED, guiaId: null, canceledAt: addMinutes(now, -10), cancelReason: "[SEED] Cupo cancelado" },
     ],
   })
 
+  // 3) OPEN futura (upcoming): +120min → +240min
+  await upsertAtencionWithSlots({
+    recaladaId: rArrived.id,
+    supervisorId: supervisor1Id,
+    createdById,
+    descripcion: "[SEED] Atención ABIERTA (próxima en ~2h)",
+    fechaInicio: addMinutes(now, +120),
+    fechaFin: addMinutes(now, +240),
+    operationalStatus: AtencionOperativeStatus.OPEN,
+    turnosTotal: 3,
+    slotPlan: [
+      { numero: 1, status: TurnoStatus.AVAILABLE, guiaId: null },
+      { numero: 2, status: TurnoStatus.AVAILABLE, guiaId: null },
+      { numero: 3, status: TurnoStatus.AVAILABLE, guiaId: null },
+    ],
+  })
+
+  // 4) OPEN asociada a recalada SCHEDULED: +150min → +330min
   await upsertAtencionWithSlots({
     recaladaId: rScheduled.id,
     supervisorId: supervisor2Id,
     createdById,
-    descripcion: "[SEED] Atención PROGRAMADA (asignaciones previas)",
-    fechaInicio: bogotaDate(2026, 2, 11, 17, 0),
-    fechaFin: bogotaDate(2026, 2, 11, 20, 0),
+    descripcion: "[SEED] Atención (para recalada SCHEDULED)",
+    fechaInicio: addMinutes(now, +150),
+    fechaFin: addMinutes(now, +330),
     operationalStatus: AtencionOperativeStatus.OPEN,
     turnosTotal: 3,
     slotPlan: [
@@ -637,40 +689,14 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
     ],
   })
 
-  await upsertAtencionWithSlots({
-    recaladaId: rDeparted.id,
-    supervisorId: supervisor1Id,
-    createdById,
-    descripcion: "[SEED] Atención histórica (cerrada ayer)",
-    fechaInicio: bogotaDate(2026, 2, 10, 12, 0),
-    fechaFin: bogotaDate(2026, 2, 10, 15, 0),
-    operationalStatus: AtencionOperativeStatus.CLOSED,
-    turnosTotal: 2,
-    slotPlan: [
-      {
-        numero: 1,
-        status: TurnoStatus.COMPLETED,
-        guiaId: guiaIds[1],
-        checkInAt: bogotaDate(2026, 2, 10, 12, 10),
-        checkOutAt: bogotaDate(2026, 2, 10, 14, 55),
-      },
-      {
-        numero: 2,
-        status: TurnoStatus.COMPLETED,
-        guiaId: guiaIds[2],
-        checkInAt: bogotaDate(2026, 2, 10, 12, 15),
-        checkOutAt: bogotaDate(2026, 2, 10, 14, 50),
-      },
-    ],
-  })
-
+  // 5) CANCELADA mañana: +1d +60 → +1d +180
   await upsertAtencionWithSlots({
     recaladaId: rCanceled.id,
     supervisorId: supervisor2Id,
     createdById,
-    descripcion: "[SEED] Atención CANCELADA",
-    fechaInicio: bogotaDate(2026, 2, 12, 10, 0),
-    fechaFin: bogotaDate(2026, 2, 12, 12, 0),
+    descripcion: "[SEED] Atención CANCELADA (mañana)",
+    fechaInicio: addMinutes(now, +24 * 60 + 60),
+    fechaFin: addMinutes(now, +24 * 60 + 180),
     operationalStatus: AtencionOperativeStatus.CANCELED,
     turnosTotal: 2,
     slotPlan: [
@@ -682,7 +708,7 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
     canceledById: createdById,
   })
 
-  console.log("🧩 Atenciones + Turnos seed ready (OPEN/CLOSED/CANCELED + múltiples estados de turnos)")
+  console.log("🧩 Atenciones + Turnos seed ready (OPEN/CLOSED/CANCELED + estados de turnos)")
 }
 
 type SlotPlanItem = {
@@ -766,7 +792,7 @@ async function upsertAtencionWithSlots(input: UpsertAtencionInput) {
       })
     }
 
-    // 2) Aplica plan (sin repetir guía dentro de la misma atención: @@unique([atencionId, guiaId]))
+    // 2) Aplica plan
     for (const p of input.slotPlan) {
       if (p.numero < 1 || p.numero > input.turnosTotal) continue
 
@@ -798,8 +824,15 @@ async function upsertAtencionWithSlots(input: UpsertAtencionInput) {
     if (toDelete.length > 0) await tx.turno.deleteMany({ where: { id: { in: toDelete } } })
   })
 
-  console.log(`🎫 Atencion seed ok id=${atencion.id} recaladaId=${input.recaladaId} status=${input.operationalStatus} cupo=${input.turnosTotal}`)
+  console.log(
+    `🎫 Atencion seed ok id=${atencion.id} recaladaId=${input.recaladaId} status=${input.operationalStatus} cupo=${input.turnosTotal}`
+  )
   return atencion
+}
+
+// 🔒 Pequeño helper para evitar TS raro si tu editor se pone quisquilloso
+function RecaladaOperiveStatusFallback(s: RecaladaOperativeStatus) {
+  return s
 }
 
 main()

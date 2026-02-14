@@ -17,6 +17,9 @@ import atencionesRoutes from "./atenciones.routes";
 // 🔹 Turnos (slots/cupos)
 import turnosRoutes from "./turno.routes";
 
+// 🔹 Dashboard (overview)
+import dashboardRoutes from "./dashboard.routes";
+
 const router = Router();
 
 // API v1 routes
@@ -40,6 +43,9 @@ v1Router.use("/atenciones", atencionesRoutes);
 // 🔹 Turnos
 v1Router.use("/turnos", turnosRoutes);
 
+// ✅ Dashboard overview
+v1Router.use("/dashboard", dashboardRoutes);
+
 // Mount versioned routes
 router.use("/", v1Router);
 
@@ -60,6 +66,7 @@ router.get("/", (_req, res) => {
         recaladas: `${process.env.API_PREFIX ?? "/api"}/recaladas`,
         atenciones: `${process.env.API_PREFIX ?? "/api"}/atenciones`,
         turnos: `${process.env.API_PREFIX ?? "/api"}/turnos`,
+        dashboard: `${process.env.API_PREFIX ?? "/api"}/dashboard`,
         health: "/health",
       },
     },
