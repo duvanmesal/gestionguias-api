@@ -18,6 +18,8 @@ import {
   checkOutTurnoParamsSchema,
   noShowTurnoParamsSchema,
   noShowTurnoBodySchema,
+  cancelTurnoParamsSchema,
+  cancelTurnoBodySchema,
 } from "../modules/turnos/turno.schemas";
 
 const router = Router();
@@ -146,5 +148,18 @@ router.patch(
   validate({ params: noShowTurnoParamsSchema, body: noShowTurnoBodySchema }),
   TurnoController.noShow,
 );
+
+/**
+ * PATCH /turnos/:id/cancel
+ * Cancela un turno
+ * Auth: SUPERVISOR / SUPER_ADMIN
+ */
+router.patch(
+  "/:id/cancel",
+  requireSupervisor,
+  validate({ params: cancelTurnoParamsSchema, body: cancelTurnoBodySchema }),
+  TurnoController.cancel,
+);
+
 
 export default router;

@@ -20,6 +20,8 @@ export const listTurnosQuerySchema = z
 
     status: z.nativeEnum(TurnoStatus).optional(),
 
+    guiaId: z.string().min(1).trim().optional(),
+
     assigned: z
       .union([z.literal("true"), z.literal("false"), z.boolean()])
       .transform((v) => (v === true || v === "true" ? true : false))
@@ -32,6 +34,7 @@ export const listTurnosQuerySchema = z
     message: "dateTo debe ser mayor o igual a dateFrom",
     path: ["dateTo"],
   });
+
 
 /**
  * GET /turnos/me
@@ -132,6 +135,18 @@ export const noShowTurnoBodySchema = z.object({
     .trim()
     .optional(),
 });
+export const cancelTurnoParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export const cancelTurnoBodySchema = z.object({
+  cancelReason: z
+    .string()
+    .min(1, "cancelReason must not be empty")
+    .max(500, "cancelReason too long")
+    .trim()
+    .optional(),
+});
 
 // Types
 export type ListTurnosQuery = z.infer<typeof listTurnosQuerySchema>;
@@ -151,3 +166,6 @@ export type CheckOutTurnoParams = z.infer<typeof checkOutTurnoParamsSchema>;
 
 export type NoShowTurnoParams = z.infer<typeof noShowTurnoParamsSchema>;
 export type NoShowTurnoBody = z.infer<typeof noShowTurnoBodySchema>;
+
+export type CancelTurnoParams = z.infer<typeof cancelTurnoParamsSchema>;
+export type CancelTurnoBody = z.infer<typeof cancelTurnoBodySchema>;

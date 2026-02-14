@@ -168,11 +168,14 @@ export class TurnoService {
     const where: Prisma.TurnoWhereInput = {
       ...(query.atencionId ? { atencionId: query.atencionId } : {}),
       ...(query.status ? { status: query.status } : {}),
+      ...(query.guiaId ? { guiaId: query.guiaId } : {}),
+
       ...(typeof query.assigned === "boolean"
         ? query.assigned
           ? { guiaId: { not: null } }
           : { guiaId: null }
         : {}),
+
       ...(query.recaladaId
         ? { atencion: { recaladaId: query.recaladaId } }
         : {}),
@@ -625,6 +628,72 @@ export class TurnoService {
         reason,
       },
       "[Turnos] unassigned",
+    );
+
+    return updated;
+  }
+
+  /**
+   * PATCH /turnos/:id/cancel
+   * Cancela un turno (modo supervisor)
+   * Marca:
+   * - status = CANCELED
+   * - canceledAt = now
+   * - cancelReason = optional
+   * - canceledById = actorUserId
+   */
+  static async cancel(
+    turnoId: number,
+    cancelReason: string | undefined,
+    actorUserId: string,
+  ) {
+    const current = await prisma.turno.findUnique({
+      where: { id: turnoId },
+      select: {
+        id: true,
+        atencionId: true,
+        guiaId: true,
+        status: true,
+        canceledAt: true,
+      },
+    });
+
+    if (!current) throw new NotFoundError("Turno no encontrado");
+
+    if (current.status === "COMPLETED") {
+      throw new ConflictError("No se puede cancelar un turno completado");
+    }
+
+    if (current.status === "IN_PROGRESS") {
+      throw new ConflictError("No se puede cancelar un turno en progreso");
+    }
+
+    if (current.status === "CANCELED") {
+      throw new ConflictError("El turno ya está cancelado");
+    }
+
+    const now = new Date();
+
+    const updated = await prisma.turno.update({
+      where: { id: turnoId },
+      data: {
+        status: "CANCELED",
+        canceledAt: now,
+        cancelReason: cancelReason?.trim() ? cancelReason.trim() : null,
+        canceledById: actorUserId,
+      },
+      select: turnoSelect,
+    });
+
+    logger.info(
+      {
+        turnoId,
+        atencionId: updated.atencionId,
+        guiaId: updated.guiaId,
+        actorUserId,
+        cancelReason,
+      },
+      "[Turnos] canceled",
     );
 
     return updated;

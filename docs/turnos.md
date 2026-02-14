@@ -1035,93 +1035,59 @@ Con estos endpoints, el front puede:
 ✨ **Esto cierra formalmente la Fase 3 del módulo Turnos**
 ---
 
-# 🧩 Fase 4 — Ajustes de Acceso + Claim Específico de Turno (GUIA)
+Sí. Aquí tienes la **Fase 3 completa**, ya con **tu contenido actual** (3.7.3, seguridad, relación con front, etc.) y **con el nuevo agregado** integrado de forma limpia:
 
-Esta fase introduce **dos mejoras operativas** que resuelven fricción real de UX y permisos:
+* ✅ **(2.2)** `GET /turnos` ahora soporta `guiaId` (panel supervisor)
+* ✅ **(2.3)** nuevo `PATCH /turnos/:id/cancel` (cancelación real de turno)
 
-1. Permitir que un **GUIA** pueda ver el **detalle** de un turno **sin entrar al panel de supervisor**, pero **sin exponer turnos ajenos**.
-
-2. Habilitar que un **GUIA** pueda **tomar un turno específico** (no solo el “primero disponible” FIFO), útil cuando la operación requiere:
-
-* “toma el #7”
-* “toma el último”
-* “toma el que te asignaron verbalmente”
-
-Estas mejoras mantienen el mismo principio: **DB como fuente de verdad**, reglas explícitas y protección ante concurrencia.
+> La única corrección editorial que hago es de estructura: tu doc tenía “Fase 3” repetida. Aquí lo dejo como **una sola Fase 3**, con subsecciones claras.
 
 ---
 
-## ✅ 1) GET `/turnos/:id` permitido para GUIA solo si es su turno
+# 🟢 Fase 3 — Operación Real + Ajustes de UX y Acceso (Turnos)
 
-### Objetivo (UX / Operación)
+## 1. Objetivo de la Fase 3
 
-Permitir que el GUIA abra un “detalle de turno” desde una tarjeta/lista sin depender de endpoints de panel.
+La Fase 3 introduce comportamientos y endpoints que reflejan la **operación real diaria**, y además corrige fricciones prácticas del UI:
 
-**Antes:**
-`GET /turnos/:id` estaba bloqueado por `requireSupervisor`, por lo que un GUIA no podía consultar detalle.
+1. **Operación real del turno**: el turno pasa de ser “un cupo asignado” a ser **actividad trazable** (check-in, check-out, no-show).
 
-**Ahora:**
-`GET /turnos/:id` se expone para usuario autenticado, pero se valida ACL fina:
+2. **Acceso seguro por rol**: un GUIA puede consultar recursos necesarios sin depender del panel, pero **sin exponer datos ajenos**.
 
-* `SUPERVISOR` / `SUPER_ADMIN`: puede ver cualquier turno
-* `GUIA`: **solo** si `turno.guiaId === miGuiaId`
+3. **UX del panel Supervisor**: permitir filtros prácticos (por guía) y acciones reales (cancelación) para reducir llamadas y evitar endpoints extra.
 
 ---
 
-### Auth requerida
+## ✅ 2. Endpoints operativos principales (ciclo de vida)
 
-✅ Sí
+### ✅ 2.1 Inicio operativo del turno (check-in)
 
-**Roles permitidos (a nivel de negocio):**
+#### PATCH `/turnos/:id/check-in`
 
-* `SUPERVISOR`
-* `SUPER_ADMIN`
-* `GUIA` (solo su turno)
+Marca el **inicio real** del turno.
 
-**Headers obligatorios**
+**Auth requerida:** ✅ Sí
+**Roles permitidos:** `GUIA`
 
-| Header              | Valor            |
-| ------------------- | ---------------- |
-| `Authorization`     | `Bearer <token>` |
-| `X-Client-Platform` | `WEB` / `MOBILE` |
+**Qué hace exactamente:**
 
----
+1. Valida que el turno exista.
+2. Verifica que el turno esté en estado `ASSIGNED`.
+3. Verifica que el usuario autenticado sea el guía asignado.
+4. (Opcional) Aplica regla FIFO si está habilitada.
+5. Actualiza:
 
-### Path params
+   * `checkInAt = now()`
+   * `status = IN_PROGRESS`
 
-| Parámetro |   Tipo | Descripción  |
-| --------- | -----: | ------------ |
-| `id`      | number | ID del turno |
-
----
-
-### Reglas de negocio implementadas
-
-1. **El turno debe existir**
-
-   * Si no existe → `404 Turno no encontrado`
-
-2. **ACL por rol**
-
-   * Supervisor/Admin → permite cualquier turno
-   * Guía → permite solo si `turno.guiaId === guiaIdDelToken`
-
-3. **Un usuario GUIA debe estar asociado a un Guia**
-
-   * Si `usuarioId` no tiene `Guia` → `409 El usuario autenticado no está asociado a un guía`
-
----
-
-### Respuesta 200 (ejemplo)
+**Respuesta 200 (ejemplo):**
 
 ```json
 {
   "data": {
     "id": 43,
-    "numero": 2,
-    "status": "ASSIGNED",
-    "guiaId": "cml4abcd0000xxx999",
-    "atencionId": 8
+    "status": "IN_PROGRESS",
+    "checkInAt": "2026-02-03T14:10:22.000Z"
   },
   "meta": null,
   "error": null
@@ -1130,125 +1096,33 @@ Permitir que el GUIA abra un “detalle de turno” desde una tarjeta/lista sin 
 
 ---
 
-### Errores esperados
+### ✅ 2.2 Cierre operativo del turno (check-out)
 
-* `401` Authentication required
-* `403` No tienes permisos para ver este turno (cuando GUIA intenta ver turno ajeno)
-* `404` Turno no encontrado
-* `409` El usuario autenticado no está asociado a un guía
+#### PATCH `/turnos/:id/check-out`
 
----
+Marca el **fin real** del turno.
 
-### Implementación técnica (lo que hicimos)
+**Auth requerida:** ✅ Sí
+**Roles permitidos:** `GUIA`
 
-#### 1) Routes
+**Qué hace exactamente:**
 
-Se eliminó el bloqueo `requireSupervisor` en `GET /turnos/:id` para permitir que el GUIA llegue al controller:
+1. Valida que el turno exista.
+2. Verifica que el turno esté en estado `IN_PROGRESS`.
+3. Verifica que el usuario sea el guía asignado.
+4. Actualiza:
 
-* **Antes**
+   * `checkOutAt = now()`
+   * `status = COMPLETED`
 
-  * `GET /turnos/:id` → `requireSupervisor` (GUIA nunca entraba)
-* **Ahora**
-
-  * `GET /turnos/:id` → solo `requireAuth` + `validate(params)`
-
-#### 2) Controller
-
-Se cambió `TurnoController.getById` para llamar a un método con ACL:
-
-* `TurnoService.getByIdForActor(turnoId, actorUserId, actorRol)`
-
-#### 3) Service
-
-Se implementó:
-
-* `getByIdForActor(...)`:
-
-  * carga turno
-  * si rol es GUIA: obtiene `actorGuiaId` y valida `item.guiaId === actorGuiaId`
-  * si falla → `ForbiddenError`
-
----
-
-## ✅ 2) POST `/turnos/:id/claim` (tomar turno específico)
-
-### Objetivo (Operación real)
-
-Permite que un GUIA “tome” un turno específico si está:
-
-* `status = AVAILABLE`
-* `guiaId = null`
-
-Esto complementa el flujo FIFO de:
-
-* `POST /atenciones/:id/claim` (primer AVAILABLE por número)
-
-y cubre escenarios reales donde la elección no necesariamente es FIFO.
-
----
-
-### Auth requerida
-
-✅ Sí
-
-**Roles permitidos:**
-
-* `GUIA`
-
----
-
-### Headers obligatorios
-
-| Header              | Valor            |
-| ------------------- | ---------------- |
-| `Authorization`     | `Bearer <token>` |
-| `X-Client-Platform` | `WEB` / `MOBILE` |
-
----
-
-### Path params
-
-| Parámetro |   Tipo | Descripción          |
-| --------- | -----: | -------------------- |
-| `id`      | number | ID del turno a tomar |
-
----
-
-### Qué hace exactamente
-
-1. Obtiene el `guiaId` real desde el usuario autenticado (`Guia.usuarioId`)
-2. Valida que el turno exista
-3. Valida gate operativo (Atención/Recalada):
-
-   * `status` activo
-   * no cancelado, no cerrado, no departed
-4. Valida que el turno esté disponible:
-
-   * `status === AVAILABLE`
-   * `guiaId === null`
-5. Valida que el guía **no tenga otro turno en esa misma atención**
-
-   * respaldo adicional por unique `(atencionId, guiaId)`
-6. Ejecuta asignación **atómica**:
-
-   * `updateMany` condicional: solo si sigue AVAILABLE y guiaId=null
-   * set:
-
-     * `guiaId = actorGuiaId`
-     * `status = ASSIGNED`
-
----
-
-### Respuesta 200 (ejemplo)
+**Respuesta 200 (ejemplo):**
 
 ```json
 {
   "data": {
-    "id": 55,
-    "numero": 7,
-    "status": "ASSIGNED",
-    "guiaId": "cml4abcd0000xxx999",
-    "atencionId": 8
+    "id": 43,
+    "status": "COMPLETED",
+    "checkOutAt": "2026-02-03T15:02:11.000Z"
   },
   "meta": null,
   "error": null
@@ -1257,60 +1131,287 @@ y cubre escenarios reales donde la elección no necesariamente es FIFO.
 
 ---
 
-### Errores esperados
+### ✅ 2.3 Turno no atendido (no-show)
 
-* `401` Authentication required
-* `403` (no aplica en claim porque el rol está bloqueado por route guard)
-* `404` Turno no encontrado
-* `409` El turno no está disponible para tomar
-* `409` Ya tienes un turno asignado en esta atención
-* `409` La atención está cerrada/cancelada o la recalada departió, etc. (gate operativo)
-* `409` No fue posible tomar: el turno ya no está disponible (concurrencia)
+#### PATCH `/turnos/:id/no-show`
 
----
+Marca un turno como `NO_SHOW` cuando el guía no se presenta.
 
-## 🧠 Concurrencia y consistencia
+**Auth requerida:** ✅ Sí
+**Roles permitidos:** `SUPERVISOR`, `SUPER_ADMIN`
 
-Para evitar race conditions (varios guías reclamando a la vez), el claim se implementa con:
+**Body (opcional):**
 
-* **Transacción Prisma**
-* **`updateMany` condicional**:
+```json
+{
+  "reason": "Guía no se presentó en la ventana asignada"
+}
+```
 
-  * si `count !== 1` → conflicto, porque alguien ya lo tomó antes
-* Respaldo por **unique de DB**:
+**Qué hace exactamente:**
 
-  * `(atencionId, guiaId)` evita doble turno en la misma atención
-  * si Prisma lanza `P2002` se convierte en `409` con mensaje claro
+1. Valida que el turno exista.
+2. Verifica que esté en estado `ASSIGNED`.
+3. Actualiza:
 
----
-
-## 🖥️ Impacto directo en el Front
-
-### Para GUIA
-
-* `TurnoCard` puede abrir **detalle** sin panel (usando `GET /turnos/:id`)
-* Si el flujo operativo lo requiere, el GUIA puede:
-
-  * ver lista (por ejemplo desde `/turnos/me` o turnero en atención)
-  * elegir un turno puntual
-  * ejecutar `POST /turnos/:id/claim`
-
-### Para Supervisor
-
-No se afectó el panel, se mantiene:
-
-* `PATCH /turnos/:id/assign`
-* `PATCH /turnos/:id/unassign`
-* `PATCH /turnos/:id/no-show`
+   * `status = NO_SHOW`
+4. Agrega evidencia en `observaciones` (si se envía razón).
 
 ---
 
-## ✅ Resultado de esta fase
+## ✅ 3. Endpoints del rol GUIA (UX real sin panel)
 
-✅ `GET /turnos/:id` usable por GUIA sin exponer datos de otros guías
-✅ ACL robusta en backend (no depende del front)
-✅ Nuevo `POST /turnos/:id/claim` para operación flexible
-✅ Reglas + gate operativo consistentes con el resto del sistema
-✅ Concurrencia protegida (transacción + updateMany + uniques)
+Principio:
+
+> El backend fuerza `guiaId` desde el usuario autenticado (JWT).
+> El front no “declara” el guía, solo consulta “mis turnos”.
 
 ---
+
+### ✅ 3.1 Listar mis turnos
+
+#### GET `/turnos/me`
+
+Lista los turnos del guía autenticado con filtros simples (hoy por defecto o por rango).
+
+**Auth requerida:** ✅ Sí
+**Roles permitidos:** `GUIA`
+
+**Query params (opcionales):**
+
+| Param        | Tipo   | Descripción                                                                |
+| ------------ | ------ | -------------------------------------------------------------------------- |
+| `dateFrom`   | date   | Inicio del rango (por defecto hoy 00:00 si no se envía ningún date)        |
+| `dateTo`     | date   | Fin del rango (por defecto hoy 23:59 si no se envía ningún date)           |
+| `status`     | enum   | `AVAILABLE`, `ASSIGNED`, `IN_PROGRESS`, `COMPLETED`, `CANCELED`, `NO_SHOW` |
+| `recaladaId` | number | Filtra por recalada                                                        |
+| `atencionId` | number | Filtra por atención                                                        |
+| `page`       | number | default 1                                                                  |
+| `pageSize`   | number | default 20 (max 100)                                                       |
+
+**Reglas de negocio:**
+
+1. El `guiaId` se fuerza por el usuario autenticado.
+2. Aplica solapamiento de fechas:
+
+   * `fechaFin >= dateFrom` (si dateFrom existe)
+   * `fechaInicio <= dateTo` (si dateTo existe)
+3. Si el usuario no está asociado a un guía → `409`.
+
+---
+
+### ✅ 3.2 Obtener mi próximo turno
+
+#### GET `/turnos/me/next`
+
+Retorna el próximo turno del guía autenticado cuyo estado sea `ASSIGNED` o `IN_PROGRESS`, ordenado por `fechaInicio ASC`.
+
+**Auth requerida:** ✅ Sí
+**Roles permitidos:** `GUIA`
+
+**Respuesta 200:**
+
+* Si existe → `data = Turno`
+* Si no existe → `data = null`
+
+---
+
+### ✅ 3.3 Obtener mi turno activo
+
+#### GET `/turnos/me/active`
+
+Retorna el turno activo del guía autenticado (`status = IN_PROGRESS`) si existe.
+
+**Auth requerida:** ✅ Sí
+**Roles permitidos:** `GUIA`
+
+**Qué hace exactamente:**
+
+1. Obtiene el `guiaId` desde el usuario autenticado.
+2. Busca el primer turno con:
+
+   * `status = IN_PROGRESS`
+
+**Respuesta 200:**
+
+* Si existe → `data = Turno`
+* Si no existe → `data = null`
+
+**Ejemplo:**
+
+```
+GET /turnos/me/active
+```
+
+**Motivo de existencia (UX):**
+
+* Permite un botón grande “Continuar turno”.
+* Evita que el guía se pierda buscando su turno en listas.
+
+---
+
+## ✅ 4. Ajustes de acceso + Claim específico de turno (GUIA)
+
+Esta sección resuelve fricción real: permitir que el GUIA consulte recursos necesarios **sin exponer turnos ajenos**, y habilitar toma de turno por ID (no solo FIFO).
+
+---
+
+### ✅ 4.1 GET `/turnos/:id` permitido para GUIA solo si es su turno
+
+**Objetivo (UX / Operación)**
+Permitir que el GUIA abra el detalle desde una lista/tarjeta sin usar panel.
+
+**Regla de ACL:**
+
+* `SUPERVISOR` / `SUPER_ADMIN`: puede ver cualquier turno
+* `GUIA`: solo si `turno.guiaId === miGuiaId`
+
+**Errores esperados:**
+
+* `403` si GUIA intenta ver turno ajeno
+* `409` si el usuario no está asociado a un guía
+
+---
+
+### ✅ 4.2 POST `/turnos/:id/claim` (tomar turno específico)
+
+Permite que un GUIA tome un turno específico si:
+
+* `status = AVAILABLE`
+* `guiaId = null`
+
+**Qué hace exactamente (resumen):**
+
+1. Obtiene el `guiaId` real desde el usuario autenticado.
+2. Valida existencia.
+3. Gate operativo Atención/Recalada (activo, no cerrado/cancelado/departed).
+4. Valida disponibilidad (AVAILABLE + guiaId null).
+5. Valida que el guía no tenga otro turno en esa atención.
+6. Asignación atómica (transacción + `updateMany` condicional):
+
+   * `guiaId = actorGuiaId`
+   * `status = ASSIGNED`
+
+---
+
+## ✅ 5. Nuevo agregado Fase 3: mejoras para Panel Supervisor
+
+Aquí se documentan los dos cambios nuevos que implementamos ahora:
+
+1. Filtro `guiaId` en `GET /turnos` (panel)
+2. `PATCH /turnos/:id/cancel` (cancelación real de turno)
+
+---
+
+### ✅ 5.1 GET `/turnos` ahora soporta filtro `guiaId` (Panel)
+
+**Qué hace:** permite filtrar turnos por guía desde el panel.
+
+**Motivo:** ver rápido “qué tiene Juan hoy” sin inventar endpoints extra.
+
+**Roles permitidos:** `SUPERVISOR`, `SUPER_ADMIN`
+
+**Nuevo Query Param:**
+
+| Param    | Tipo   | Descripción                            |
+| -------- | ------ | -------------------------------------- |
+| `guiaId` | string | Filtra por `Turno.guiaId` (ID de Guia) |
+
+**Ejemplo (recomendado con rango):**
+
+```
+GET /turnos?guiaId=cmll9wob5000g4c60sal5ewg1&dateFrom=2026-02-10&dateTo=2026-02-12&page=1&pageSize=50
+```
+
+> Nota operativa: `GET /turnos` por defecto filtra “hoy” si no envías `dateFrom/dateTo`. Para validar seeds históricas, usa rango explícito.
+
+---
+
+### ✅ 5.2 Cancelación real de turno
+
+#### PATCH `/turnos/:id/cancel`
+
+**Qué hace:** cancela un turno registrando evidencia completa:
+
+* `status = CANCELED`
+* `canceledAt = now`
+* `cancelReason` (opcional)
+* `canceledById = actorUserId`
+
+**Motivo:** el modelo y docs ya hablaban de cancelación y el front ya intenta usarlo. Solo faltaba el endpoint real.
+
+**Front:** `turnosApi.cancelTurno()` ya existe.
+
+**Auth requerida:** ✅ Sí
+**Roles permitidos:** `SUPERVISOR`, `SUPER_ADMIN`
+
+**Body (opcional):**
+
+```json
+{
+  "cancelReason": "string"
+}
+```
+
+**Reglas de negocio implementadas:**
+
+* Si `COMPLETED` → `409`
+* Si `IN_PROGRESS` → `409`
+* Si ya está `CANCELED` → `409`
+
+**Ejemplo:**
+
+```
+PATCH /turnos/6/cancel
+```
+
+Body:
+
+```json
+{
+  "cancelReason": "Cancelación manual por supervisor"
+}
+```
+
+---
+
+## 🔐 6. Seguridad y concurrencia
+
+* Todas las operaciones críticas usan **transacciones Prisma**.
+* Se emplean `updateMany` condicionales para evitar **race conditions**.
+* Los `@@unique` en base de datos actúan como **última barrera de seguridad**.
+* No existen estados intermedios ambiguos.
+
+---
+
+## 🖥️ 7. Relación con el Front
+
+Con estos endpoints, el front puede:
+
+* Mostrar slots reales (`GET /atenciones/:id/turnos`)
+* Asignar y liberar turnos manualmente
+* Permitir autoclaim del guía (FIFO o por turno específico)
+* Iniciar y cerrar turnos (check-in/check-out)
+* Resolver ausencias (no-show)
+* Cancelar turnos con trazabilidad real (cancel)
+* Filtrar turnos por guía desde panel (`GET /turnos?guiaId=...`)
+
+👉 **Sin lógica duplicada ni cálculos en el front**.
+
+---
+
+## 🏁 8. Resultado de la Fase 3
+
+✅ Operación real modelada
+✅ Asignación y liberación seguras
+✅ Autoclaim transaccional (FIFO y por ID)
+✅ Check-in / Check-out / No-show implementados
+✅ Cancelación real de turno implementada (con auditoría)
+✅ Panel supervisor más usable (filtro por guía)
+✅ Base sólida para reportes y analítica
+
+✨ **Esto cierra formalmente la Fase 3 del módulo Turnos**
+
+---
+
+Si quieres, ahora te dejo también un **bloque “Changelog de endpoints”** (lista final de todos los endpoints del módulo) para que tu doc quede todavía más “audit-able” en sustentación.
