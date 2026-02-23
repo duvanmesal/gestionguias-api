@@ -681,21 +681,27 @@ export class AtencionService {
   /**
    * PATCH /atenciones/:id/cancel
    * Cancela atención con razón y auditoría.
+   *
+   * Receta final:
+   * - Gate: si recalada DEPARTED o CANCELED, no permitir cambios (idempotencia suave)
+   * - Cancel: bloquea si hay IN_PROGRESS; si no, permite y cancela turnos no finalizados
    */
   static async cancel(id: number, reason: string, actorUserId: string) {
-    const current = await prisma.atencion.findUnique({
+    // Traer atención + gate recalada
+    const gate = await prisma.atencion.findUnique({
       where: { id },
       select: {
         id: true,
+        status: true,
         operationalStatus: true,
-        canceledAt: true,
+        recalada: { select: { status: true, operationalStatus: true } },
       },
     });
 
-    if (!current) throw new NotFoundError("Atención no encontrada");
+    if (!gate) throw new NotFoundError("Atención no encontrada");
 
-    if (current.operationalStatus === "CANCELED") {
-      // idempotencia "suave": si ya está cancelada, devolvemos la entidad
+    // Idempotencia suave: si ya está cancelada, devolvemos entidad
+    if (gate.operationalStatus === "CANCELED") {
       const item = await prisma.atencion.findUnique({
         where: { id },
         select: atencionSelect,
@@ -704,22 +710,74 @@ export class AtencionService {
       return item;
     }
 
-    if (current.operationalStatus === "CLOSED") {
+    // Si ya está cerrada, no permitimos cancelar (tu regla existente)
+    if (gate.operationalStatus === "CLOSED") {
       throw new ConflictError("No se puede cancelar una atención cerrada");
     }
 
-    const updated = await prisma.atencion.update({
-      where: { id },
-      data: {
-        operationalStatus: "CANCELED",
-        canceledAt: new Date(),
-        cancelReason: reason,
-        canceledById: actorUserId,
-      },
-      select: atencionSelect,
+    // Gate recalada: si está DEPARTED o CANCELED no permitimos cambios
+    // (pero si ya estuviera cancelada, arriba la devolvimos)
+    if (gate.recalada.operationalStatus === "CANCELED") {
+      throw new ConflictError(
+        "No se puede cancelar: la recalada está cancelada",
+      );
+    }
+    if (gate.recalada.operationalStatus === "DEPARTED") {
+      throw new ConflictError(
+        "No se puede cancelar: la recalada ya finalizó (DEPARTED)",
+      );
+    }
+
+    // Bloqueo: si hay IN_PROGRESS, no se puede cancelar
+    const inProgressCount = await prisma.turno.count({
+      where: { atencionId: id, status: "IN_PROGRESS" },
     });
 
-    logger.info({ atencionId: id, actorUserId }, "[Atenciones] canceled");
+    if (inProgressCount > 0) {
+      throw new ConflictError(
+        "No se puede cancelar la atención: existen turnos en progreso (IN_PROGRESS)",
+      );
+    }
+
+    const when = new Date();
+
+    const updated = await prisma.$transaction(async (tx) => {
+      // 1) Cancelar turnos no finalizados (AVAILABLE/ASSIGNED)
+      await tx.turno.updateMany({
+        where: {
+          atencionId: id,
+          status: { in: ["AVAILABLE", "ASSIGNED"] },
+        },
+        data: {
+          status: "CANCELED",
+          canceledAt: when,
+          cancelReason: reason,
+          canceledById: actorUserId,
+        },
+      });
+
+      // (Opcional) Si quisieras también cancelar NO_SHOW (normalmente NO) o tocar COMPLETED (nunca).
+      // Por receta: solo no finalizados.
+
+      // 2) Cancelar atención
+      const atencion = await tx.atencion.update({
+        where: { id },
+        data: {
+          operationalStatus: "CANCELED",
+          canceledAt: when,
+          cancelReason: reason,
+          canceledById: actorUserId,
+        },
+        select: atencionSelect,
+      });
+
+      return atencion;
+    });
+
+    logger.info(
+      { atencionId: id, actorUserId, canceledAt: when.toISOString() },
+      "[Atenciones] canceled",
+    );
 
     return updated;
   }
@@ -727,21 +785,27 @@ export class AtencionService {
   /**
    * PATCH /atenciones/:id/close
    * Cierra atención (operationalStatus -> CLOSED)
+   *
+   * Receta final:
+   * - Gate: si recalada DEPARTED o CANCELED, no permitir cambios (idempotencia suave)
+   * - Close: bloquea si hay AVAILABLE | ASSIGNED | IN_PROGRESS
    */
   static async close(id: number, actorUserId: string) {
-    const current = await prisma.atencion.findUnique({
+    // Traer atención + gate recalada
+    const gate = await prisma.atencion.findUnique({
       where: { id },
-      select: { id: true, operationalStatus: true },
+      select: {
+        id: true,
+        status: true,
+        operationalStatus: true,
+        recalada: { select: { status: true, operationalStatus: true } },
+      },
     });
 
-    if (!current) throw new NotFoundError("Atención no encontrada");
+    if (!gate) throw new NotFoundError("Atención no encontrada");
 
-    if (current.operationalStatus === "CANCELED") {
-      throw new ConflictError("No se puede cerrar una atención cancelada");
-    }
-
-    if (current.operationalStatus === "CLOSED") {
-      // idempotente
+    // Idempotencia suave: si ya está CLOSED, devolvemos entidad
+    if (gate.operationalStatus === "CLOSED") {
       const item = await prisma.atencion.findUnique({
         where: { id },
         select: atencionSelect,
@@ -750,11 +814,39 @@ export class AtencionService {
       return item;
     }
 
+    // Si está cancelada, no permitimos cerrar
+    if (gate.operationalStatus === "CANCELED") {
+      throw new ConflictError("No se puede cerrar una atención cancelada");
+    }
+
+    // Gate recalada: si está DEPARTED o CANCELED no permitimos cambios
+    // (pero si ya estuviera CLOSED, arriba la devolvimos)
+    if (gate.recalada.operationalStatus === "CANCELED") {
+      throw new ConflictError("No se puede cerrar: la recalada está cancelada");
+    }
+    if (gate.recalada.operationalStatus === "DEPARTED") {
+      throw new ConflictError(
+        "No se puede cerrar: la recalada ya finalizó (DEPARTED)",
+      );
+    }
+
+    // Bloqueo: si hay turnos vivos, no se puede cerrar
+    const aliveCount = await prisma.turno.count({
+      where: {
+        atencionId: id,
+        status: { in: ["AVAILABLE", "ASSIGNED", "IN_PROGRESS"] },
+      },
+    });
+
+    if (aliveCount > 0) {
+      throw new ConflictError(
+        "No se puede cerrar la atención: aún existen turnos AVAILABLE/ASSIGNED/IN_PROGRESS",
+      );
+    }
+
     const updated = await prisma.atencion.update({
       where: { id },
-      data: {
-        operationalStatus: "CLOSED",
-      },
+      data: { operationalStatus: "CLOSED" },
       select: atencionSelect,
     });
 
@@ -818,11 +910,11 @@ export class AtencionService {
       canceledAt: t.canceledAt,
       guia: t.guia
         ? {
-          id: t.guia.id,
-          email: t.guia.usuario.email,
-          nombres: t.guia.usuario.nombres,
-          apellidos: t.guia.usuario.apellidos,
-        }
+            id: t.guia.id,
+            email: t.guia.usuario.email,
+            nombres: t.guia.usuario.nombres,
+            apellidos: t.guia.usuario.apellidos,
+          }
         : null,
     }));
   }
