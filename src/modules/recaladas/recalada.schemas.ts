@@ -17,12 +17,9 @@ export const createRecaladaSchema = z
     terminal: z.string().trim().min(2).max(80).optional(),
     muelle: z.string().trim().min(1).max(80).optional(),
 
-    pasajerosEstimados: z.coerce
-      .number()
-      .int()
-      .nonnegative()
-      .max(300000)
-      .optional(),
+    // ✅ Viejo: total_turistas >= 1 (si mandan el campo)
+    pasajerosEstimados: z.coerce.number().int().min(1).max(300000).optional(),
+
     tripulacionEstimada: z.coerce
       .number()
       .int()
@@ -43,9 +40,23 @@ export const createRecaladaSchema = z
     {
       message: "fechaSalida debe ser mayor o igual a fechaLlegada",
       path: ["fechaSalida"],
-    }
+    },
+  )
+  .refine(
+    (data) => {
+      // PR-01: Si MANUAL (o default) y mandan fechaSalida -> fechaSalida >= now
+      // Si IMPORT -> permitir pasado
+      const source = data.fuente ?? RecaladaSource.MANUAL;
+      if (source === RecaladaSource.IMPORT) return true;
+      if (!data.fechaSalida) return true;
+      return data.fechaSalida.getTime() >= Date.now();
+    },
+    {
+      message:
+        "fechaSalida debe ser mayor o igual a ahora para recalada MANUAL (operativa)",
+      path: ["fechaSalida"],
+    },
   );
-
 
 export const listRecaladasQuerySchema = z
   .object({
@@ -114,7 +125,7 @@ export const updateRecaladaBodySchema = z
     {
       message: "fechaSalida debe ser mayor o igual a fechaLlegada",
       path: ["fechaSalida"],
-    }
+    },
   );
 
 export const deleteRecaladaParamsSchema = z.object({
@@ -151,43 +162,22 @@ export const cancelRecaladaBodySchema = z
   })
   .strict();
 
-
 export type CreateRecaladaBody = z.infer<typeof createRecaladaSchema>;
 
 export type ListRecaladasQuery = z.infer<typeof listRecaladasQuerySchema>;
 
-export type GetRecaladaByIdParams = z.infer<
-  typeof getRecaladaByIdParamsSchema
->;
+export type GetRecaladaByIdParams = z.infer<typeof getRecaladaByIdParamsSchema>;
 
-export type UpdateRecaladaParams = z.infer<
-  typeof updateRecaladaParamsSchema
->;
-export type UpdateRecaladaBody = z.infer<
-  typeof updateRecaladaBodySchema
->;
+export type UpdateRecaladaParams = z.infer<typeof updateRecaladaParamsSchema>;
+export type UpdateRecaladaBody = z.infer<typeof updateRecaladaBodySchema>;
 
-export type DeleteRecaladaParams = z.infer<
-  typeof deleteRecaladaParamsSchema
->;
+export type DeleteRecaladaParams = z.infer<typeof deleteRecaladaParamsSchema>;
 
-export type ArriveRecaladaParams = z.infer<
-  typeof arriveRecaladaParamsSchema
->;
-export type ArriveRecaladaBody = z.infer<
-  typeof arriveRecaladaBodySchema
->;
+export type ArriveRecaladaParams = z.infer<typeof arriveRecaladaParamsSchema>;
+export type ArriveRecaladaBody = z.infer<typeof arriveRecaladaBodySchema>;
 
-export type DepartRecaladaParams = z.infer<
-  typeof departRecaladaParamsSchema
->;
-export type DepartRecaladaBody = z.infer<
-  typeof departRecaladaBodySchema
->;
+export type DepartRecaladaParams = z.infer<typeof departRecaladaParamsSchema>;
+export type DepartRecaladaBody = z.infer<typeof departRecaladaBodySchema>;
 
-export type CancelRecaladaParams = z.infer<
-  typeof cancelRecaladaParamsSchema
->;
-export type CancelRecaladaBody = z.infer<
-  typeof cancelRecaladaBodySchema
->;
+export type CancelRecaladaParams = z.infer<typeof cancelRecaladaParamsSchema>;
+export type CancelRecaladaBody = z.infer<typeof cancelRecaladaBodySchema>;

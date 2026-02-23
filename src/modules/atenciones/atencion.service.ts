@@ -143,24 +143,121 @@ export class AtencionService {
   /**
    * Crea una Atención (ventana + cupo).
    * - Valida existencia de la Recalada
+   * - Valida reglas operativas (viejo) + soporte histórico vía recalada.fuente (si decides)
+   * - Bloquea solapamientos de atenciones dentro de la misma recalada (overlap real)
    * - Resuelve supervisorId desde actorUserId (si no existe, lo crea)
    * - Crea Atencion y materializa Turnos 1..turnosTotal
    */
   static async create(input: CreateAtencionBody, actorUserId: string) {
+    // ✅ Reglas básicas de ventana
     if (input.fechaFin < input.fechaInicio) {
       throw new BadRequestError("fechaFin debe ser >= fechaInicio");
     }
 
-    // Validar que exista la Recalada
+    // ✅ Viejo: total_turnos >= 1
+    if (!Number.isInteger(input.turnosTotal) || input.turnosTotal < 1) {
+      throw new BadRequestError("turnosTotal debe ser un entero >= 1");
+    }
+
+    const now = new Date();
+
+    // ✅ PR-02: Traer recalada con campos necesarios
     const recalada = await prisma.recalada.findUnique({
       where: { id: input.recaladaId },
-      select: { id: true },
+      select: {
+        id: true,
+        fechaLlegada: true,
+        fechaSalida: true,
+        status: true,
+        operationalStatus: true,
+      },
     });
+
     if (!recalada) {
       throw new NotFoundError("La recalada (recaladaId) no existe");
     }
 
-    // Resolver supervisorId desde usuario autenticado.
+    // ✅ PR-02: Validar “recalada operable”
+    // viejo: si la recalada ya zarpó, no deja crear atención
+    if (recalada.status !== "ACTIVO") {
+      throw new ConflictError("La recalada no está activa");
+    }
+    if (recalada.operationalStatus === "CANCELED") {
+      throw new ConflictError("La recalada está cancelada");
+    }
+    if (recalada.operationalStatus === "DEPARTED") {
+      throw new ConflictError("La recalada ya finalizó (DEPARTED)");
+    }
+
+    // ✅ Equivalente “ya zarpó” por fecha (complemento operativo)
+    // Si fechaSalida existe y ya pasó, no permitir crear atenciones
+    if (recalada.fechaSalida && recalada.fechaSalida < now) {
+      throw new ConflictError(
+        "No se puede crear una atención: la recalada ya zarpó (fechaSalida < ahora)",
+      );
+    }
+
+    // ✅ PR-02: Validar ventana dentro de la recalada (viejo)
+    // fecha_inicio >= recalada.fecha_arribo
+    if (input.fechaInicio < recalada.fechaLlegada) {
+      throw new BadRequestError(
+        "fechaInicio debe ser >= fechaLlegada de la recalada",
+      );
+    }
+
+    // fecha_cierre >= recalada.fecha_arribo (implícito si fechaFin >= fechaInicio, pero lo dejamos explícito)
+    if (input.fechaFin < recalada.fechaLlegada) {
+      throw new BadRequestError(
+        "fechaFin debe ser >= fechaLlegada de la recalada",
+      );
+    }
+
+    // fecha_inicio <= recalada.fecha_zarpe  (si existe)
+    // fecha_cierre <= recalada.fecha_zarpe  (si existe)
+    if (recalada.fechaSalida) {
+      if (input.fechaInicio > recalada.fechaSalida) {
+        throw new BadRequestError(
+          "fechaInicio debe ser <= fechaSalida de la recalada",
+        );
+      }
+      if (input.fechaFin > recalada.fechaSalida) {
+        throw new BadRequestError(
+          "fechaFin debe ser <= fechaSalida de la recalada",
+        );
+      }
+    }
+
+    // ✅ PR-02: Validar contra “ahora” (igual al viejo)
+    if (input.fechaInicio < now) {
+      throw new BadRequestError("fechaInicio debe ser >= ahora");
+    }
+    if (input.fechaFin < now) {
+      throw new BadRequestError("fechaFin debe ser >= ahora");
+    }
+
+    // ✅ PR-03: Bloquear solapamiento de atenciones en la misma recalada
+    // Overlap existe si: existing.fechaInicio <= new.fechaFin AND existing.fechaFin >= new.fechaInicio
+    // (Opcional) Solo consideramos atenciones "ACTIVO" y no canceladas
+    const overlap = await prisma.atencion.findFirst({
+      where: {
+        recaladaId: input.recaladaId,
+        status: "ACTIVO",
+        operationalStatus: { not: "CANCELED" },
+        AND: [
+          { fechaInicio: { lte: input.fechaFin } },
+          { fechaFin: { gte: input.fechaInicio } },
+        ],
+      },
+      select: { id: true, fechaInicio: true, fechaFin: true },
+    });
+
+    if (overlap) {
+      throw new ConflictError(
+        "La ventana de la atención se solapa con otra atención existente en esta recalada",
+      );
+    }
+
+    // ✅ Resolver supervisorId desde usuario autenticado.
     // Si no existe supervisor (ej SUPER_ADMIN), lo creamos para cumplir FK.
     let supervisor = await prisma.supervisor.findUnique({
       where: { usuarioId: actorUserId },
@@ -388,6 +485,96 @@ export class AtencionService {
         body.fechaInicio.getTime() !== current.fechaInicio.getTime()) ||
       (body.fechaFin && body.fechaFin.getTime() !== current.fechaFin.getTime());
 
+    // ✅ Si cambia la ventana, aplicamos PR-02 + PR-03 (protección fuerte)
+    if (windowChanged) {
+      const now = new Date();
+
+      // PR-02: traer recalada con campos necesarios
+      const recalada = await prisma.recalada.findUnique({
+        where: { id: current.recaladaId },
+        select: {
+          id: true,
+          fechaLlegada: true,
+          fechaSalida: true,
+          status: true,
+          operationalStatus: true,
+        },
+      });
+
+      if (!recalada) {
+        throw new NotFoundError("La recalada (recaladaId) no existe");
+      }
+
+      // PR-02: recalada operable
+      if (recalada.status !== "ACTIVO") {
+        throw new ConflictError("La recalada no está activa");
+      }
+      if (recalada.operationalStatus === "CANCELED") {
+        throw new ConflictError("La recalada está cancelada");
+      }
+      if (recalada.operationalStatus === "DEPARTED") {
+        throw new ConflictError("La recalada ya finalizó (DEPARTED)");
+      }
+      if (recalada.fechaSalida && recalada.fechaSalida < now) {
+        throw new ConflictError(
+          "No se puede editar la atención: la recalada ya zarpó (fechaSalida < ahora)",
+        );
+      }
+
+      // PR-02: ventana dentro de recalada
+      if (newFechaInicio < recalada.fechaLlegada) {
+        throw new BadRequestError(
+          "fechaInicio debe ser >= fechaLlegada de la recalada",
+        );
+      }
+      if (newFechaFin < recalada.fechaLlegada) {
+        throw new BadRequestError(
+          "fechaFin debe ser >= fechaLlegada de la recalada",
+        );
+      }
+      if (recalada.fechaSalida) {
+        if (newFechaInicio > recalada.fechaSalida) {
+          throw new BadRequestError(
+            "fechaInicio debe ser <= fechaSalida de la recalada",
+          );
+        }
+        if (newFechaFin > recalada.fechaSalida) {
+          throw new BadRequestError(
+            "fechaFin debe ser <= fechaSalida de la recalada",
+          );
+        }
+      }
+
+      // PR-02: contra “ahora” (igual al viejo)
+      if (newFechaInicio < now) {
+        throw new BadRequestError("fechaInicio debe ser >= ahora");
+      }
+      if (newFechaFin < now) {
+        throw new BadRequestError("fechaFin debe ser >= ahora");
+      }
+
+      // ✅ PR-03: bloquear overlap real, excluyendo esta atención
+      const overlap = await prisma.atencion.findFirst({
+        where: {
+          recaladaId: current.recaladaId,
+          id: { not: id },
+          status: "ACTIVO",
+          operationalStatus: { not: "CANCELED" },
+          AND: [
+            { fechaInicio: { lte: newFechaFin } },
+            { fechaFin: { gte: newFechaInicio } },
+          ],
+        },
+        select: { id: true, fechaInicio: true, fechaFin: true },
+      });
+
+      if (overlap) {
+        throw new ConflictError(
+          "La ventana de la atención se solapa con otra atención existente en esta recalada",
+        );
+      }
+    }
+
     if (body.fechaInicio) patch.fechaInicio = body.fechaInicio;
     if (body.fechaFin) patch.fechaFin = body.fechaFin;
 
@@ -402,7 +589,7 @@ export class AtencionService {
         ? body.turnosTotal
         : current.turnosTotal;
 
-    if (targetTurnosTotal <= 0) {
+    if (!Number.isInteger(targetTurnosTotal) || targetTurnosTotal <= 0) {
       throw new BadRequestError("turnosTotal debe ser un entero positivo");
     }
 
@@ -631,11 +818,11 @@ export class AtencionService {
       canceledAt: t.canceledAt,
       guia: t.guia
         ? {
-            id: t.guia.id,
-            email: t.guia.usuario.email,
-            nombres: t.guia.usuario.nombres,
-            apellidos: t.guia.usuario.apellidos,
-          }
+          id: t.guia.id,
+          email: t.guia.usuario.email,
+          nombres: t.guia.usuario.nombres,
+          apellidos: t.guia.usuario.apellidos,
+        }
         : null,
     }));
   }

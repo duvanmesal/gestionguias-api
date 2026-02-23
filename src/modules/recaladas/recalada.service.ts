@@ -190,8 +190,30 @@ const atencionSelectForRecalada = {
 
 export class RecaladaService {
   static async create(input: CreateRecaladaInput, actorUserId: string) {
+    // ✅ Regla base (ya la tenías): fechaSalida >= fechaLlegada
     if (input.fechaSalida && input.fechaSalida < input.fechaLlegada) {
       throw new BadRequestError("fechaSalida debe ser >= fechaLlegada");
+    }
+
+    // ✅ PR-01: reglas “duras” operativas (viejo → nuevo)
+    // - MANUAL (o default): si mandan fechaSalida, exigir fechaSalida >= now
+    // - IMPORT (histórico): permitir fechas pasadas
+    const now = new Date();
+    const source: RecaladaSource = input.fuente ?? "MANUAL";
+
+    if (source !== "IMPORT" && input.fechaSalida && input.fechaSalida < now) {
+      throw new BadRequestError(
+        "fechaSalida debe ser >= ahora para recalada MANUAL (operativa)",
+      );
+    }
+
+    // ✅ Viejo: total_turistas >= 1 (aquí: pasajerosEstimados)
+    if (
+      typeof input.pasajerosEstimados !== "undefined" &&
+      input.pasajerosEstimados !== null &&
+      input.pasajerosEstimados < 1
+    ) {
+      throw new BadRequestError("pasajerosEstimados debe ser >= 1");
     }
 
     const [buque, pais] = await Promise.all([
@@ -245,7 +267,7 @@ export class RecaladaService {
           tripulacionEstimada: input.tripulacionEstimada ?? null,
 
           observaciones: input.observaciones ?? null,
-          fuente: input.fuente ?? "MANUAL",
+          fuente: source,
 
           status: input.status ?? "ACTIVO",
         },
