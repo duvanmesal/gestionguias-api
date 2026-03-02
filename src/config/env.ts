@@ -1,8 +1,10 @@
-import "dotenv/config"
-import { z } from "zod"
+import "dotenv/config";
+import { z } from "zod";
 
 const Env = z.object({
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  NODE_ENV: z
+    .enum(["development", "test", "production"])
+    .default("development"),
   API_PREFIX: z.string().default("/api/v1"),
   PORT: z.coerce.number().default(3000),
   DATABASE_URL: z.string().url(),
@@ -50,11 +52,23 @@ const Env = z.object({
   // CORS
   CORS_ALLOWED_ORIGINS: z
     .string()
-    .default("http://localhost:3001,http://localhost:5173,http://localhost:8081"),
+    .default(
+      "http://localhost:3001,http://localhost:5173,http://localhost:8081",
+    ),
   CORS_ALLOW_CREDENTIALS: z.coerce.boolean().default(true),
-})
 
-export const env = Env.parse(process.env)
+  // Logs microservice (global)
+  LOGS_SERVICE_URL: z.string().url().default("http://localhost:4010"),
+  LOGS_INGEST_API_KEY: z.string().default(""),
+  LOGS_ENABLED: z.coerce.boolean().default(true),
+  LOGS_TIMEOUT_MS: z.coerce.number().int().min(100).max(30_000).default(1500),
+
+  // Identidad del servicio emisor (útil si varios servicios publican logs)
+  SERVICE_NAME: z.string().default("gestionguias-api"),
+});
+
+export const env = Env.parse(process.env);
+
 export const corsOrigins = Env.shape.CORS_ALLOWED_ORIGINS.parse(
   process.env.CORS_ALLOWED_ORIGINS,
-).split(",")
+).split(",");

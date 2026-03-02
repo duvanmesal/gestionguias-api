@@ -55,9 +55,9 @@ build/
 Thumbs.db
 
 # Logs
-logs
 *.log
 
 # Prisma
 prisma/migrations/
 gestionguias-api.zip
+docs-api.zip

@@ -8,6 +8,8 @@ import healthRouter from "./routes/health.routes"
 import { apiRouter } from "./routes"
 import { logger } from "./libs/logger"
 import { env } from "./config/env"
+import { requestContext } from "./middlewares/requestContext"
+import { responseLog } from "./middlewares/response-log"
 
 const app = express()
 
@@ -17,7 +19,7 @@ app.set("trust proxy", 1)
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
-  })
+  }),
 )
 
 // 2) CORS SIEMPRE antes de parsers y rutas
@@ -28,15 +30,20 @@ app.use(express.json({ limit: "1mb", strict: false }))
 app.use(express.urlencoded({ extended: true, limit: "1mb" }))
 app.use(cookieParser())
 
-// 4) Logs
+// 4) Request context (requestId + startTime) ANTES de logs
+app.use(requestContext)
+
+// 5) Logs HTTP (pino-http)
 app.use(requestLogger)
 
-// 5) Rutas públicas
-app.use(`${env.API_PREFIX ?? "/api"}/health`, healthRouter)
+// 6) Response log (status + duration) hacia microservicio (opcional recomendado)
+app.use(responseLog)
 
+// 7) Rutas públicas
+app.use(`${env.API_PREFIX ?? "/api"}/health`, healthRouter)
 app.use(env.API_PREFIX, apiRouter)
 
-// 7) 404
+// 8) 404
 app.use((_req, res) => {
   res.status(404).json({
     data: null,
@@ -45,10 +52,10 @@ app.use((_req, res) => {
   })
 })
 
-// 8) Errores
+// 9) Errores
 app.use(errorHandler)
 
-// 9) Shutdown
+// 10) Shutdown
 process.on("SIGTERM", () => {
   logger.info("SIGTERM received, shutting down gracefully")
   process.exit(0)

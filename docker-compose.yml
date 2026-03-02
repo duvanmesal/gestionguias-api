@@ -1,4 +1,7 @@
 services:
+  # =========================
+  # Postgres (API DB)
+  # =========================
   db:
     image: postgres:15
     env_file: .env
@@ -23,9 +26,48 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command: ["npx","prisma","migrate","deploy"]
+    command: ["npx", "prisma", "migrate", "deploy"]
     restart: "no"
 
+  # =========================
+  # Mongo (Logs DB)
+  # =========================
+  mongo-logs:
+    image: mongo:7
+    container_name: mongo-logs
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_logs_data:/data/db
+
+  # =========================
+  # Logs Service
+  # =========================
+  logs-service:
+    build:
+      context: ../corpoturismo-logs-service
+      dockerfile: Dockerfile
+    container_name: logs-service
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 4010
+
+      MONGO_URL: mongodb://mongo-logs:27017
+      MONGO_DB: corpoturismo_db_logs
+
+      INGEST_API_KEY: ${LOGS_INGEST_API_KEY}
+      READ_API_KEY: ${LOGS_READ_API_KEY}
+    ports:
+      - "4010:4010"
+    depends_on:
+      mongo-logs:
+        condition: service_started
+
+  # =========================
+  # API
+  # =========================
   api:
     build: .
     env_file: .env
@@ -34,9 +76,14 @@ services:
         condition: service_healthy
       migrator:
         condition: service_completed_successfully
+      logs-service:
+        condition: service_started
     ports:
       - "3000:3000"
-    # opcional: si tu Dockerfile ya corre "node dist/src/server.js", no hace falta command
+    environment:
+      # Asegura conexión al logs-service dentro de la red docker
+      LOGS_SERVICE_URL: http://logs-service:4010
 
 volumes:
   pgdata: {}
+  mongo_logs_data: {}
