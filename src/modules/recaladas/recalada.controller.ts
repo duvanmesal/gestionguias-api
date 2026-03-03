@@ -7,7 +7,6 @@ import type {
   UpdateRecaladaParams,
   UpdateRecaladaBody,
   DeleteRecaladaParams,
-
   ArriveRecaladaParams,
   ArriveRecaladaBody,
   DepartRecaladaParams,
@@ -15,6 +14,9 @@ import type {
   CancelRecaladaParams,
   CancelRecaladaBody,
 } from "./recalada.schemas";
+
+// ✅ logs facade
+import { logsService } from "../../libs/logs/logs.service";
 
 export class RecaladaController {
   static async create(
@@ -27,7 +29,14 @@ export class RecaladaController {
         throw new UnauthorizedError("Authentication required");
       }
 
-      const item = await RecaladaService.create(req.body, req.user.userId);
+      const item = await RecaladaService.create(req, req.body, req.user.userId);
+
+      logsService.audit(req, {
+        event: "recaladas.create.http_ok",
+        target: { entity: "Recalada", id: String(item.id) },
+        meta: { codigoRecalada: item.codigoRecalada },
+        message: "Create recalada response sent",
+      });
 
       res.status(201).json({ data: item, meta: null, error: null });
       return;
@@ -39,8 +48,6 @@ export class RecaladaController {
 
   /**
    * GET /recaladas
-   * Lista recaladas con filtros (vista tipo agenda)
-   * Auth: GUIA / SUPERVISOR / SUPER_ADMIN
    */
   static async list(
     req: Request,
@@ -53,14 +60,27 @@ export class RecaladaController {
       }
 
       const query = req.query as unknown as ListRecaladasQuery;
+      const result = await RecaladaService.list(req, query);
 
-      const result = await RecaladaService.list(query);
-
-      res.status(200).json({
-        data: result.items,
-        meta: result.meta,
-        error: null,
+      logsService.audit(req, {
+        event: "recaladas.list.http_ok",
+        target: { entity: "Recalada" },
+        meta: {
+          returned: result.items.length,
+          page: result.meta.page,
+          pageSize: result.meta.pageSize,
+          total: result.meta.total,
+          filters: result.meta.filters,
+          q: result.meta.q ?? null,
+          from: result.meta.from ?? null,
+          to: result.meta.to ?? null,
+        },
+        message: "List recaladas response sent",
       });
+
+      res
+        .status(200)
+        .json({ data: result.items, meta: result.meta, error: null });
       return;
     } catch (err) {
       next(err);
@@ -70,8 +90,6 @@ export class RecaladaController {
 
   /**
    * GET /recaladas/:id
-   * Detalle de una recalada
-   * Auth: GUIA / SUPERVISOR / SUPER_ADMIN
    */
   static async getById(
     req: Request,
@@ -84,8 +102,14 @@ export class RecaladaController {
       }
 
       const params = req.params as unknown as GetRecaladaByIdParams;
+      const item = await RecaladaService.getById(req, params.id);
 
-      const item = await RecaladaService.getById(params.id);
+      logsService.audit(req, {
+        event: "recaladas.getById.http_ok",
+        target: { entity: "Recalada", id: String(params.id) },
+        meta: { codigoRecalada: item.codigoRecalada },
+        message: "Get recalada response sent",
+      });
 
       res.status(200).json({ data: item, meta: null, error: null });
       return;
@@ -96,9 +120,7 @@ export class RecaladaController {
   }
 
   /**
-   * ✅ GET /recaladas/:id/atenciones
-   * Atenciones de una recalada (para tab "Atenciones" en detalle)
-   * Auth: GUIA / SUPERVISOR / SUPER_ADMIN
+   * GET /recaladas/:id/atenciones
    */
   static async getAtenciones(
     req: Request,
@@ -111,8 +133,14 @@ export class RecaladaController {
       }
 
       const params = req.params as unknown as GetRecaladaByIdParams;
+      const items = await RecaladaService.getAtenciones(req, params.id);
 
-      const items = await RecaladaService.getAtenciones(params.id);
+      logsService.audit(req, {
+        event: "recaladas.getAtenciones.http_ok",
+        target: { entity: "Recalada", id: String(params.id) },
+        meta: { count: items.length },
+        message: "Get atenciones response sent",
+      });
 
       res.status(200).json({ data: items, meta: null, error: null });
       return;
@@ -124,8 +152,6 @@ export class RecaladaController {
 
   /**
    * PATCH /recaladas/:id
-   * Edita campos permitidos según estado operativo (reglas en service)
-   * Auth: SUPERVISOR / SUPER_ADMIN (requireSupervisor en routes)
    */
   static async update(
     req: Request,
@@ -141,10 +167,18 @@ export class RecaladaController {
       const body = req.body as UpdateRecaladaBody;
 
       const item = await RecaladaService.update(
+        req,
         params.id,
         body,
         req.user.userId,
       );
+
+      logsService.audit(req, {
+        event: "recaladas.update.http_ok",
+        target: { entity: "Recalada", id: String(params.id) },
+        meta: { updatedKeys: Object.keys(body ?? {}) },
+        message: "Update recalada response sent",
+      });
 
       res.status(200).json({ data: item, meta: null, error: null });
       return;
@@ -156,8 +190,6 @@ export class RecaladaController {
 
   /**
    * PATCH /recaladas/:id/arrive
-   * Marca recalada como ARRIVED y guarda arrivedAt
-   * Auth: SUPERVISOR / SUPER_ADMIN (requireSupervisor en routes)
    */
   static async arrive(
     req: Request,
@@ -173,10 +205,22 @@ export class RecaladaController {
       const body = req.body as ArriveRecaladaBody;
 
       const item = await RecaladaService.arrive(
+        req,
         params.id,
         body.arrivedAt,
         req.user.userId,
       );
+
+      logsService.audit(req, {
+        event: "recaladas.arrive.http_ok",
+        target: { entity: "Recalada", id: String(params.id) },
+        meta: {
+          arrivedAt: body.arrivedAt
+            ? new Date(body.arrivedAt).toISOString()
+            : null,
+        },
+        message: "Arrive recalada response sent",
+      });
 
       res.status(200).json({ data: item, meta: null, error: null });
       return;
@@ -188,8 +232,6 @@ export class RecaladaController {
 
   /**
    * PATCH /recaladas/:id/depart
-   * Marca recalada como DEPARTED y guarda departedAt
-   * Auth: SUPERVISOR / SUPER_ADMIN (requireSupervisor en routes)
    */
   static async depart(
     req: Request,
@@ -205,10 +247,22 @@ export class RecaladaController {
       const body = req.body as DepartRecaladaBody;
 
       const item = await RecaladaService.depart(
+        req,
         params.id,
         body.departedAt,
         req.user.userId,
       );
+
+      logsService.audit(req, {
+        event: "recaladas.depart.http_ok",
+        target: { entity: "Recalada", id: String(params.id) },
+        meta: {
+          departedAt: body.departedAt
+            ? new Date(body.departedAt).toISOString()
+            : null,
+        },
+        message: "Depart recalada response sent",
+      });
 
       res.status(200).json({ data: item, meta: null, error: null });
       return;
@@ -220,8 +274,6 @@ export class RecaladaController {
 
   /**
    * PATCH /recaladas/:id/cancel
-   * Marca recalada como CANCELED y guarda canceledAt + cancelReason
-   * Auth: SUPERVISOR / SUPER_ADMIN (requireSupervisor en routes)
    */
   static async cancel(
     req: Request,
@@ -239,11 +291,19 @@ export class RecaladaController {
       const actorRol = req.user?.rol;
 
       const item = await RecaladaService.cancel(
+        req,
         params.id,
         body.reason,
         req.user.userId,
         actorRol,
       );
+
+      logsService.audit(req, {
+        event: "recaladas.cancel.http_ok",
+        target: { entity: "Recalada", id: String(params.id) },
+        meta: { reason: body.reason ?? null, actorRol: actorRol ?? null },
+        message: "Cancel recalada response sent",
+      });
 
       res.status(200).json({ data: item, meta: null, error: null });
       return;
@@ -255,8 +315,6 @@ export class RecaladaController {
 
   /**
    * DELETE /recaladas/:id
-   * Elimina físicamente una recalada SOLO si es "safe"
-   * Auth: SUPERVISOR / SUPER_ADMIN (requireSupervisor en routes)
    */
   static async delete(
     req: Request,
@@ -271,9 +329,17 @@ export class RecaladaController {
       const params = req.params as unknown as DeleteRecaladaParams;
 
       const result = await RecaladaService.deleteSafe(
+        req,
         params.id,
         req.user.userId,
       );
+
+      logsService.audit(req, {
+        event: "recaladas.deleteSafe.http_ok",
+        target: { entity: "Recalada", id: String(params.id) },
+        meta: { deleted: result.deleted },
+        message: "Delete recalada response sent",
+      });
 
       res.status(200).json({ data: result, meta: null, error: null });
       return;

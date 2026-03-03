@@ -1,3 +1,4 @@
+import type { Request } from "express";
 import { prisma } from "../../prisma/client";
 import {
   BadRequestError,
@@ -5,6 +6,7 @@ import {
   ConflictError,
 } from "../../libs/errors";
 import { logger } from "../../libs/logger";
+import { logsService } from "../../libs/logs/logs.service";
 import type {
   Prisma,
   AtencionOperativeStatus,
@@ -112,7 +114,7 @@ function assertOperacionPermitida(gate: OperativeGate) {
     throw new ConflictError("La atención no está activa");
   }
 
-  // Recalada operative status (lo dejamos como string para no pelear con imports)
+  // Recalada operative status
   if (gate.recalada.operationalStatus === "CANCELED") {
     throw new ConflictError("La recalada está cancelada");
   }
@@ -139,33 +141,85 @@ export type AtencionTurnosSummary = {
   noShowCount: number;
 };
 
+function auditWarn(
+  req: Request,
+  event: string,
+  message: string,
+  meta?: Record<string, any>,
+  target?: { entity?: string; id?: string },
+) {
+  logsService.audit(req, {
+    event,
+    level: "warn",
+    message,
+    meta,
+    target,
+  });
+}
+
+function auditInfo(
+  req: Request,
+  event: string,
+  message: string,
+  meta?: Record<string, any>,
+  target?: { entity?: string; id?: string },
+) {
+  logsService.audit(req, {
+    event,
+    message,
+    meta,
+    target,
+  });
+}
+
 export class AtencionService {
   /**
    * Crea una Atención (ventana + cupo).
-   * - Valida existencia de la Recalada
-   * - Valida reglas operativas (viejo) + soporte histórico vía recalada.fuente (si decides)
-   * - Bloquea solapamientos de atenciones dentro de la misma recalada (overlap real)
-   * - Resuelve supervisorId desde actorUserId (si no existe, lo crea)
-   * - Crea Atencion y materializa Turnos 1..turnosTotal
    */
-  static async create(input: CreateAtencionBody, actorUserId: string) {
-    // ✅ Reglas básicas de ventana
+  static async create(
+    req: Request,
+    input: CreateAtencionBody,
+    actorUserId: string,
+  ) {
+    // Reglas básicas de ventana
     if (input.fechaFin < input.fechaInicio) {
+      auditWarn(
+        req,
+        "atenciones.create.failed",
+        "Create atencion failed",
+        {
+          reason: "fechaFin_lt_fechaInicio",
+          fechaInicio: input.fechaInicio?.toISOString?.(),
+          fechaFin: input.fechaFin?.toISOString?.(),
+        },
+        { entity: "Atencion" },
+      );
       throw new BadRequestError("fechaFin debe ser >= fechaInicio");
     }
 
-    // ✅ Viejo: total_turnos >= 1
+    // total_turnos >= 1
     if (!Number.isInteger(input.turnosTotal) || input.turnosTotal < 1) {
+      auditWarn(
+        req,
+        "atenciones.create.failed",
+        "Create atencion failed",
+        {
+          reason: "turnosTotal_invalid",
+          turnosTotal: input.turnosTotal,
+        },
+        { entity: "Atencion" },
+      );
       throw new BadRequestError("turnosTotal debe ser un entero >= 1");
     }
 
     const now = new Date();
 
-    // ✅ PR-02: Traer recalada con campos necesarios
+    //  Traer recalada
     const recalada = await prisma.recalada.findUnique({
       where: { id: input.recaladaId },
       select: {
         id: true,
+        codigoRecalada: true,
         fechaLlegada: true,
         fechaSalida: true,
         status: true,
@@ -174,70 +228,184 @@ export class AtencionService {
     });
 
     if (!recalada) {
+      auditWarn(
+        req,
+        "atenciones.create.failed",
+        "Create atencion failed",
+        {
+          reason: "recalada_not_found",
+          recaladaId: input.recaladaId,
+        },
+        { entity: "Recalada", id: String(input.recaladaId) },
+      );
       throw new NotFoundError("La recalada (recaladaId) no existe");
     }
 
-    // ✅ PR-02: Validar “recalada operable”
-    // viejo: si la recalada ya zarpó, no deja crear atención
+    //  recalada operable
     if (recalada.status !== "ACTIVO") {
+      auditWarn(
+        req,
+        "atenciones.create.failed",
+        "Create atencion failed",
+        {
+          reason: "recalada_not_active",
+          recaladaId: recalada.id,
+          status: recalada.status,
+        },
+        { entity: "Recalada", id: String(recalada.id) },
+      );
       throw new ConflictError("La recalada no está activa");
     }
     if (recalada.operationalStatus === "CANCELED") {
+      auditWarn(
+        req,
+        "atenciones.create.failed",
+        "Create atencion failed",
+        {
+          reason: "recalada_canceled",
+          recaladaId: recalada.id,
+        },
+        { entity: "Recalada", id: String(recalada.id) },
+      );
       throw new ConflictError("La recalada está cancelada");
     }
     if (recalada.operationalStatus === "DEPARTED") {
+      auditWarn(
+        req,
+        "atenciones.create.failed",
+        "Create atencion failed",
+        {
+          reason: "recalada_departed",
+          recaladaId: recalada.id,
+        },
+        { entity: "Recalada", id: String(recalada.id) },
+      );
       throw new ConflictError("La recalada ya finalizó (DEPARTED)");
     }
 
-    // ✅ Equivalente “ya zarpó” por fecha (complemento operativo)
-    // Si fechaSalida existe y ya pasó, no permitir crear atenciones
     if (recalada.fechaSalida && recalada.fechaSalida < now) {
+      auditWarn(
+        req,
+        "atenciones.create.failed",
+        "Create atencion failed",
+        {
+          reason: "recalada_fechaSalida_past",
+          recaladaId: recalada.id,
+          fechaSalida: recalada.fechaSalida.toISOString(),
+          now: now.toISOString(),
+        },
+        { entity: "Recalada", id: String(recalada.id) },
+      );
       throw new ConflictError(
         "No se puede crear una atención: la recalada ya zarpó (fechaSalida < ahora)",
       );
     }
 
-    // ✅ PR-02: Validar ventana dentro de la recalada (viejo)
-    // fecha_inicio >= recalada.fecha_arribo
+    //  ventana dentro de recalada
     if (input.fechaInicio < recalada.fechaLlegada) {
+      auditWarn(
+        req,
+        "atenciones.create.failed",
+        "Create atencion failed",
+        {
+          reason: "fechaInicio_lt_fechaLlegada",
+          recaladaId: recalada.id,
+          fechaLlegada: recalada.fechaLlegada.toISOString(),
+          fechaInicio: input.fechaInicio.toISOString(),
+        },
+        { entity: "Recalada", id: String(recalada.id) },
+      );
       throw new BadRequestError(
         "fechaInicio debe ser >= fechaLlegada de la recalada",
       );
     }
 
-    // fecha_cierre >= recalada.fecha_arribo (implícito si fechaFin >= fechaInicio, pero lo dejamos explícito)
     if (input.fechaFin < recalada.fechaLlegada) {
+      auditWarn(
+        req,
+        "atenciones.create.failed",
+        "Create atencion failed",
+        {
+          reason: "fechaFin_lt_fechaLlegada",
+          recaladaId: recalada.id,
+          fechaLlegada: recalada.fechaLlegada.toISOString(),
+          fechaFin: input.fechaFin.toISOString(),
+        },
+        { entity: "Recalada", id: String(recalada.id) },
+      );
       throw new BadRequestError(
         "fechaFin debe ser >= fechaLlegada de la recalada",
       );
     }
 
-    // fecha_inicio <= recalada.fecha_zarpe  (si existe)
-    // fecha_cierre <= recalada.fecha_zarpe  (si existe)
     if (recalada.fechaSalida) {
       if (input.fechaInicio > recalada.fechaSalida) {
+        auditWarn(
+          req,
+          "atenciones.create.failed",
+          "Create atencion failed",
+          {
+            reason: "fechaInicio_gt_fechaSalida",
+            recaladaId: recalada.id,
+            fechaSalida: recalada.fechaSalida.toISOString(),
+            fechaInicio: input.fechaInicio.toISOString(),
+          },
+          { entity: "Recalada", id: String(recalada.id) },
+        );
         throw new BadRequestError(
           "fechaInicio debe ser <= fechaSalida de la recalada",
         );
       }
       if (input.fechaFin > recalada.fechaSalida) {
+        auditWarn(
+          req,
+          "atenciones.create.failed",
+          "Create atencion failed",
+          {
+            reason: "fechaFin_gt_fechaSalida",
+            recaladaId: recalada.id,
+            fechaSalida: recalada.fechaSalida.toISOString(),
+            fechaFin: input.fechaFin.toISOString(),
+          },
+          { entity: "Recalada", id: String(recalada.id) },
+        );
         throw new BadRequestError(
           "fechaFin debe ser <= fechaSalida de la recalada",
         );
       }
     }
 
-    // ✅ PR-02: Validar contra “ahora” (igual al viejo)
+    //  contra “ahora”
     if (input.fechaInicio < now) {
+      auditWarn(
+        req,
+        "atenciones.create.failed",
+        "Create atencion failed",
+        {
+          reason: "fechaInicio_lt_now",
+          now: now.toISOString(),
+          fechaInicio: input.fechaInicio.toISOString(),
+        },
+        { entity: "Atencion" },
+      );
       throw new BadRequestError("fechaInicio debe ser >= ahora");
     }
     if (input.fechaFin < now) {
+      auditWarn(
+        req,
+        "atenciones.create.failed",
+        "Create atencion failed",
+        {
+          reason: "fechaFin_lt_now",
+          now: now.toISOString(),
+          fechaFin: input.fechaFin.toISOString(),
+        },
+        { entity: "Atencion" },
+      );
       throw new BadRequestError("fechaFin debe ser >= ahora");
     }
 
-    // ✅ PR-03: Bloquear solapamiento de atenciones en la misma recalada
-    // Overlap existe si: existing.fechaInicio <= new.fechaFin AND existing.fechaFin >= new.fechaInicio
-    // (Opcional) Solo consideramos atenciones "ACTIVO" y no canceladas
+    //  overlap
     const overlap = await prisma.atencion.findFirst({
       where: {
         recaladaId: input.recaladaId,
@@ -252,13 +420,25 @@ export class AtencionService {
     });
 
     if (overlap) {
+      auditWarn(
+        req,
+        "atenciones.create.failed",
+        "Create atencion failed",
+        {
+          reason: "overlap",
+          recaladaId: input.recaladaId,
+          overlapAtencionId: overlap.id,
+          overlapFechaInicio: overlap.fechaInicio.toISOString(),
+          overlapFechaFin: overlap.fechaFin.toISOString(),
+        },
+        { entity: "Recalada", id: String(input.recaladaId) },
+      );
       throw new ConflictError(
         "La ventana de la atención se solapa con otra atención existente en esta recalada",
       );
     }
 
-    // ✅ Resolver supervisorId desde usuario autenticado.
-    // Si no existe supervisor (ej SUPER_ADMIN), lo creamos para cumplir FK.
+    //  resolver supervisorId
     let supervisor = await prisma.supervisor.findUnique({
       where: { usuarioId: actorUserId },
       select: { id: true },
@@ -269,6 +449,17 @@ export class AtencionService {
         { actorUserId },
         "[Atenciones] supervisor not found for user; creating one",
       );
+
+      auditInfo(
+        req,
+        "atenciones.supervisor.autocreate",
+        "Supervisor auto-created for actor",
+        {
+          actorUserId,
+        },
+        { entity: "Supervisor" },
+      );
+
       supervisor = await prisma.supervisor.create({
         data: { usuarioId: actorUserId },
         select: { id: true },
@@ -287,7 +478,6 @@ export class AtencionService {
           fechaInicio: input.fechaInicio,
           fechaFin: input.fechaFin,
 
-          // defaults: status=ACTIVO, operationalStatus=OPEN
           createdById: actorUserId,
         },
         select: {
@@ -298,7 +488,6 @@ export class AtencionService {
         },
       });
 
-      // Materializar turnos 1..N
       const turnosData = Array.from(
         { length: atencion.turnosTotal },
         (_, i) => ({
@@ -310,10 +499,7 @@ export class AtencionService {
         }),
       );
 
-      await tx.turno.createMany({
-        data: turnosData,
-        skipDuplicates: false,
-      });
+      await tx.turno.createMany({ data: turnosData, skipDuplicates: false });
 
       return tx.atencion.findUnique({
         where: { id: atencion.id },
@@ -322,6 +508,16 @@ export class AtencionService {
     });
 
     if (!created) {
+      auditWarn(
+        req,
+        "atenciones.create.failed",
+        "Create atencion failed",
+        {
+          reason: "transaction_returned_null",
+          recaladaId: input.recaladaId,
+        },
+        { entity: "Atencion" },
+      );
       throw new BadRequestError("No fue posible crear la atención");
     }
 
@@ -330,17 +526,30 @@ export class AtencionService {
       "[Atenciones] created",
     );
 
+    auditInfo(
+      req,
+      "atenciones.create.success",
+      "Atencion created",
+      {
+        atencionId: created.id,
+        recaladaId: created.recaladaId,
+        codigoRecalada:
+          created.recalada?.codigoRecalada ?? recalada.codigoRecalada,
+        turnosTotal: created.turnosTotal,
+        fechaInicio: created.fechaInicio?.toISOString?.(),
+        fechaFin: created.fechaFin?.toISOString?.(),
+        supervisorId: created.supervisorId,
+      },
+      { entity: "Atencion", id: String(created.id) },
+    );
+
     return created;
   }
 
-  /**
-   * Lista Atenciones con filtros/paginación.
-   * Filtro de fechas por solapamiento de ventana:
-   * - if from & to: fechaFin >= from AND fechaInicio <= to
-   * - if only from: fechaFin >= from
-   * - if only to: fechaInicio <= to
-   */
-  static async list(query: ListAtencionesQuery): Promise<ListAtencionesResult> {
+  static async list(
+    req: Request,
+    query: ListAtencionesQuery,
+  ): Promise<ListAtencionesResult> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const skip = (page - 1) * pageSize;
@@ -353,7 +562,6 @@ export class AtencionService {
     if (query.operationalStatus)
       where.operationalStatus = query.operationalStatus;
 
-    // Filtro de ventana por solapamiento
     if (query.from && query.to) {
       where.AND = [
         { fechaFin: { gte: query.from } },
@@ -378,7 +586,7 @@ export class AtencionService {
 
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-    return {
+    const result: ListAtencionesResult = {
       items: rows,
       meta: {
         page,
@@ -397,32 +605,80 @@ export class AtencionService {
         },
       },
     };
+
+    auditInfo(
+      req,
+      "atenciones.list",
+      "Atenciones list",
+      {
+        page,
+        pageSize,
+        total,
+        returned: rows.length,
+        from: result.meta.from ?? null,
+        to: result.meta.to ?? null,
+        filters: result.meta.filters,
+      },
+      { entity: "Atencion" },
+    );
+
+    return result;
   }
 
-  /**
-   * Detalle por ID
-   */
-  static async getById(id: number) {
+  static async getById(req: Request, id: number) {
     const item = await prisma.atencion.findUnique({
       where: { id },
       select: atencionSelect,
     });
 
-    if (!item) throw new NotFoundError("Atención no encontrada");
+    if (!item) {
+      auditWarn(
+        req,
+        "atenciones.getById.failed",
+        "Get atencion failed",
+        {
+          reason: "not_found",
+          atencionId: id,
+        },
+        { entity: "Atencion", id: String(id) },
+      );
+      throw new NotFoundError("Atención no encontrada");
+    }
+
+    auditInfo(
+      req,
+      "atenciones.getById",
+      "Atencion detail",
+      {
+        atencionId: id,
+        recaladaId: item.recaladaId,
+        operationalStatus: item.operationalStatus,
+        status: item.status,
+      },
+      { entity: "Atencion", id: String(id) },
+    );
 
     return item;
   }
 
-  /**
-   * Lista atenciones de una Recalada (para tab "Atenciones").
-   */
-  static async listByRecaladaId(recaladaId: number) {
-    // Validar recalada existe (para 404 claro)
+  static async listByRecaladaId(req: Request, recaladaId: number) {
     const recalada = await prisma.recalada.findUnique({
       where: { id: recaladaId },
-      select: { id: true },
+      select: { id: true, codigoRecalada: true },
     });
-    if (!recalada) throw new NotFoundError("Recalada no encontrada");
+    if (!recalada) {
+      auditWarn(
+        req,
+        "atenciones.listByRecalada.failed",
+        "List atenciones by recalada failed",
+        {
+          reason: "recalada_not_found",
+          recaladaId,
+        },
+        { entity: "Recalada", id: String(recaladaId) },
+      );
+      throw new NotFoundError("Recalada no encontrada");
+    }
 
     const items = await prisma.atencion.findMany({
       where: { recaladaId },
@@ -430,21 +686,23 @@ export class AtencionService {
       orderBy: { fechaInicio: "asc" },
     });
 
+    auditInfo(
+      req,
+      "atenciones.listByRecalada",
+      "Atenciones by recalada",
+      {
+        recaladaId,
+        codigoRecalada: recalada.codigoRecalada,
+        count: items.length,
+      },
+      { entity: "Recalada", id: String(recaladaId) },
+    );
+
     return items;
   }
 
-  /**
-   * PATCH /atenciones/:id
-   * Edita ventana/cupo/descripcion/status admin.
-   *
-   * Reglas clave implementadas:
-   * - No permite editar si operationalStatus = CANCELED
-   * - Si cambia ventana: actualiza Atencion y ajusta ventana de turnos NO asignados (guiaId = null)
-   * - Si cambia turnosTotal:
-   *   - Aumenta: crea nuevos turnos (numero old+1..new)
-   *   - Disminuye: solo permite si los turnos a eliminar NO están asignados (guiaId = null)
-   */
   static async update(
+    req: Request,
     id: number,
     body: UpdateAtencionBody,
     actorUserId: string,
@@ -462,19 +720,50 @@ export class AtencionService {
       },
     });
 
-    if (!current) throw new NotFoundError("Atención no encontrada");
+    if (!current) {
+      auditWarn(
+        req,
+        "atenciones.update.failed",
+        "Update atencion failed",
+        {
+          reason: "not_found",
+          atencionId: id,
+        },
+        { entity: "Atencion", id: String(id) },
+      );
+      throw new NotFoundError("Atención no encontrada");
+    }
 
     if (current.operationalStatus === "CANCELED") {
+      auditWarn(
+        req,
+        "atenciones.update.failed",
+        "Update atencion failed",
+        {
+          reason: "already_canceled",
+          atencionId: id,
+        },
+        { entity: "Atencion", id: String(id) },
+      );
       throw new ConflictError("No se puede editar una atención cancelada");
     }
 
-    // Armar patch
     const patch: Prisma.AtencionUpdateInput = {};
 
     const newFechaInicio = body.fechaInicio ?? current.fechaInicio;
     const newFechaFin = body.fechaFin ?? current.fechaFin;
 
     if (newFechaFin < newFechaInicio) {
+      auditWarn(
+        req,
+        "atenciones.update.failed",
+        "Update atencion failed",
+        {
+          reason: "fechaFin_lt_fechaInicio",
+          atencionId: id,
+        },
+        { entity: "Atencion", id: String(id) },
+      );
       throw new BadRequestError(
         "fechaFin debe ser mayor o igual a fechaInicio",
       );
@@ -485,15 +774,14 @@ export class AtencionService {
         body.fechaInicio.getTime() !== current.fechaInicio.getTime()) ||
       (body.fechaFin && body.fechaFin.getTime() !== current.fechaFin.getTime());
 
-    // ✅ Si cambia la ventana, aplicamos PR-02 + PR-03 (protección fuerte)
     if (windowChanged) {
       const now = new Date();
 
-      // PR-02: traer recalada con campos necesarios
       const recalada = await prisma.recalada.findUnique({
         where: { id: current.recaladaId },
         select: {
           id: true,
+          codigoRecalada: true,
           fechaLlegada: true,
           fechaSalida: true,
           status: true,
@@ -502,58 +790,166 @@ export class AtencionService {
       });
 
       if (!recalada) {
+        auditWarn(
+          req,
+          "atenciones.update.failed",
+          "Update atencion failed",
+          {
+            reason: "recalada_not_found",
+            atencionId: id,
+            recaladaId: current.recaladaId,
+          },
+          { entity: "Recalada", id: String(current.recaladaId) },
+        );
         throw new NotFoundError("La recalada (recaladaId) no existe");
       }
 
-      // PR-02: recalada operable
       if (recalada.status !== "ACTIVO") {
+        auditWarn(
+          req,
+          "atenciones.update.failed",
+          "Update atencion failed",
+          {
+            reason: "recalada_not_active",
+            recaladaId: recalada.id,
+            status: recalada.status,
+          },
+          { entity: "Recalada", id: String(recalada.id) },
+        );
         throw new ConflictError("La recalada no está activa");
       }
       if (recalada.operationalStatus === "CANCELED") {
+        auditWarn(
+          req,
+          "atenciones.update.failed",
+          "Update atencion failed",
+          {
+            reason: "recalada_canceled",
+            recaladaId: recalada.id,
+          },
+          { entity: "Recalada", id: String(recalada.id) },
+        );
         throw new ConflictError("La recalada está cancelada");
       }
       if (recalada.operationalStatus === "DEPARTED") {
+        auditWarn(
+          req,
+          "atenciones.update.failed",
+          "Update atencion failed",
+          {
+            reason: "recalada_departed",
+            recaladaId: recalada.id,
+          },
+          { entity: "Recalada", id: String(recalada.id) },
+        );
         throw new ConflictError("La recalada ya finalizó (DEPARTED)");
       }
       if (recalada.fechaSalida && recalada.fechaSalida < now) {
+        auditWarn(
+          req,
+          "atenciones.update.failed",
+          "Update atencion failed",
+          {
+            reason: "recalada_fechaSalida_past",
+            recaladaId: recalada.id,
+          },
+          { entity: "Recalada", id: String(recalada.id) },
+        );
         throw new ConflictError(
           "No se puede editar la atención: la recalada ya zarpó (fechaSalida < ahora)",
         );
       }
 
-      // PR-02: ventana dentro de recalada
       if (newFechaInicio < recalada.fechaLlegada) {
+        auditWarn(
+          req,
+          "atenciones.update.failed",
+          "Update atencion failed",
+          {
+            reason: "fechaInicio_lt_fechaLlegada",
+            recaladaId: recalada.id,
+          },
+          { entity: "Recalada", id: String(recalada.id) },
+        );
         throw new BadRequestError(
           "fechaInicio debe ser >= fechaLlegada de la recalada",
         );
       }
       if (newFechaFin < recalada.fechaLlegada) {
+        auditWarn(
+          req,
+          "atenciones.update.failed",
+          "Update atencion failed",
+          {
+            reason: "fechaFin_lt_fechaLlegada",
+            recaladaId: recalada.id,
+          },
+          { entity: "Recalada", id: String(recalada.id) },
+        );
         throw new BadRequestError(
           "fechaFin debe ser >= fechaLlegada de la recalada",
         );
       }
       if (recalada.fechaSalida) {
         if (newFechaInicio > recalada.fechaSalida) {
+          auditWarn(
+            req,
+            "atenciones.update.failed",
+            "Update atencion failed",
+            {
+              reason: "fechaInicio_gt_fechaSalida",
+              recaladaId: recalada.id,
+            },
+            { entity: "Recalada", id: String(recalada.id) },
+          );
           throw new BadRequestError(
             "fechaInicio debe ser <= fechaSalida de la recalada",
           );
         }
         if (newFechaFin > recalada.fechaSalida) {
+          auditWarn(
+            req,
+            "atenciones.update.failed",
+            "Update atencion failed",
+            {
+              reason: "fechaFin_gt_fechaSalida",
+              recaladaId: recalada.id,
+            },
+            { entity: "Recalada", id: String(recalada.id) },
+          );
           throw new BadRequestError(
             "fechaFin debe ser <= fechaSalida de la recalada",
           );
         }
       }
 
-      // PR-02: contra “ahora” (igual al viejo)
       if (newFechaInicio < now) {
+        auditWarn(
+          req,
+          "atenciones.update.failed",
+          "Update atencion failed",
+          {
+            reason: "fechaInicio_lt_now",
+            atencionId: id,
+          },
+          { entity: "Atencion", id: String(id) },
+        );
         throw new BadRequestError("fechaInicio debe ser >= ahora");
       }
       if (newFechaFin < now) {
+        auditWarn(
+          req,
+          "atenciones.update.failed",
+          "Update atencion failed",
+          {
+            reason: "fechaFin_lt_now",
+            atencionId: id,
+          },
+          { entity: "Atencion", id: String(id) },
+        );
         throw new BadRequestError("fechaFin debe ser >= ahora");
       }
 
-      // ✅ PR-03: bloquear overlap real, excluyendo esta atención
       const overlap = await prisma.atencion.findFirst({
         where: {
           recaladaId: current.recaladaId,
@@ -569,6 +965,18 @@ export class AtencionService {
       });
 
       if (overlap) {
+        auditWarn(
+          req,
+          "atenciones.update.failed",
+          "Update atencion failed",
+          {
+            reason: "overlap",
+            atencionId: id,
+            recaladaId: current.recaladaId,
+            overlapAtencionId: overlap.id,
+          },
+          { entity: "Atencion", id: String(id) },
+        );
         throw new ConflictError(
           "La ventana de la atención se solapa con otra atención existente en esta recalada",
         );
@@ -579,7 +987,7 @@ export class AtencionService {
     if (body.fechaFin) patch.fechaFin = body.fechaFin;
 
     if (typeof body.descripcion !== "undefined") {
-      patch.descripcion = body.descripcion; // puede ser null
+      patch.descripcion = body.descripcion;
     }
 
     if (body.status) patch.status = body.status;
@@ -590,11 +998,21 @@ export class AtencionService {
         : current.turnosTotal;
 
     if (!Number.isInteger(targetTurnosTotal) || targetTurnosTotal <= 0) {
+      auditWarn(
+        req,
+        "atenciones.update.failed",
+        "Update atencion failed",
+        {
+          reason: "turnosTotal_invalid",
+          atencionId: id,
+          turnosTotal: targetTurnosTotal,
+        },
+        { entity: "Atencion", id: String(id) },
+      );
       throw new BadRequestError("turnosTotal debe ser un entero positivo");
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      // 1) Actualizar Atencion base (si aplica)
       const updatedAtencion = await tx.atencion.update({
         where: { id },
         data: {
@@ -611,23 +1029,17 @@ export class AtencionService {
         },
       });
 
-      // 2) Si cambió ventana, actualizar turnos NO asignados
       if (windowChanged) {
         await tx.turno.updateMany({
           where: { atencionId: id, guiaId: null },
-          data: {
-            fechaInicio: newFechaInicio,
-            fechaFin: newFechaFin,
-          },
+          data: { fechaInicio: newFechaInicio, fechaFin: newFechaFin },
         });
       }
 
-      // 3) Ajuste de cupo (turnosTotal)
       const oldTotal = current.turnosTotal;
       const newTotal = targetTurnosTotal;
 
       if (newTotal > oldTotal) {
-        // crear turnos faltantes
         const toCreate = Array.from(
           { length: newTotal - oldTotal },
           (_, i) => ({
@@ -638,12 +1050,10 @@ export class AtencionService {
             createdById: actorUserId,
           }),
         );
-
         await tx.turno.createMany({ data: toCreate, skipDuplicates: false });
       }
 
       if (newTotal < oldTotal) {
-        // Solo se pueden eliminar los turnos "sobrantes" si NO están asignados
         const extraTurnos = await tx.turno.findMany({
           where: { atencionId: id, numero: { gt: newTotal } },
           select: { id: true, numero: true, guiaId: true },
@@ -657,51 +1067,103 @@ export class AtencionService {
           );
         }
 
-        // borrar los extra
         await tx.turno.deleteMany({
           where: { atencionId: id, numero: { gt: newTotal } },
         });
       }
 
-      // 4) Devolver detalle completo
       return tx.atencion.findUnique({
         where: { id },
         select: atencionSelect,
       });
     });
 
-    if (!result)
+    if (!result) {
+      auditWarn(
+        req,
+        "atenciones.update.failed",
+        "Update atencion failed",
+        {
+          reason: "transaction_returned_null",
+          atencionId: id,
+        },
+        { entity: "Atencion", id: String(id) },
+      );
       throw new BadRequestError("No fue posible actualizar la atención");
+    }
 
-    logger.info({ atencionId: id, actorUserId, body }, "[Atenciones] updated");
+    logger.info(
+      { atencionId: id, actorUserId, updatedKeys: Object.keys(body ?? {}) },
+      "[Atenciones] updated",
+    );
+
+    auditInfo(
+      req,
+      "atenciones.update.success",
+      "Atencion updated",
+      {
+        atencionId: id,
+        recaladaId: current.recaladaId,
+        actorUserId,
+        windowChanged,
+        updatedKeys: Object.keys(body ?? {}),
+        newTurnosTotal:
+          typeof body.turnosTotal === "number" ? body.turnosTotal : undefined,
+      },
+      { entity: "Atencion", id: String(id) },
+    );
 
     return result;
   }
 
-  /**
-   * PATCH /atenciones/:id/cancel
-   * Cancela atención con razón y auditoría.
-   *
-   * Receta final:
-   * - Gate: si recalada DEPARTED o CANCELED, no permitir cambios (idempotencia suave)
-   * - Cancel: bloquea si hay IN_PROGRESS; si no, permite y cancela turnos no finalizados
-   */
-  static async cancel(id: number, reason: string, actorUserId: string) {
-    // Traer atención + gate recalada
+  static async cancel(
+    req: Request,
+    id: number,
+    reason: string,
+    actorUserId: string,
+  ) {
     const gate = await prisma.atencion.findUnique({
       where: { id },
       select: {
         id: true,
         status: true,
         operationalStatus: true,
-        recalada: { select: { status: true, operationalStatus: true } },
+        recalada: {
+          select: {
+            status: true,
+            operationalStatus: true,
+            id: true,
+            codigoRecalada: true,
+          },
+        },
       },
     });
 
-    if (!gate) throw new NotFoundError("Atención no encontrada");
+    if (!gate) {
+      auditWarn(
+        req,
+        "atenciones.cancel.failed",
+        "Cancel atencion failed",
+        {
+          reason: "not_found",
+          atencionId: id,
+        },
+        { entity: "Atencion", id: String(id) },
+      );
+      throw new NotFoundError("Atención no encontrada");
+    }
 
-    // Idempotencia suave: si ya está cancelada, devolvemos entidad
     if (gate.operationalStatus === "CANCELED") {
+      auditInfo(
+        req,
+        "atenciones.cancel.noop",
+        "Cancel atencion noop (already canceled)",
+        {
+          atencionId: id,
+        },
+        { entity: "Atencion", id: String(id) },
+      );
+
       const item = await prisma.atencion.findUnique({
         where: { id },
         select: atencionSelect,
@@ -710,30 +1172,67 @@ export class AtencionService {
       return item;
     }
 
-    // Si ya está cerrada, no permitimos cancelar (tu regla existente)
     if (gate.operationalStatus === "CLOSED") {
+      auditWarn(
+        req,
+        "atenciones.cancel.failed",
+        "Cancel atencion failed",
+        {
+          reason: "already_closed",
+          atencionId: id,
+        },
+        { entity: "Atencion", id: String(id) },
+      );
       throw new ConflictError("No se puede cancelar una atención cerrada");
     }
 
-    // Gate recalada: si está DEPARTED o CANCELED no permitimos cambios
-    // (pero si ya estuviera cancelada, arriba la devolvimos)
     if (gate.recalada.operationalStatus === "CANCELED") {
+      auditWarn(
+        req,
+        "atenciones.cancel.failed",
+        "Cancel atencion failed",
+        {
+          reason: "recalada_canceled",
+          recaladaId: gate.recalada.id,
+        },
+        { entity: "Recalada", id: String(gate.recalada.id) },
+      );
       throw new ConflictError(
         "No se puede cancelar: la recalada está cancelada",
       );
     }
     if (gate.recalada.operationalStatus === "DEPARTED") {
+      auditWarn(
+        req,
+        "atenciones.cancel.failed",
+        "Cancel atencion failed",
+        {
+          reason: "recalada_departed",
+          recaladaId: gate.recalada.id,
+        },
+        { entity: "Recalada", id: String(gate.recalada.id) },
+      );
       throw new ConflictError(
         "No se puede cancelar: la recalada ya finalizó (DEPARTED)",
       );
     }
 
-    // Bloqueo: si hay IN_PROGRESS, no se puede cancelar
     const inProgressCount = await prisma.turno.count({
       where: { atencionId: id, status: "IN_PROGRESS" },
     });
 
     if (inProgressCount > 0) {
+      auditWarn(
+        req,
+        "atenciones.cancel.failed",
+        "Cancel atencion failed",
+        {
+          reason: "turnos_in_progress",
+          atencionId: id,
+          inProgressCount,
+        },
+        { entity: "Atencion", id: String(id) },
+      );
       throw new ConflictError(
         "No se puede cancelar la atención: existen turnos en progreso (IN_PROGRESS)",
       );
@@ -742,12 +1241,8 @@ export class AtencionService {
     const when = new Date();
 
     const updated = await prisma.$transaction(async (tx) => {
-      // 1) Cancelar turnos no finalizados (AVAILABLE/ASSIGNED)
       await tx.turno.updateMany({
-        where: {
-          atencionId: id,
-          status: { in: ["AVAILABLE", "ASSIGNED"] },
-        },
+        where: { atencionId: id, status: { in: ["AVAILABLE", "ASSIGNED"] } },
         data: {
           status: "CANCELED",
           canceledAt: when,
@@ -756,10 +1251,6 @@ export class AtencionService {
         },
       });
 
-      // (Opcional) Si quisieras también cancelar NO_SHOW (normalmente NO) o tocar COMPLETED (nunca).
-      // Por receta: solo no finalizados.
-
-      // 2) Cancelar atención
       const atencion = await tx.atencion.update({
         where: { id },
         data: {
@@ -779,33 +1270,62 @@ export class AtencionService {
       "[Atenciones] canceled",
     );
 
+    auditInfo(
+      req,
+      "atenciones.cancel.success",
+      "Atencion canceled",
+      {
+        atencionId: id,
+        recaladaId: updated.recaladaId,
+        codigoRecalada: updated.recalada?.codigoRecalada,
+        actorUserId,
+        canceledAt: when.toISOString(),
+        reason,
+      },
+      { entity: "Atencion", id: String(id) },
+    );
+
     return updated;
   }
 
-  /**
-   * PATCH /atenciones/:id/close
-   * Cierra atención (operationalStatus -> CLOSED)
-   *
-   * Receta final:
-   * - Gate: si recalada DEPARTED o CANCELED, no permitir cambios (idempotencia suave)
-   * - Close: bloquea si hay AVAILABLE | ASSIGNED | IN_PROGRESS
-   */
-  static async close(id: number, actorUserId: string) {
-    // Traer atención + gate recalada
+  static async close(req: Request, id: number, actorUserId: string) {
     const gate = await prisma.atencion.findUnique({
       where: { id },
       select: {
         id: true,
         status: true,
         operationalStatus: true,
-        recalada: { select: { status: true, operationalStatus: true } },
+        recalada: {
+          select: { status: true, operationalStatus: true, id: true },
+        },
       },
     });
 
-    if (!gate) throw new NotFoundError("Atención no encontrada");
+    if (!gate) {
+      auditWarn(
+        req,
+        "atenciones.close.failed",
+        "Close atencion failed",
+        {
+          reason: "not_found",
+          atencionId: id,
+        },
+        { entity: "Atencion", id: String(id) },
+      );
+      throw new NotFoundError("Atención no encontrada");
+    }
 
-    // Idempotencia suave: si ya está CLOSED, devolvemos entidad
     if (gate.operationalStatus === "CLOSED") {
+      auditInfo(
+        req,
+        "atenciones.close.noop",
+        "Close atencion noop (already closed)",
+        {
+          atencionId: id,
+        },
+        { entity: "Atencion", id: String(id) },
+      );
+
       const item = await prisma.atencion.findUnique({
         where: { id },
         select: atencionSelect,
@@ -814,23 +1334,49 @@ export class AtencionService {
       return item;
     }
 
-    // Si está cancelada, no permitimos cerrar
     if (gate.operationalStatus === "CANCELED") {
+      auditWarn(
+        req,
+        "atenciones.close.failed",
+        "Close atencion failed",
+        {
+          reason: "already_canceled",
+          atencionId: id,
+        },
+        { entity: "Atencion", id: String(id) },
+      );
       throw new ConflictError("No se puede cerrar una atención cancelada");
     }
 
-    // Gate recalada: si está DEPARTED o CANCELED no permitimos cambios
-    // (pero si ya estuviera CLOSED, arriba la devolvimos)
     if (gate.recalada.operationalStatus === "CANCELED") {
+      auditWarn(
+        req,
+        "atenciones.close.failed",
+        "Close atencion failed",
+        {
+          reason: "recalada_canceled",
+          recaladaId: gate.recalada.id,
+        },
+        { entity: "Recalada", id: String(gate.recalada.id) },
+      );
       throw new ConflictError("No se puede cerrar: la recalada está cancelada");
     }
     if (gate.recalada.operationalStatus === "DEPARTED") {
+      auditWarn(
+        req,
+        "atenciones.close.failed",
+        "Close atencion failed",
+        {
+          reason: "recalada_departed",
+          recaladaId: gate.recalada.id,
+        },
+        { entity: "Recalada", id: String(gate.recalada.id) },
+      );
       throw new ConflictError(
         "No se puede cerrar: la recalada ya finalizó (DEPARTED)",
       );
     }
 
-    // Bloqueo: si hay turnos vivos, no se puede cerrar
     const aliveCount = await prisma.turno.count({
       where: {
         atencionId: id,
@@ -839,6 +1385,17 @@ export class AtencionService {
     });
 
     if (aliveCount > 0) {
+      auditWarn(
+        req,
+        "atenciones.close.failed",
+        "Close atencion failed",
+        {
+          reason: "turnos_alive",
+          atencionId: id,
+          aliveCount,
+        },
+        { entity: "Atencion", id: String(id) },
+      );
       throw new ConflictError(
         "No se puede cerrar la atención: aún existen turnos AVAILABLE/ASSIGNED/IN_PROGRESS",
       );
@@ -852,26 +1409,40 @@ export class AtencionService {
 
     logger.info({ atencionId: id, actorUserId }, "[Atenciones] closed");
 
+    auditInfo(
+      req,
+      "atenciones.close.success",
+      "Atencion closed",
+      {
+        atencionId: id,
+        recaladaId: updated.recaladaId,
+        actorUserId,
+      },
+      { entity: "Atencion", id: String(id) },
+    );
+
     return updated;
   }
 
-  /**
-   * GET /atenciones/:id/turnos
-   * Turnero UI: lista slots por número ASC (sin inflar payload).
-   *
-   * Incluye recomendado:
-   * id, numero, status, guiaId, checkInAt, checkOutAt, canceledAt
-   * opcional: mini info del guía si está asignado (nombre/email)
-   */
-  static async listTurnosByAtencionId(atencionId: number) {
-    // 1) validar atención existe (para 404 claro)
+  static async listTurnosByAtencionId(req: Request, atencionId: number) {
     const atencion = await prisma.atencion.findUnique({
       where: { id: atencionId },
-      select: { id: true },
+      select: { id: true, recaladaId: true },
     });
-    if (!atencion) throw new NotFoundError("Atención no encontrada");
+    if (!atencion) {
+      auditWarn(
+        req,
+        "atenciones.turnos.list.failed",
+        "List turnos failed",
+        {
+          reason: "atencion_not_found",
+          atencionId,
+        },
+        { entity: "Atencion", id: String(atencionId) },
+      );
+      throw new NotFoundError("Atención no encontrada");
+    }
 
-    // 2) traer turnos
     const items = await prisma.turno.findMany({
       where: { atencionId },
       orderBy: { numero: "asc" },
@@ -887,19 +1458,24 @@ export class AtencionService {
           select: {
             id: true,
             usuario: {
-              select: {
-                id: true,
-                email: true,
-                nombres: true,
-                apellidos: true,
-              },
+              select: { id: true, email: true, nombres: true, apellidos: true },
             },
           },
         },
       },
     });
 
-    // 3) devolver plano (sin nesting raro)
+    auditInfo(
+      req,
+      "atenciones.turnos.list",
+      "Atencion turnos list",
+      {
+        atencionId,
+        count: items.length,
+      },
+      { entity: "Atencion", id: String(atencionId) },
+    );
+
     return items.map((t) => ({
       id: t.id,
       numero: t.numero,
@@ -919,26 +1495,28 @@ export class AtencionService {
     }));
   }
 
-  /**
-   * GET /atenciones/:id/summary
-   * Resumen de cupos por estado.
-   *
-   * Devuelve:
-   * turnosTotal,
-   * availableCount, assignedCount, inProgressCount, completedCount, canceledCount, noShowCount
-   */
   static async getSummaryByAtencionId(
+    req: Request,
     atencionId: number,
   ): Promise<AtencionTurnosSummary> {
-    // 1) validar atención existe y obtener turnosTotal
     const atencion = await prisma.atencion.findUnique({
       where: { id: atencionId },
       select: { id: true, turnosTotal: true },
     });
-    if (!atencion) throw new NotFoundError("Atención no encontrada");
+    if (!atencion) {
+      auditWarn(
+        req,
+        "atenciones.summary.failed",
+        "Get summary failed",
+        {
+          reason: "atencion_not_found",
+          atencionId,
+        },
+        { entity: "Atencion", id: String(atencionId) },
+      );
+      throw new NotFoundError("Atención no encontrada");
+    }
 
-    // 2) contar por status (usa groupBy para 1 sola query)
-    // Nota: status es enum del modelo Turno. No lo tipamos explícitamente aquí para no pelear con TS.
     const grouped = await prisma.turno.groupBy({
       by: ["status"],
       where: { atencionId },
@@ -946,15 +1524,9 @@ export class AtencionService {
     });
 
     const counts = new Map<string, number>();
-    for (const g of grouped) {
-      counts.set(String(g.status), g._count._all);
-    }
-
-    // Helper: lee count o 0
+    for (const g of grouped) counts.set(String(g.status), g._count._all);
     const c = (key: string) => counts.get(key) ?? 0;
 
-    // Mapeo esperado por tu UI
-    // Ajusta estos strings si tu enum de TurnoStatus se llama distinto.
     const summary: AtencionTurnosSummary = {
       turnosTotal: atencion.turnosTotal,
       availableCount: c("AVAILABLE"),
@@ -965,33 +1537,42 @@ export class AtencionService {
       noShowCount: c("NO_SHOW"),
     };
 
+    auditInfo(
+      req,
+      "atenciones.summary",
+      "Atencion summary",
+      {
+        atencionId,
+        ...summary,
+      },
+      { entity: "Atencion", id: String(atencionId) },
+    );
+
     return summary;
   }
 
-  /**
-   * POST /atenciones/:id/claim
-   * Autoclaim: busca el primer Turno AVAILABLE por numero ASC y lo asigna al guía autenticado.
-   *
-   * Reglas:
-   * - Atención/Recalada deben permitir operación (OPEN/activa)
-   * - El guía autenticado debe existir como Guia (guia.usuarioId = actorUserId)
-   * - Si el guía ya tiene turno en esa atención -> conflicto (unique)
-   * - Transaccional + anti-carreras:
-   *   - Selecciona 1 turno disponible
-   *   - updateMany condicional (id + AVAILABLE + guiaId null)
-   *   - si perdió la carrera, reintenta (hasta N)
-   */
   static async claimFirstAvailableTurno(
+    req: Request,
     atencionId: number,
     actorUserId: string,
   ) {
-    // 1) Resolver guiaId desde usuario autenticado
     const guia = await prisma.guia.findUnique({
       where: { usuarioId: actorUserId },
       select: { id: true },
     });
 
     if (!guia) {
+      auditWarn(
+        req,
+        "atenciones.claim.failed",
+        "Claim turno failed",
+        {
+          reason: "user_not_guia",
+          atencionId,
+          actorUserId,
+        },
+        { entity: "Guia" },
+      );
       throw new ConflictError(
         "El usuario autenticado no está registrado como guía",
       );
@@ -999,19 +1580,13 @@ export class AtencionService {
 
     try {
       const claimed = await prisma.$transaction(async (tx) => {
-        // 2) Validar atención + gate operativo
         const atencionGate = await tx.atencion.findUnique({
           where: { id: atencionId },
           select: {
             id: true,
             status: true,
             operationalStatus: true,
-            recalada: {
-              select: {
-                status: true,
-                operationalStatus: true,
-              },
-            },
+            recalada: { select: { status: true, operationalStatus: true } },
           },
         });
 
@@ -1028,7 +1603,6 @@ export class AtencionService {
           },
         });
 
-        // 3) Si el guía ya tiene turno en esta atención -> conflicto (mensaje limpio)
         const existing = await tx.turno.findFirst({
           where: { atencionId, guiaId: guia.id },
           select: { id: true },
@@ -1040,18 +1614,13 @@ export class AtencionService {
           );
         }
 
-        // 4) Anti-carreras: reintentos dentro de la misma transacción
         const maxAttempts = 6;
 
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
           const candidate = await tx.turno.findFirst({
-            where: {
-              atencionId,
-              status: "AVAILABLE",
-              guiaId: null,
-            },
+            where: { atencionId, status: "AVAILABLE", guiaId: null },
             orderBy: { numero: "asc" },
-            select: { id: true },
+            select: { id: true, numero: true },
           });
 
           if (!candidate) {
@@ -1060,21 +1629,12 @@ export class AtencionService {
             );
           }
 
-          // update condicional: si alguien se lo llevó, count=0
           const updated = await tx.turno.updateMany({
-            where: {
-              id: candidate.id,
-              status: "AVAILABLE",
-              guiaId: null,
-            },
-            data: {
-              guiaId: guia.id,
-              status: "ASSIGNED",
-            },
+            where: { id: candidate.id, status: "AVAILABLE", guiaId: null },
+            data: { guiaId: guia.id, status: "ASSIGNED" },
           });
 
           if (updated.count === 1) {
-            // devolver el turno ya asignado (payload útil)
             const turno = await tx.turno.findUnique({
               where: { id: candidate.id },
               select: {
@@ -1107,11 +1667,8 @@ export class AtencionService {
 
             if (!turno)
               throw new BadRequestError("No fue posible completar el claim");
-
             return turno;
           }
-
-          // Si count=0, perdimos la carrera. Reintentamos.
         }
 
         throw new ConflictError(
@@ -1124,12 +1681,52 @@ export class AtencionService {
         "[Atenciones] claim turno",
       );
 
+      auditInfo(
+        req,
+        "atenciones.claim.success",
+        "Turno claimed",
+        {
+          atencionId,
+          actorUserId,
+          guiaId: guia.id,
+          turnoId: claimed.id,
+          turnoNumero: claimed.numero,
+        },
+        { entity: "Turno", id: String(claimed.id) },
+      );
+
       return claimed;
     } catch (err: any) {
-      // Respaldo por si explota @@unique([atencionId, guiaId])
       if (err?.code === "P2002") {
+        auditWarn(
+          req,
+          "atenciones.claim.failed",
+          "Claim turno failed",
+          {
+            reason: "unique_conflict",
+            atencionId,
+            actorUserId,
+            guiaId: guia.id,
+          },
+          { entity: "Turno" },
+        );
         throw new ConflictError("Ya tienes un turno asignado en esta atención");
       }
+
+      auditWarn(
+        req,
+        "atenciones.claim.failed",
+        "Claim turno failed",
+        {
+          reason: "exception",
+          atencionId,
+          errorName: err?.name,
+          errorCode: err?.code,
+          message: err?.message,
+        },
+        { entity: "Turno" },
+      );
+
       throw err;
     }
   }

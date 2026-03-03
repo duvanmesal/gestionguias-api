@@ -7,12 +7,15 @@ import type {
   RecaladaOperativeStatus,
   Prisma,
   RolType,
-  AtencionOperativeStatus,
 } from "@prisma/client";
 import type {
   ListRecaladasQuery,
   UpdateRecaladaBody,
 } from "./recalada.schemas";
+
+// ✅ logs facade
+import type { Request } from "express";
+import { logsService } from "../../libs/logs/logs.service";
 
 /**
  * Genera código final estilo RA-YYYY-000123 usando el ID autoincremental.
@@ -188,31 +191,96 @@ const atencionSelectForRecalada = {
   },
 } satisfies Prisma.AtencionSelect;
 
+function auditFail(
+  req: Request,
+  event: string,
+  message: string,
+  meta?: Record<string, any>,
+  target?: { entity?: string; id?: string },
+) {
+  logsService.audit(req, {
+    event,
+    level: "warn",
+    message,
+    meta,
+    target,
+  });
+}
+
+function auditOk(
+  req: Request,
+  event: string,
+  message: string,
+  meta?: Record<string, any>,
+  target?: { entity?: string; id?: string },
+) {
+  logsService.audit(req, {
+    event,
+    message,
+    meta,
+    target,
+  });
+}
+
 export class RecaladaService {
-  static async create(input: CreateRecaladaInput, actorUserId: string) {
+  static async create(
+    req: Request,
+    input: CreateRecaladaInput,
+    actorUserId: string,
+  ) {
     // ✅ Regla base (ya la tenías): fechaSalida >= fechaLlegada
     if (input.fechaSalida && input.fechaSalida < input.fechaLlegada) {
+      auditFail(
+        req,
+        "recaladas.create.failed",
+        "Create recalada failed",
+        {
+          reason: "fechaSalida_lt_fechaLlegada",
+          fechaLlegada: input.fechaLlegada?.toISOString?.(),
+          fechaSalida: input.fechaSalida?.toISOString?.(),
+        },
+        { entity: "Recalada" },
+      );
       throw new BadRequestError("fechaSalida debe ser >= fechaLlegada");
     }
 
-    // ✅ PR-01: reglas “duras” operativas (viejo → nuevo)
-    // - MANUAL (o default): si mandan fechaSalida, exigir fechaSalida >= now
-    // - IMPORT (histórico): permitir fechas pasadas
+    // ✅ PR-01: reglas “duras” operativas
     const now = new Date();
     const source: RecaladaSource = input.fuente ?? "MANUAL";
 
     if (source !== "IMPORT" && input.fechaSalida && input.fechaSalida < now) {
+      auditFail(
+        req,
+        "recaladas.create.failed",
+        "Create recalada failed",
+        {
+          reason: "manual_fechaSalida_past",
+          fuente: source,
+          fechaSalida: input.fechaSalida?.toISOString?.(),
+          now: now.toISOString(),
+        },
+        { entity: "Recalada" },
+      );
       throw new BadRequestError(
         "fechaSalida debe ser >= ahora para recalada MANUAL (operativa)",
       );
     }
 
-    // ✅ Viejo: total_turistas >= 1 (aquí: pasajerosEstimados)
     if (
       typeof input.pasajerosEstimados !== "undefined" &&
       input.pasajerosEstimados !== null &&
       input.pasajerosEstimados < 1
     ) {
+      auditFail(
+        req,
+        "recaladas.create.failed",
+        "Create recalada failed",
+        {
+          reason: "pasajerosEstimados_lt_1",
+          pasajerosEstimados: input.pasajerosEstimados,
+        },
+        { entity: "Recalada" },
+      );
       throw new BadRequestError("pasajerosEstimados debe ser >= 1");
     }
 
@@ -227,8 +295,33 @@ export class RecaladaService {
       }),
     ]);
 
-    if (!buque) throw new NotFoundError("El buque (buqueId) no existe");
-    if (!pais) throw new NotFoundError("El país (paisOrigenId) no existe");
+    if (!buque) {
+      auditFail(
+        req,
+        "recaladas.create.failed",
+        "Create recalada failed",
+        {
+          reason: "buque_not_found",
+          buqueId: input.buqueId,
+        },
+        { entity: "Recalada" },
+      );
+      throw new NotFoundError("El buque (buqueId) no existe");
+    }
+
+    if (!pais) {
+      auditFail(
+        req,
+        "recaladas.create.failed",
+        "Create recalada failed",
+        {
+          reason: "paisOrigen_not_found",
+          paisOrigenId: input.paisOrigenId,
+        },
+        { entity: "Recalada" },
+      );
+      throw new NotFoundError("El país (paisOrigenId) no existe");
+    }
 
     let supervisor = await prisma.supervisor.findUnique({
       where: { usuarioId: actorUserId },
@@ -240,6 +333,18 @@ export class RecaladaService {
         { actorUserId },
         "[Recaladas] supervisor not found for user; creating one",
       );
+
+      // ✅ audit (info) porque es “side-effect” relevante
+      auditOk(
+        req,
+        "recaladas.supervisor.autocreate",
+        "Supervisor auto-created for actor",
+        {
+          actorUserId,
+        },
+        { entity: "Supervisor" },
+      );
+
       supervisor = await prisma.supervisor.create({
         data: { usuarioId: actorUserId },
         select: { id: true },
@@ -297,10 +402,32 @@ export class RecaladaService {
       "[Recaladas] created",
     );
 
+    auditOk(
+      req,
+      "recaladas.create.success",
+      "Recalada created",
+      {
+        actorUserId,
+        buqueId: created.buque?.id ?? input.buqueId,
+        paisOrigenId: created.paisOrigen?.id ?? input.paisOrigenId,
+        operationalStatus: created.operationalStatus,
+        status: created.status,
+        fechaLlegada: created.fechaLlegada?.toISOString?.(),
+        fechaSalida: created.fechaSalida?.toISOString?.() ?? null,
+        fuente: created.fuente,
+        terminal: created.terminal,
+        muelle: created.muelle,
+      },
+      { entity: "Recalada", id: String(created.id) },
+    );
+
     return created;
   }
 
-  static async list(query: ListRecaladasQuery): Promise<ListRecaladasResult> {
+  static async list(
+    req: Request,
+    query: ListRecaladasQuery,
+  ): Promise<ListRecaladasResult> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
 
@@ -390,20 +517,59 @@ export class RecaladaService {
       "[Recaladas] list",
     );
 
+    auditOk(
+      req,
+      "recaladas.list",
+      "Recaladas list",
+      {
+        page,
+        pageSize,
+        total,
+        from: meta.from,
+        to: meta.to,
+        q: query.q ?? null,
+        filters: meta.filters,
+        returned: items.length,
+      },
+      { entity: "Recalada" },
+    );
+
     return { items, meta };
   }
 
-  static async getById(id: number) {
+  static async getById(req: Request, id: number) {
     const item = await prisma.recalada.findUnique({
       where: { id },
       select: recaladaSelect,
     });
 
     if (!item) {
+      auditFail(
+        req,
+        "recaladas.getById.failed",
+        "Get recalada failed",
+        {
+          reason: "not_found",
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new NotFoundError("La recalada no existe");
     }
 
     logger.info({ recaladaId: id }, "[Recaladas] getById");
+
+    auditOk(
+      req,
+      "recaladas.getById",
+      "Recalada detail",
+      {
+        recaladaId: id,
+        operationalStatus: item.operationalStatus,
+        status: item.status,
+      },
+      { entity: "Recalada", id: String(id) },
+    );
 
     return item;
   }
@@ -412,13 +578,23 @@ export class RecaladaService {
    * ✅ GET /recaladas/:id/atenciones
    * Devuelve las atenciones de una recalada para el tab de detalle.
    */
-  static async getAtenciones(recaladaId: number) {
+  static async getAtenciones(req: Request, recaladaId: number) {
     const recalada = await prisma.recalada.findUnique({
       where: { id: recaladaId },
       select: { id: true },
     });
 
     if (!recalada) {
+      auditFail(
+        req,
+        "recaladas.getAtenciones.failed",
+        "Get atenciones failed",
+        {
+          reason: "recalada_not_found",
+          recaladaId,
+        },
+        { entity: "Recalada", id: String(recaladaId) },
+      );
       throw new NotFoundError("La recalada no existe");
     }
 
@@ -433,10 +609,22 @@ export class RecaladaService {
       "[Recaladas] getAtenciones",
     );
 
+    auditOk(
+      req,
+      "recaladas.getAtenciones",
+      "Recalada atenciones",
+      {
+        recaladaId,
+        count: items.length,
+      },
+      { entity: "Recalada", id: String(recaladaId) },
+    );
+
     return items;
   }
 
   static async update(
+    req: Request,
     id: number,
     input: UpdateRecaladaInput,
     actorUserId: string,
@@ -452,6 +640,16 @@ export class RecaladaService {
     });
 
     if (!current) {
+      auditFail(
+        req,
+        "recaladas.update.failed",
+        "Update recalada failed",
+        {
+          reason: "not_found",
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new NotFoundError("La recalada no existe");
     }
 
@@ -459,6 +657,17 @@ export class RecaladaService {
       current.operationalStatus === "DEPARTED" ||
       current.operationalStatus === "CANCELED"
     ) {
+      auditFail(
+        req,
+        "recaladas.update.failed",
+        "Update recalada failed",
+        {
+          reason: "invalid_operational_status",
+          operationalStatus: current.operationalStatus,
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new BadRequestError(
         "No se puede editar una recalada en estado DEPARTED o CANCELED",
       );
@@ -495,6 +704,17 @@ export class RecaladaService {
     const data = normalizeNullableFields(dataRaw);
 
     if (Object.keys(data).length === 0) {
+      auditFail(
+        req,
+        "recaladas.update.failed",
+        "Update recalada failed",
+        {
+          reason: "no_allowed_fields",
+          operationalStatus: current.operationalStatus,
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new BadRequestError(
         "No hay campos permitidos para actualizar según el estado actual",
       );
@@ -505,7 +725,20 @@ export class RecaladaService {
         where: { id: data.buqueId },
         select: { id: true },
       });
-      if (!buque) throw new NotFoundError("El buque (buqueId) no existe");
+      if (!buque) {
+        auditFail(
+          req,
+          "recaladas.update.failed",
+          "Update recalada failed",
+          {
+            reason: "buque_not_found",
+            buqueId: data.buqueId,
+            recaladaId: id,
+          },
+          { entity: "Recalada", id: String(id) },
+        );
+        throw new NotFoundError("El buque (buqueId) no existe");
+      }
     }
 
     if (data.paisOrigenId) {
@@ -513,7 +746,20 @@ export class RecaladaService {
         where: { id: data.paisOrigenId },
         select: { id: true },
       });
-      if (!pais) throw new NotFoundError("El país (paisOrigenId) no existe");
+      if (!pais) {
+        auditFail(
+          req,
+          "recaladas.update.failed",
+          "Update recalada failed",
+          {
+            reason: "paisOrigen_not_found",
+            paisOrigenId: data.paisOrigenId,
+            recaladaId: id,
+          },
+          { entity: "Recalada", id: String(id) },
+        );
+        throw new NotFoundError("El país (paisOrigenId) no existe");
+      }
     }
 
     const nextFechaLlegada: Date = data.fechaLlegada ?? current.fechaLlegada;
@@ -523,6 +769,18 @@ export class RecaladaService {
         : current.fechaSalida;
 
     if (nextFechaSalida && nextFechaSalida < nextFechaLlegada) {
+      auditFail(
+        req,
+        "recaladas.update.failed",
+        "Update recalada failed",
+        {
+          reason: "fechaSalida_lt_fechaLlegada",
+          recaladaId: id,
+          nextFechaLlegada: nextFechaLlegada.toISOString(),
+          nextFechaSalida: nextFechaSalida.toISOString(),
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new BadRequestError("fechaSalida debe ser >= fechaLlegada");
     }
 
@@ -546,35 +804,89 @@ export class RecaladaService {
       "[Recaladas] update",
     );
 
+    auditOk(
+      req,
+      "recaladas.update.success",
+      "Recalada updated",
+      {
+        actorUserId,
+        recaladaId: id,
+        operationalStatusBefore: current.operationalStatus,
+        updatedKeys: Object.keys(data),
+      },
+      { entity: "Recalada", id: String(id) },
+    );
+
     return updated;
   }
 
   static async arrive(
+    req: Request,
     id: number,
     arrivedAt: Date | undefined,
     actorUserId: string,
   ) {
     const current = await prisma.recalada.findUnique({
       where: { id },
-      select: {
-        id: true,
-        operationalStatus: true,
-      },
+      select: { id: true, operationalStatus: true },
     });
 
-    if (!current) throw new NotFoundError("La recalada no existe");
+    if (!current) {
+      auditFail(
+        req,
+        "recaladas.arrive.failed",
+        "Arrive recalada failed",
+        {
+          reason: "not_found",
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
+      throw new NotFoundError("La recalada no existe");
+    }
 
     if (current.operationalStatus === "DEPARTED") {
+      auditFail(
+        req,
+        "recaladas.arrive.failed",
+        "Arrive recalada failed",
+        {
+          reason: "already_departed",
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new BadRequestError(
         "No se puede marcar ARRIVED una recalada en estado DEPARTED",
       );
     }
     if (current.operationalStatus === "CANCELED") {
+      auditFail(
+        req,
+        "recaladas.arrive.failed",
+        "Arrive recalada failed",
+        {
+          reason: "canceled",
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new BadRequestError(
         "No se puede marcar ARRIVED una recalada en estado CANCELED",
       );
     }
     if (current.operationalStatus !== "SCHEDULED") {
+      auditFail(
+        req,
+        "recaladas.arrive.failed",
+        "Arrive recalada failed",
+        {
+          reason: "invalid_state",
+          operationalStatus: current.operationalStatus,
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new BadRequestError(
         "Solo se puede marcar ARRIVED si la recalada está en SCHEDULED",
       );
@@ -598,34 +910,86 @@ export class RecaladaService {
       "[Recaladas] arrive",
     );
 
+    auditOk(
+      req,
+      "recaladas.arrive.success",
+      "Recalada arrived",
+      {
+        actorUserId,
+        recaladaId: id,
+        arrivedAt: when.toISOString(),
+      },
+      { entity: "Recalada", id: String(id) },
+    );
+
     return updated;
   }
 
   static async depart(
+    req: Request,
     id: number,
     departedAt: Date | undefined,
     actorUserId: string,
   ) {
     const current = await prisma.recalada.findUnique({
       where: { id },
-      select: {
-        id: true,
-        operationalStatus: true,
-        arrivedAt: true,
-      },
+      select: { id: true, operationalStatus: true, arrivedAt: true },
     });
 
-    if (!current) throw new NotFoundError("La recalada no existe");
+    if (!current) {
+      auditFail(
+        req,
+        "recaladas.depart.failed",
+        "Depart recalada failed",
+        {
+          reason: "not_found",
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
+      throw new NotFoundError("La recalada no existe");
+    }
 
     if (current.operationalStatus === "CANCELED") {
+      auditFail(
+        req,
+        "recaladas.depart.failed",
+        "Depart recalada failed",
+        {
+          reason: "canceled",
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new BadRequestError(
         "No se puede marcar DEPARTED una recalada en estado CANCELED",
       );
     }
     if (current.operationalStatus === "DEPARTED") {
+      auditFail(
+        req,
+        "recaladas.depart.failed",
+        "Depart recalada failed",
+        {
+          reason: "already_departed",
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new BadRequestError("La recalada ya está en DEPARTED");
     }
     if (current.operationalStatus !== "ARRIVED") {
+      auditFail(
+        req,
+        "recaladas.depart.failed",
+        "Depart recalada failed",
+        {
+          reason: "invalid_state",
+          operationalStatus: current.operationalStatus,
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new BadRequestError(
         "Solo se puede marcar DEPARTED si la recalada está en ARRIVED",
       );
@@ -634,6 +998,18 @@ export class RecaladaService {
     const when = departedAt ?? new Date();
 
     if (current.arrivedAt && when < current.arrivedAt) {
+      auditFail(
+        req,
+        "recaladas.depart.failed",
+        "Depart recalada failed",
+        {
+          reason: "departedAt_lt_arrivedAt",
+          recaladaId: id,
+          arrivedAt: current.arrivedAt.toISOString(),
+          departedAt: when.toISOString(),
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new BadRequestError("departedAt debe ser >= arrivedAt");
     }
 
@@ -651,10 +1027,23 @@ export class RecaladaService {
       "[Recaladas] depart",
     );
 
+    auditOk(
+      req,
+      "recaladas.depart.success",
+      "Recalada departed",
+      {
+        actorUserId,
+        recaladaId: id,
+        departedAt: when.toISOString(),
+      },
+      { entity: "Recalada", id: String(id) },
+    );
+
     return updated;
   }
 
   static async cancel(
+    req: Request,
     id: number,
     reason: string | undefined,
     actorUserId: string,
@@ -662,28 +1051,79 @@ export class RecaladaService {
   ) {
     const current = await prisma.recalada.findUnique({
       where: { id },
-      select: {
-        id: true,
-        operationalStatus: true,
-      },
+      select: { id: true, operationalStatus: true },
     });
 
-    if (!current) throw new NotFoundError("La recalada no existe");
+    if (!current) {
+      auditFail(
+        req,
+        "recaladas.cancel.failed",
+        "Cancel recalada failed",
+        {
+          reason: "not_found",
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
+      throw new NotFoundError("La recalada no existe");
+    }
 
     if (current.operationalStatus === "DEPARTED") {
+      auditFail(
+        req,
+        "recaladas.cancel.failed",
+        "Cancel recalada failed",
+        {
+          reason: "already_departed",
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new BadRequestError(
         "No se puede cancelar una recalada en estado DEPARTED",
       );
     }
     if (current.operationalStatus === "CANCELED") {
+      auditFail(
+        req,
+        "recaladas.cancel.failed",
+        "Cancel recalada failed",
+        {
+          reason: "already_canceled",
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new BadRequestError("La recalada ya está en estado CANCELED");
     }
 
     if (current.operationalStatus === "ARRIVED") {
       if (!actorRol) {
+        auditFail(
+          req,
+          "recaladas.cancel.failed",
+          "Cancel recalada failed",
+          {
+            reason: "missing_actor_role",
+            recaladaId: id,
+          },
+          { entity: "Recalada", id: String(id) },
+        );
         throw new BadRequestError("No se pudo determinar el rol del usuario");
       }
       if (actorRol !== "SUPER_ADMIN") {
+        auditFail(
+          req,
+          "recaladas.cancel.failed",
+          "Cancel recalada failed",
+          {
+            reason: "role_not_allowed",
+            required: "SUPER_ADMIN",
+            actorRol,
+            recaladaId: id,
+          },
+          { entity: "Recalada", id: String(id) },
+        );
         throw new BadRequestError(
           "Solo SUPER_ADMIN puede cancelar una recalada que ya ARRIVED",
         );
@@ -696,6 +1136,18 @@ export class RecaladaService {
     ]);
 
     if (atencionesCount > 0 || turnosCount > 0) {
+      auditFail(
+        req,
+        "recaladas.cancel.failed",
+        "Cancel recalada failed",
+        {
+          reason: "has_dependencies",
+          recaladaId: id,
+          atencionesCount,
+          turnosCount,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new BadRequestError(
         "No se puede cancelar la recalada porque tiene atenciones/turnos asociados. Defina política de cascada (cancelar o bloquear) para habilitar esta acción.",
       );
@@ -723,24 +1175,55 @@ export class RecaladaService {
       "[Recaladas] cancel",
     );
 
+    auditOk(
+      req,
+      "recaladas.cancel.success",
+      "Recalada canceled",
+      {
+        actorUserId,
+        actorRol,
+        recaladaId: id,
+        canceledAt: when.toISOString(),
+        cancelReason: reason ?? null,
+      },
+      { entity: "Recalada", id: String(id) },
+    );
+
     return updated;
   }
 
-  static async deleteSafe(id: number, actorUserId: string) {
+  static async deleteSafe(req: Request, id: number, actorUserId: string) {
     const current = await prisma.recalada.findUnique({
       where: { id },
-      select: {
-        id: true,
-        codigoRecalada: true,
-        operationalStatus: true,
-      },
+      select: { id: true, codigoRecalada: true, operationalStatus: true },
     });
 
     if (!current) {
+      auditFail(
+        req,
+        "recaladas.deleteSafe.failed",
+        "Delete recalada failed",
+        {
+          reason: "not_found",
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new NotFoundError("La recalada no existe");
     }
 
     if (current.operationalStatus !== "SCHEDULED") {
+      auditFail(
+        req,
+        "recaladas.deleteSafe.failed",
+        "Delete recalada failed",
+        {
+          reason: "not_scheduled",
+          operationalStatus: current.operationalStatus,
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new BadRequestError(
         "No se puede eliminar físicamente una recalada que no esté en SCHEDULED. Use cancelación.",
       );
@@ -749,8 +1232,18 @@ export class RecaladaService {
     const atencionesCount = await prisma.atencion.count({
       where: { recaladaId: id },
     });
-
     if (atencionesCount > 0) {
+      auditFail(
+        req,
+        "recaladas.deleteSafe.failed",
+        "Delete recalada failed",
+        {
+          reason: "has_atenciones",
+          recaladaId: id,
+          atencionesCount,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new BadRequestError(
         "No se puede eliminar la recalada porque tiene atenciones asociadas. Use cancelación.",
       );
@@ -759,24 +1252,40 @@ export class RecaladaService {
     const turnosCount = await prisma.turno.count({
       where: { atencion: { recaladaId: id } },
     });
-
     if (turnosCount > 0) {
+      auditFail(
+        req,
+        "recaladas.deleteSafe.failed",
+        "Delete recalada failed",
+        {
+          reason: "has_turnos",
+          recaladaId: id,
+          turnosCount,
+        },
+        { entity: "Recalada", id: String(id) },
+      );
       throw new BadRequestError(
         "No se puede eliminar la recalada porque tiene turnos asociados. Use cancelación.",
       );
     }
 
-    await prisma.recalada.delete({
-      where: { id },
-    });
+    await prisma.recalada.delete({ where: { id } });
 
     logger.info(
+      { recaladaId: id, codigoRecalada: current.codigoRecalada, actorUserId },
+      "[Recaladas] deleteSafe",
+    );
+
+    auditOk(
+      req,
+      "recaladas.deleteSafe.success",
+      "Recalada deleted",
       {
+        actorUserId,
         recaladaId: id,
         codigoRecalada: current.codigoRecalada,
-        actorUserId,
       },
-      "[Recaladas] deleteSafe",
+      { entity: "Recalada", id: String(id) },
     );
 
     return { deleted: true, id };
