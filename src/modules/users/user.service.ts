@@ -1,56 +1,56 @@
-import type { Request } from "express"
-import { prisma } from "../../prisma/client"
-import { hashPassword, verifyPassword } from "../../libs/password"
+import type { Request } from "express";
+import { prisma } from "../../prisma/client";
+import { hashPassword, verifyPassword } from "../../libs/password";
 import {
   NotFoundError,
   ConflictError,
   BusinessError,
   UnauthorizedError,
-} from "../../libs/errors"
-import { logger } from "../../libs/logger"
+} from "../../libs/errors";
+import { logger } from "../../libs/logger";
 import type {
   CreateUserRequest,
   UpdateUserRequest,
   ChangePasswordRequest,
-} from "../auth/auth.schemas"
+} from "../auth/auth.schemas";
 import type {
   CompleteProfileRequest,
   UpdateMeRequest,
   ListGuidesQuery,
-} from "./user.schemas"
+} from "./user.schemas";
 
-import { RolType, ProfileStatus } from "@prisma/client"
+import { RolType, ProfileStatus } from "@prisma/client";
 
 // ✅ NEW: logs facade (DRY)
-import { logsService } from "../../libs/logs/logs.service"
+import { logsService } from "../../libs/logs/logs.service";
 
 export interface PaginationOptions {
-  page?: number
-  pageSize?: number
-  search?: string
-  rol?: RolType
-  activo?: boolean
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  rol?: RolType;
+  activo?: boolean;
 
   // ✅ nuevos filtros
-  profileStatus?: ProfileStatus
-  createdFrom?: Date
-  createdTo?: Date
-  updatedFrom?: Date
-  updatedTo?: Date
+  profileStatus?: ProfileStatus;
+  createdFrom?: Date;
+  createdTo?: Date;
+  updatedFrom?: Date;
+  updatedTo?: Date;
 
   // ✅ ordenamiento
-  orderBy?: "createdAt" | "updatedAt" | "email"
-  orderDir?: "asc" | "desc"
+  orderBy?: "createdAt" | "updatedAt" | "email";
+  orderDir?: "asc" | "desc";
 }
 
 export interface PaginatedResult<T> {
-  data: T[]
+  data: T[];
   meta: {
-    page: number
-    pageSize: number
-    total: number
-    totalPages: number
-  }
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
 }
 
 export class UserService {
@@ -85,62 +85,62 @@ export class UserService {
           },
         },
       },
-    })
+    });
 
     if (!user) {
-      throw new NotFoundError("User not found")
+      throw new NotFoundError("User not found");
     }
 
-    return user
+    return user;
   }
 
   async list(options: PaginationOptions = {}): Promise<PaginatedResult<any>> {
     // Normalización defensiva
-    const rawPage = Number(options.page ?? 1)
-    const rawPageSize = Number(options.pageSize ?? 20)
+    const rawPage = Number(options.page ?? 1);
+    const rawPageSize = Number(options.pageSize ?? 20);
 
-    const MIN_PAGE_SIZE = 1
-    const MAX_PAGE_SIZE = 100
+    const MIN_PAGE_SIZE = 1;
+    const MAX_PAGE_SIZE = 100;
 
     const page =
-      Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1
+      Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
 
     const pageSizeClampedBase =
       Number.isFinite(rawPageSize) && rawPageSize > 0
         ? Math.floor(rawPageSize)
-        : 20
+        : 20;
 
     const pageSize = Math.min(
       Math.max(pageSizeClampedBase, MIN_PAGE_SIZE),
       MAX_PAGE_SIZE,
-    )
+    );
 
-    const skip = (page - 1) * pageSize
-    const take = pageSize
+    const skip = (page - 1) * pageSize;
+    const take = pageSize;
 
     // Build where clause
-    const where: any = {}
+    const where: any = {};
 
-    const q = (options.search ?? "").trim()
+    const q = (options.search ?? "").trim();
     if (q !== "") {
       where.OR = [
         { nombres: { contains: q, mode: "insensitive" } },
         { apellidos: { contains: q, mode: "insensitive" } },
         { email: { contains: q, mode: "insensitive" } },
-      ]
+      ];
     }
 
     if (options.rol) {
-      where.rol = options.rol
+      where.rol = options.rol;
     }
 
     if (typeof options.activo === "boolean") {
-      where.activo = options.activo
+      where.activo = options.activo;
     }
 
     // ✅ profileStatus
     if (options.profileStatus) {
-      where.profileStatus = options.profileStatus
+      where.profileStatus = options.profileStatus;
     }
 
     // ✅ createdAt range
@@ -148,7 +148,7 @@ export class UserService {
       where.createdAt = {
         ...(options.createdFrom ? { gte: options.createdFrom } : {}),
         ...(options.createdTo ? { lte: options.createdTo } : {}),
-      }
+      };
     }
 
     // ✅ updatedAt range
@@ -156,12 +156,12 @@ export class UserService {
       where.updatedAt = {
         ...(options.updatedFrom ? { gte: options.updatedFrom } : {}),
         ...(options.updatedTo ? { lte: options.updatedTo } : {}),
-      }
+      };
     }
 
     // ✅ ordenamiento configurable
-    const orderByField = options.orderBy ?? "createdAt"
-    const orderDir = options.orderDir ?? "desc"
+    const orderByField = options.orderBy ?? "createdAt";
+    const orderDir = options.orderDir ?? "desc";
 
     const [total, users] = await Promise.all([
       prisma.usuario.count({ where }),
@@ -186,7 +186,7 @@ export class UserService {
         skip,
         take,
       }),
-    ])
+    ]);
 
     const normalized = users.map((u: any) => ({
       id: u.id,
@@ -201,10 +201,10 @@ export class UserService {
 
       guiaId: u.guia?.id ?? null,
       supervisorId: u.supervisor?.id ?? null,
-    }))
+    }));
 
     // ¡Importante!: usar el pageSize EFECTIVO para coherencia con 'take'
-    const totalPages = Math.max(1, Math.ceil(total / pageSize))
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
     return {
       data: normalized,
@@ -214,14 +214,14 @@ export class UserService {
         total,
         totalPages,
       },
-    }
+    };
   }
 
   async listGuidesLookup(query: ListGuidesQuery) {
     const activo =
-      typeof (query as any).activo === "boolean" ? (query as any).activo : true
+      typeof (query as any).activo === "boolean" ? (query as any).activo : true;
 
-    const q = (query.search ?? "").trim()
+    const q = (query.search ?? "").trim();
 
     const whereUser: any = {
       rol: RolType.GUIA,
@@ -235,7 +235,7 @@ export class UserService {
             ],
           }
         : {}),
-    }
+    };
 
     const rows = await prisma.guia.findMany({
       where: {
@@ -258,7 +258,7 @@ export class UserService {
         { id: "asc" },
       ],
       take: 500,
-    })
+    });
 
     return rows.map((g) => ({
       guiaId: g.id,
@@ -266,14 +266,18 @@ export class UserService {
       apellidos: g.usuario.apellidos,
       email: g.usuario.email,
       activo: g.usuario.activo,
-    }))
+    }));
   }
 
   // ✅ CHANGED: recibe req
-  async create(req: Request, data: CreateUserRequest, createdBy: string): Promise<any> {
+  async create(
+    req: Request,
+    data: CreateUserRequest,
+    createdBy: string,
+  ): Promise<any> {
     const existingUser = await prisma.usuario.findUnique({
       where: { email: data.email },
-    })
+    });
 
     if (existingUser) {
       logsService.audit(req, {
@@ -282,11 +286,11 @@ export class UserService {
         target: { entity: "User", email: data.email },
         meta: { reason: "duplicate_email", createdBy },
         message: "User create failed",
-      })
-      throw new ConflictError("User with this email already exists")
+      });
+      throw new ConflictError("User with this email already exists");
     }
 
-    const passwordHash = await hashPassword(data.password)
+    const passwordHash = await hashPassword(data.password);
 
     const user = await prisma.usuario.create({
       data: {
@@ -307,12 +311,12 @@ export class UserService {
         createdAt: true,
         updatedAt: true,
       },
-    })
+    });
 
     logger.info(
       { userId: user.id, email: user.email, rol: user.rol, createdBy },
       "User created by admin",
-    )
+    );
 
     // ✅ audit
     logsService.audit(req, {
@@ -320,24 +324,28 @@ export class UserService {
       target: { entity: "User", id: String(user.id), email: user.email },
       meta: { createdBy, rol: user.rol },
       message: "User created",
-    })
+    });
 
-    return user
+    return user;
   }
 
   // ✅ CHANGED: recibe req
-  async updateMe(req: Request, userId: string, data: UpdateMeRequest): Promise<any> {
-    const user = await prisma.usuario.findUnique({ where: { id: userId } })
-    if (!user) throw new NotFoundError("User not found")
+  async updateMe(
+    req: Request,
+    userId: string,
+    data: UpdateMeRequest,
+  ): Promise<any> {
+    const user = await prisma.usuario.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundError("User not found");
 
-    const updateData: any = {}
+    const updateData: any = {};
 
-    if (data.nombres !== undefined) updateData.nombres = data.nombres
-    if (data.apellidos !== undefined) updateData.apellidos = data.apellidos
-    if (data.telefono !== undefined) updateData.telefono = data.telefono
+    if (data.nombres !== undefined) updateData.nombres = data.nombres;
+    if (data.apellidos !== undefined) updateData.apellidos = data.apellidos;
+    if (data.telefono !== undefined) updateData.telefono = data.telefono;
 
     if (Object.keys(updateData).length === 0) {
-      throw new BusinessError("No fields to update")
+      throw new BusinessError("No fields to update");
     }
 
     const updated = await prisma.usuario.update({
@@ -355,9 +363,12 @@ export class UserService {
         createdAt: true,
         updatedAt: true,
       },
-    })
+    });
 
-    logger.info({ userId, changes: Object.keys(updateData) }, "User updated via /me")
+    logger.info(
+      { userId, changes: Object.keys(updateData) },
+      "User updated via /me",
+    );
 
     // ✅ audit
     logsService.audit(req, {
@@ -365,9 +376,9 @@ export class UserService {
       target: { entity: "User", id: String(updated.id), email: updated.email },
       meta: { by: "self", fields: Object.keys(updateData) },
       message: "User updated (me)",
-    })
+    });
 
-    return updated
+    return updated;
   }
 
   async get(id: string): Promise<any> {
@@ -396,13 +407,13 @@ export class UserService {
           },
         },
       },
-    })
+    });
 
     if (!user) {
-      throw new NotFoundError("User not found")
+      throw new NotFoundError("User not found");
     }
 
-    return user
+    return user;
   }
 
   // ✅ CHANGED: recibe req
@@ -413,21 +424,22 @@ export class UserService {
     updatedBy: string,
     updaterRole: RolType,
   ): Promise<any> {
-    const existingUser = await prisma.usuario.findUnique({ where: { id } })
-    if (!existingUser) throw new NotFoundError("User not found")
+    const existingUser = await prisma.usuario.findUnique({ where: { id } });
+    if (!existingUser) throw new NotFoundError("User not found");
 
-    const updateData: any = {}
+    const updateData: any = {};
 
-    if (data.nombres !== undefined) updateData.nombres = data.nombres
-    if (data.apellidos !== undefined) updateData.apellidos = data.apellidos
+    if (data.nombres !== undefined) updateData.nombres = data.nombres;
+    if (data.apellidos !== undefined) updateData.apellidos = data.apellidos;
 
     if (updaterRole === RolType.SUPER_ADMIN) {
-      if (data.rol !== undefined) updateData.rol = data.rol
-      if (data.activo !== undefined) updateData.activo = data.activo
+      if (data.rol !== undefined) updateData.rol = data.rol;
+      if (data.activo !== undefined) updateData.activo = data.activo;
     } else {
-      if (updatedBy !== id) throw new UnauthorizedError("You can only update your own profile")
+      if (updatedBy !== id)
+        throw new UnauthorizedError("You can only update your own profile");
       if (data.rol !== undefined || data.activo !== undefined) {
-        throw new UnauthorizedError("You cannot change role or active status")
+        throw new UnauthorizedError("You cannot change role or active status");
       }
     }
 
@@ -444,29 +456,40 @@ export class UserService {
         createdAt: true,
         updatedAt: true,
       },
-    })
+    });
 
-    logger.info({ userId: id, updatedBy, changes: Object.keys(updateData) }, "User updated")
+    logger.info(
+      { userId: id, updatedBy, changes: Object.keys(updateData) },
+      "User updated",
+    );
 
     // ✅ audit user.updated
     logsService.audit(req, {
       event: "user.updated",
-      target: { entity: "User", id: String(updatedUser.id), email: updatedUser.email },
+      target: {
+        entity: "User",
+        id: String(updatedUser.id),
+        email: updatedUser.email,
+      },
       meta: { updatedBy, fields: Object.keys(updateData) },
       message: "User updated",
-    })
+    });
 
     // ✅ audit role change (si aplica)
     if (updateData.rol !== undefined && updateData.rol !== existingUser.rol) {
       logsService.audit(req, {
         event: "user.role.changed",
-        target: { entity: "User", id: String(updatedUser.id), email: updatedUser.email },
+        target: {
+          entity: "User",
+          id: String(updatedUser.id),
+          email: updatedUser.email,
+        },
         meta: { updatedBy, from: existingUser.rol, to: updatedUser.rol },
         message: "User role changed",
-      })
+      });
     }
 
-    return updatedUser
+    return updatedUser;
   }
 
   // ✅ CHANGED: recibe req
@@ -477,19 +500,21 @@ export class UserService {
     requesterId: string,
   ): Promise<void> {
     if (requesterId !== id) {
-      throw new UnauthorizedError("You can only change your own password")
+      throw new UnauthorizedError("You can only change your own password");
     }
 
-    const user = await prisma.usuario.findUnique({ where: { id } })
-    if (!user) throw new NotFoundError("User not found")
-    if (!user.activo) throw new BusinessError("Cannot change password for inactive user")
+    const user = await prisma.usuario.findUnique({ where: { id } });
+    if (!user) throw new NotFoundError("User not found");
+    if (!user.activo)
+      throw new BusinessError("Cannot change password for inactive user");
 
-    const current = data.currentPassword ?? (data as any).oldPassword
-    if (!current) throw new BusinessError("currentPassword/oldPassword is required")
+    const current = data.currentPassword ?? (data as any).oldPassword;
+    if (!current)
+      throw new BusinessError("currentPassword/oldPassword is required");
 
-    if (!user.passwordHash) throw new BusinessError("User has no password set")
+    if (!user.passwordHash) throw new BusinessError("User has no password set");
 
-    const isValidPassword = await verifyPassword(current, user.passwordHash)
+    const isValidPassword = await verifyPassword(current, user.passwordHash);
     if (!isValidPassword) {
       logsService.audit(req, {
         event: "user.updated",
@@ -497,23 +522,23 @@ export class UserService {
         target: { entity: "User", id: String(id), email: user.email },
         meta: { reason: "invalid_current_password", action: "changePassword" },
         message: "Password change failed",
-      })
-      throw new UnauthorizedError("Current password is incorrect")
+      });
+      throw new UnauthorizedError("Current password is incorrect");
     }
 
-    const newPasswordHash = await hashPassword(data.newPassword)
+    const newPasswordHash = await hashPassword(data.newPassword);
 
     await prisma.usuario.update({
       where: { id },
       data: { passwordHash: newPasswordHash },
-    })
+    });
 
     await prisma.session.updateMany({
       where: { userId: id, revokedAt: null },
       data: { revokedAt: new Date(), lastRotatedAt: new Date() },
-    })
+    });
 
-    logger.info({ userId: id }, "Password changed successfully")
+    logger.info({ userId: id }, "Password changed successfully");
 
     // ✅ audit (sin secretos)
     logsService.audit(req, {
@@ -521,15 +546,20 @@ export class UserService {
       target: { entity: "User", id: String(id), email: user.email },
       meta: { action: "changePassword" },
       message: "Password changed",
-    })
+    });
   }
 
   // ✅ CHANGED: recibe req
-  async deactivate(req: Request, id: string, deactivatedBy: string): Promise<void> {
-    const user = await prisma.usuario.findUnique({ where: { id } })
-    if (!user) throw new NotFoundError("User not found")
-    if (!user.activo) throw new BusinessError("User is already inactive")
-    if (id === deactivatedBy) throw new BusinessError("You cannot deactivate your own account")
+  async deactivate(
+    req: Request,
+    id: string,
+    deactivatedBy: string,
+  ): Promise<void> {
+    const user = await prisma.usuario.findUnique({ where: { id } });
+    if (!user) throw new NotFoundError("User not found");
+    if (!user.activo) throw new BusinessError("User is already inactive");
+    if (id === deactivatedBy)
+      throw new BusinessError("You cannot deactivate your own account");
 
     await prisma.$transaction([
       prisma.usuario.update({ where: { id }, data: { activo: false } }),
@@ -537,9 +567,9 @@ export class UserService {
         where: { userId: id, revokedAt: null },
         data: { revokedAt: new Date() },
       }),
-    ])
+    ]);
 
-    logger.info({ userId: id, deactivatedBy }, "User deactivated")
+    logger.info({ userId: id, deactivatedBy }, "User deactivated");
 
     logsService.audit(req, {
       event: "user.updated",
@@ -547,32 +577,37 @@ export class UserService {
       target: { entity: "User", id: String(id), email: user.email },
       meta: { deactivatedBy, fields: ["activo"], from: true, to: false },
       message: "User deactivated",
-    })
+    });
   }
 
   // ✅ CHANGED: recibe req
   async activate(req: Request, id: string, activatedBy: string): Promise<void> {
-    const user = await prisma.usuario.findUnique({ where: { id } })
-    if (!user) throw new NotFoundError("User not found")
-    if (user.activo) throw new BusinessError("User is already active")
+    const user = await prisma.usuario.findUnique({ where: { id } });
+    if (!user) throw new NotFoundError("User not found");
+    if (user.activo) throw new BusinessError("User is already active");
 
-    await prisma.usuario.update({ where: { id }, data: { activo: true } })
+    await prisma.usuario.update({ where: { id }, data: { activo: true } });
 
-    logger.info({ userId: id, activatedBy }, "User activated")
+    logger.info({ userId: id, activatedBy }, "User activated");
 
     logsService.audit(req, {
       event: "user.updated",
       target: { entity: "User", id: String(id), email: user.email },
       meta: { activatedBy, fields: ["activo"], from: false, to: true },
       message: "User activated",
-    })
+    });
   }
 
   // ✅ CHANGED: recibe req
-  async completeProfile(req: Request, userId: string, data: CompleteProfileRequest): Promise<any> {
-    const user = await prisma.usuario.findUnique({ where: { id: userId } })
-    if (!user) throw new NotFoundError("User not found")
-    if (user.profileStatus === "COMPLETE") throw new BusinessError("Profile is already complete")
+  async completeProfile(
+    req: Request,
+    userId: string,
+    data: CompleteProfileRequest,
+  ): Promise<any> {
+    const user = await prisma.usuario.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundError("User not found");
+    if (user.profileStatus === "COMPLETE")
+      throw new BusinessError("Profile is already complete");
 
     if (data.documentType && data.documentNumber) {
       const existingUserWithDoc = await prisma.usuario.findFirst({
@@ -581,10 +616,12 @@ export class UserService {
           documentNumber: data.documentNumber,
           id: { not: userId },
         },
-      })
+      });
 
       if (existingUserWithDoc) {
-        throw new ConflictError("A user with this document type and number already exists")
+        throw new ConflictError(
+          "A user with this document type and number already exists",
+        );
       }
     }
 
@@ -613,7 +650,23 @@ export class UserService {
         createdAt: true,
         updatedAt: true,
       },
-    })
+    });
+
+    if (updatedUser.rol === "GUIA") {
+      await prisma.guia.upsert({
+        where: { usuarioId: updatedUser.id },
+        create: { usuarioId: updatedUser.id },
+        update: {},
+      });
+    }
+
+    if (updatedUser.rol === "SUPERVISOR") {
+      await prisma.supervisor.upsert({
+        where: { usuarioId: updatedUser.id },
+        create: { usuarioId: updatedUser.id },
+        update: {},
+      });
+    }
 
     logger.info(
       {
@@ -624,26 +677,30 @@ export class UserService {
           .padStart(data.documentNumber.length, "*"),
       },
       "User profile completed",
-    )
+    );
 
     // ✅ audit profile completed
     logsService.audit(req, {
       event: "user.profile.completed",
-      target: { entity: "User", id: String(updatedUser.id), email: updatedUser.email },
+      target: {
+        entity: "User",
+        id: String(updatedUser.id),
+        email: updatedUser.email,
+      },
       meta: {
         documentType: data.documentType ?? null,
         hasPhone: !!data.telefono,
       },
       message: "Profile completed",
-    })
+    });
 
     return {
       ...updatedUser,
       documentNumber: data.documentNumber
         .slice(-4)
         .padStart(data.documentNumber.length, "*"),
-    }
+    };
   }
 }
 
-export const userService = new UserService()
+export const userService = new UserService();
