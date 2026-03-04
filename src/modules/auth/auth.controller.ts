@@ -1,8 +1,11 @@
 import type { Request, Response, NextFunction } from "express"
+import type { Platform } from "@prisma/client"
+
 import { authService } from "./auth.service"
 import { ok, created } from "../../libs/http"
 import { logger } from "../../libs/logger"
-import { BadRequestError, UnauthorizedError } from "../../libs/errors"
+import { BadRequestError } from "../../libs/errors"
+
 import type {
   LoginRequest,
   RefreshRequest,
@@ -14,9 +17,6 @@ import type {
   VerifyEmailRequest,
   VerifyEmailConfirmRequest,
 } from "./auth.schemas"
-import { verifyPassword } from "../../libs/password"
-import type { Platform } from "@prisma/client"
-import { prisma } from "../../prisma/client"
 
 const REFRESH_COOKIE_PATH = (process.env.API_PREFIX || "") + "/auth/refresh"
 
@@ -28,19 +28,19 @@ export class AuthController {
           hasBody: !!req.body,
           email: (req.body as any)?.email,
           platformHeader: req.get("X-Client-Platform"),
-          clientPlatform: (req as any).clientPlatform,
+          clientPlatform: req.clientPlatform,
           ip: req.ip,
           userAgent: req.get("User-Agent"),
         },
         "[Auth/Login] incoming",
       )
 
-      if (!(req as any).clientPlatform) {
+      if (!req.clientPlatform) {
         throw new BadRequestError("X-Client-Platform header is required")
       }
 
       const data = req.body as LoginRequest
-      const platform = (req as any).clientPlatform as Platform
+      const platform = req.clientPlatform as Platform
       const ip = req.ip
       const userAgent = req.get("User-Agent")
 
@@ -78,11 +78,11 @@ export class AuthController {
 
   async refresh(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!(req as any).clientPlatform) {
+      if (!req.clientPlatform) {
         throw new BadRequestError("X-Client-Platform header is required")
       }
 
-      const platform = (req as any).clientPlatform as Platform
+      const platform = req.clientPlatform as Platform
       const ip = req.ip
       const userAgent = req.get("User-Agent")
 
@@ -124,19 +124,19 @@ export class AuthController {
 
   async logout(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!(req as any).user?.sid) {
+      if (!req.user?.sid) {
         throw new BadRequestError("Session ID not found in token")
       }
 
-      const platform = (req as any).clientPlatform as Platform
-      await authService.logout(req, (req as any).user.sid)
+      const platform = req.clientPlatform as Platform
+      await authService.logout(req, req.user.sid)
 
       if (platform === "WEB") {
         res.clearCookie("rt", {
           httpOnly: true,
           secure: process.env.NODE_ENV === "production",
           sameSite: "strict",
-          path: "/api/v1/auth/refresh",
+          path: REFRESH_COOKIE_PATH,
         })
       }
 
@@ -148,7 +148,7 @@ export class AuthController {
 
   async logoutAll(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!(req as any).user) {
+      if (!req.user) {
         return res.status(401).json({ error: "Unauthorized" })
       }
 
@@ -157,25 +157,9 @@ export class AuthController {
         throw new BadRequestError("verification object is required")
       }
 
-      const user = await prisma.usuario.findUnique({
-        where: { id: (req as any).user.userId },
-      })
-      if (!user || !user.activo) {
-        throw new UnauthorizedError("User not found or inactive")
-      }
+      await authService.logoutAll(req, req.user.userId, body.verification)
 
-      if (body.verification.method === "password") {
-        const okPass = await verifyPassword(body.verification.password, user.passwordHash)
-        if (!okPass) throw new UnauthorizedError("Invalid credentials")
-      } else if (body.verification.method === "mfa") {
-        throw new BadRequestError("MFA verification not implemented")
-      } else {
-        throw new BadRequestError("Unsupported verification method")
-      }
-
-      await authService.logoutAll(req, (req as any).user.userId)
-
-      if ((req as any).clientPlatform === "WEB") {
+      if (req.clientPlatform === "WEB") {
         res.clearCookie("rt", {
           httpOnly: true,
           secure: process.env.NODE_ENV === "production",
@@ -192,11 +176,11 @@ export class AuthController {
 
   async sessions(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!(req as any).user) {
+      if (!req.user) {
         return res.status(401).json({ error: "Unauthorized" })
       }
 
-      const sessions = await authService.listSessions((req as any).user.userId)
+      const sessions = await authService.listSessions(req.user.userId)
       return res.json(ok({ sessions }))
     } catch (error) {
       return next(error)
@@ -205,7 +189,7 @@ export class AuthController {
 
   async revokeSession(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!(req as any).user) {
+      if (!req.user) {
         return res.status(401).json({ error: "Unauthorized" })
       }
 
@@ -214,7 +198,7 @@ export class AuthController {
         throw new BadRequestError("Session ID is required")
       }
 
-      await authService.revokeSession(sessionId, (req as any).user.userId)
+      await authService.revokeSession(sessionId, req.user.userId)
       return res.status(204).send()
     } catch (error) {
       return next(error)
@@ -223,7 +207,7 @@ export class AuthController {
 
   async changePassword(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!(req as any).user) {
+      if (!req.user) {
         return res.status(401).json({ error: "Unauthorized" })
       }
 
@@ -233,7 +217,7 @@ export class AuthController {
         throw new BadRequestError("oldPassword/currentPassword is required")
       }
 
-      await authService.changePassword(req, (req as any).user.userId, current, body.newPassword)
+      await authService.changePassword(req, req.user.userId, current, body.newPassword)
 
       return res.json(ok({ message: "Password changed successfully" }))
     } catch (error) {
@@ -243,7 +227,7 @@ export class AuthController {
 
   async forgotPassword(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!(req as any).clientPlatform) {
+      if (!req.clientPlatform) {
         throw new BadRequestError("X-Client-Platform header is required")
       }
 
@@ -253,7 +237,7 @@ export class AuthController {
         {
           email: body.email,
           platformHeader: req.get("X-Client-Platform"),
-          clientPlatform: (req as any).clientPlatform,
+          clientPlatform: req.clientPlatform,
           ip: req.ip,
           userAgent: req.get("User-Agent"),
         },
@@ -274,7 +258,7 @@ export class AuthController {
 
   async resetPassword(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!(req as any).clientPlatform) {
+      if (!req.clientPlatform) {
         throw new BadRequestError("X-Client-Platform header is required")
       }
 
@@ -284,7 +268,7 @@ export class AuthController {
         {
           hasToken: !!body.token,
           platformHeader: req.get("X-Client-Platform"),
-          clientPlatform: (req as any).clientPlatform,
+          clientPlatform: req.clientPlatform,
           ip: req.ip,
           userAgent: req.get("User-Agent"),
         },
@@ -301,7 +285,7 @@ export class AuthController {
 
   async verifyEmailRequest(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!(req as any).clientPlatform) {
+      if (!req.clientPlatform) {
         throw new BadRequestError("X-Client-Platform header is required")
       }
 
@@ -311,7 +295,7 @@ export class AuthController {
         {
           email: body.email,
           platformHeader: req.get("X-Client-Platform"),
-          clientPlatform: (req as any).clientPlatform,
+          clientPlatform: req.clientPlatform,
           ip: req.ip,
           userAgent: req.get("User-Agent"),
         },
@@ -332,7 +316,7 @@ export class AuthController {
 
   async verifyEmailConfirm(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!(req as any).clientPlatform) {
+      if (!req.clientPlatform) {
         throw new BadRequestError("X-Client-Platform header is required")
       }
 
@@ -342,7 +326,7 @@ export class AuthController {
         {
           hasToken: !!body.token,
           platformHeader: req.get("X-Client-Platform"),
-          clientPlatform: (req as any).clientPlatform,
+          clientPlatform: req.clientPlatform,
           ip: req.ip,
           userAgent: req.get("User-Agent"),
         },
@@ -379,10 +363,11 @@ export class AuthController {
 
   async me(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!(req as any).user) {
+      if (!req.user) {
         return res.status(401).json({ error: "Unauthorized" })
       }
-      const user = await authService.getProfile((req as any).user.userId)
+
+      const user = await authService.getProfile(req.user.userId)
       return res.json(ok(user))
     } catch (error) {
       return next(error)
