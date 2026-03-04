@@ -1,15 +1,16 @@
+import type { Request } from "express"
 import { prisma } from "../../prisma/client"
 import { hashPassword } from "../../libs/password"
 import { sendInvitationEmail } from "../../libs/email"
 import { logger } from "../../libs/logger"
 import { ConflictError, NotFoundError, BadRequestError } from "../../libs/errors"
+import { logsService } from "../../libs/logs/logs.service"
 import type { RolType, InvitationStatus } from "@prisma/client"
 import crypto from "crypto"
 
 const INVITE_TTL_HOURS = Number.parseInt(process.env.INVITE_TTL_HOURS || "24", 10)
 const PASSWORD_PEPPER = process.env.PASSWORD_PEPPER || ""
 
-/** Genera una contraseña temporal de 12 chars segura */
 function generateTempPassword(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%"
   let password = ""
@@ -37,55 +38,59 @@ export interface CreateInvitationResult {
     expiresAt: Date
     status: InvitationStatus
   }
-  /** ⚠️ Solo para testing/dev. NO exponer en producción por API. */
   tempPassword: string
 }
 
+function auditWarn(req: Request, event: string, message: string, meta?: Record<string, any>, target?: any) {
+  logsService.audit(req, { event, level: "warn", message, meta, target })
+}
+
+function auditInfo(req: Request, event: string, message: string, meta?: Record<string, any>, target?: any) {
+  logsService.audit(req, { event, message, meta, target })
+}
+
 export class InvitationService {
-  /**
-   * Invite-or-Resend por email:
-   * - Si user existe y profileStatus=COMPLETE -> conflicto (ya es usuario real)
-   * - Si existe invitación PENDING vigente -> conflicto (ya hay una activa)
-   * - Si user INCOMPLETE o invitación vieja -> reactiva + resetea password + pone invitación en PENDING + envía correo
-   *
-   * Nota: con Invitation.userId @unique lo correcto es REUSAR una invitación previa (update) en vez de crear infinitas.
-   */
-  async createInvitation(emailRaw: string, role: RolType, inviterId: string): Promise<CreateInvitationResult> {
+  async createInvitation(req: Request, emailRaw: string, role: RolType, inviterId: string): Promise<CreateInvitationResult> {
     const email = emailRaw.trim().toLowerCase()
     logger.info({ email, role, inviterId }, "[Invite] start createInvitation")
 
-    // 1) Buscar usuario existente (para decidir si se permite reinvitar)
     const existingUser = await prisma.usuario.findUnique({
       where: { email },
       select: { id: true, profileStatus: true },
     })
 
-    // 2) Si el usuario ya es REAL (perfil completo) → no se invita
     if (existingUser && existingUser.profileStatus === "COMPLETE") {
+      auditWarn(req, "invitations.create.failed", "Create invitation failed", {
+        reason: "user_complete_exists",
+        email,
+        userId: existingUser.id,
+      }, { entity: "User", id: existingUser.id })
       logger.warn({ email, userId: existingUser.id }, "[Invite] user exists and is COMPLETE")
       throw new ConflictError("User with this email already exists")
     }
 
-    // 3) Si ya hay invitación activa (PENDING no expirada) → no se reenvía desde input
     const activeInvitation = await prisma.invitation.findFirst({
       where: { email, status: "PENDING", expiresAt: { gt: new Date() } },
       orderBy: { createdAt: "desc" },
     })
+
     if (activeInvitation) {
+      auditWarn(req, "invitations.create.failed", "Create invitation failed", {
+        reason: "active_invitation_exists",
+        email,
+        invitationId: activeInvitation.id,
+        expiresAt: activeInvitation.expiresAt?.toISOString?.(),
+      }, { entity: "Invitation", id: activeInvitation.id })
       logger.warn({ email, invitationId: activeInvitation.id }, "[Invite] active invitation already exists")
       throw new ConflictError("An active invitation already exists for this email")
     }
 
-    // 4) Generar credenciales temporales
     const tempPassword = generateTempPassword()
     const tempPasswordHash = await hashPassword(tempPassword)
     const token = generateInvitationToken()
     const tokenHash = hashToken(token)
     const expiresAt = new Date(Date.now() + INVITE_TTL_HOURS * 60 * 60 * 1000)
 
-    // 5) Upsert usuario:
-    //    - si existe (INCOMPLETE) -> resetea password, activa y actualiza rol
-    //    - si no existe -> lo crea como invitado
     const user = await prisma.usuario.upsert({
       where: { email },
       create: {
@@ -104,7 +109,6 @@ export class InvitationService {
       select: { id: true, email: true },
     })
 
-    // 6) Reusar invitación previa si existe (por userId @unique)
     const lastInvitation = await prisma.invitation.findFirst({
       where: { email },
       orderBy: { createdAt: "desc" },
@@ -144,7 +148,16 @@ export class InvitationService {
       "[Invite] invite-or-resend completed",
     )
 
-    // 7) Enviar correo (rollback mínimo si falla)
+    auditInfo(req, "invitations.create.success", "Invitation created or resent", {
+      action,
+      invitationId: invitation.id,
+      email,
+      role,
+      expiresAt: expiresAt.toISOString(),
+      inviterId,
+      userId: user.id,
+    }, { entity: "Invitation", id: invitation.id })
+
     try {
       const inviter = await prisma.usuario.findUnique({
         where: { id: inviterId },
@@ -158,6 +171,13 @@ export class InvitationService {
         expiresInHours: INVITE_TTL_HOURS,
       })
 
+      auditInfo(req, "invitations.email.sent", "Invitation email sent", {
+        invitationId: invitation.id,
+        email,
+        role,
+        inviterId,
+      }, { entity: "Invitation", id: invitation.id })
+
       logger.info({ invitationId: invitation.id, email, role, inviterId }, "[Invite] email sent")
     } catch (error) {
       logger.error(
@@ -165,7 +185,12 @@ export class InvitationService {
         "[Invite] email failed; marking invitation as EXPIRED",
       )
 
-      // rollback mínimo: evitar dejar PENDING viva si el correo no salió
+      auditWarn(req, "invitations.email.failed", "Invitation email failed", {
+        invitationId: invitation.id,
+        email,
+        error: (error as Error)?.message,
+      }, { entity: "Invitation", id: invitation.id })
+
       try {
         await prisma.invitation.update({
           where: { id: invitation.id },
@@ -189,11 +214,17 @@ export class InvitationService {
     }
   }
 
-  async markInvitationAsUsed(invitationId: string, userId: string): Promise<void> {
+  async markInvitationAsUsed(invitationId: string, userId: string, req?: Request): Promise<void> {
     await prisma.invitation.update({
       where: { id: invitationId },
       data: { status: "USED", usedAt: new Date(), userId },
     })
+    if (req) {
+      auditInfo(req, "invitations.markUsed", "Invitation marked as used", {
+        invitationId,
+        userId,
+      }, { entity: "Invitation", id: invitationId })
+    }
     logger.info({ invitationId, userId }, "[Invite] marked as used")
   }
 
@@ -205,11 +236,7 @@ export class InvitationService {
     })
   }
 
-  /**
-   * Obtiene la última invitación por email (la más reciente).
-   * Útil para no paginar toda la lista.
-   */
-  async getLastInvitationByEmail(emailRaw: string) {
+  async getLastInvitationByEmail(req: Request, emailRaw: string) {
     const email = emailRaw.trim().toLowerCase()
 
     const invitation = await prisma.invitation.findFirst({
@@ -221,26 +248,47 @@ export class InvitationService {
       orderBy: { createdAt: "desc" },
     })
 
-    if (!invitation) throw new NotFoundError("Invitation not found for this email")
+    if (!invitation) {
+      auditWarn(req, "invitations.getLastByEmail.failed", "Get last invitation failed", {
+        reason: "not_found",
+        email,
+      }, { entity: "Invitation" })
+      throw new NotFoundError("Invitation not found for this email")
+    }
+
+    auditInfo(req, "invitations.getLastByEmail", "Get last invitation by email", {
+      invitationId: invitation.id,
+      email,
+      status: invitation.status,
+      expiresAt: invitation.expiresAt?.toISOString?.(),
+    }, { entity: "Invitation", id: invitation.id })
 
     return invitation
   }
 
-  async expireOldInvitations(): Promise<number> {
+  async expireOldInvitations(req?: Request): Promise<number> {
     const result = await prisma.invitation.updateMany({
       where: { status: "PENDING", expiresAt: { lte: new Date() } },
       data: { status: "EXPIRED" },
     })
-    if (result.count > 0) logger.info({ count: result.count }, "[Invite] expired old invitations")
+    if (result.count > 0) {
+      logger.info({ count: result.count }, "[Invite] expired old invitations")
+      if (req) {
+        auditInfo(req, "invitations.expireOld", "Expired old invitations", {
+          count: result.count,
+        }, { entity: "Invitation" })
+      }
+    }
     return result.count
   }
 
-  async listInvitations(filters?: { status?: InvitationStatus; email?: string }) {
+  async listInvitations(req: Request, filters?: { status?: InvitationStatus; email?: string }) {
     const where = {
       ...(filters?.status ? { status: filters.status } : {}),
       ...(filters?.email ? { email: filters.email.toLowerCase() } : {}),
     }
-    return prisma.invitation.findMany({
+
+    const items = await prisma.invitation.findMany({
       where,
       include: {
         inviter: { select: { id: true, email: true, nombres: true, apellidos: true } },
@@ -249,20 +297,32 @@ export class InvitationService {
       orderBy: { createdAt: "desc" },
       take: 100,
     })
+
+    auditInfo(req, "invitations.list", "List invitations", {
+      status: filters?.status ?? null,
+      email: filters?.email ?? null,
+      returned: items.length,
+    }, { entity: "Invitation" })
+
+    return items
   }
 
-  /**
-   * Reenvía la invitación por ID:
-   * - Regenera tempPassword y actualiza invitation.tempPasswordHash + expiresAt
-   * - Upsert de usuario:
-   *    - si existe → actualiza passwordHash y lo deja activo
-   *    - si no existe → lo crea (con nombres/apellidos obligatorios)
-   * - Enlaza invitation.userId si estaba vacío
-   */
-  async resendInvitation(invitationId: string, resenderId: string): Promise<void> {
+  async resendInvitation(req: Request, invitationId: string, resenderId: string): Promise<void> {
     const invitation = await prisma.invitation.findUnique({ where: { id: invitationId } })
-    if (!invitation) throw new NotFoundError("Invitation not found")
-    if (invitation.status === "USED") throw new BadRequestError("Cannot resend a used invitation")
+    if (!invitation) {
+      auditWarn(req, "invitations.resend.failed", "Resend invitation failed", {
+        reason: "not_found",
+        invitationId,
+      }, { entity: "Invitation", id: invitationId })
+      throw new NotFoundError("Invitation not found")
+    }
+    if (invitation.status === "USED") {
+      auditWarn(req, "invitations.resend.failed", "Resend invitation failed", {
+        reason: "already_used",
+        invitationId,
+      }, { entity: "Invitation", id: invitationId })
+      throw new BadRequestError("Cannot resend a used invitation")
+    }
 
     const email = invitation.email.toLowerCase()
     const tempPassword = generateTempPassword()
@@ -271,7 +331,6 @@ export class InvitationService {
     const tokenHash = hashToken(token)
     const expiresAt = new Date(Date.now() + INVITE_TTL_HOURS * 60 * 60 * 1000)
 
-    // Upsert usuario (con nombres/apellidos obligatorios)
     const user = await prisma.usuario.upsert({
       where: { email },
       create: {
@@ -289,7 +348,6 @@ export class InvitationService {
       select: { id: true, email: true },
     })
 
-    // Actualizar invitación y enlazar userId si faltaba
     await prisma.invitation.update({
       where: { id: invitationId },
       data: {
@@ -314,17 +372,21 @@ export class InvitationService {
       expiresInHours: INVITE_TTL_HOURS,
     })
 
+    auditInfo(req, "invitations.resend.success", "Invitation resent", {
+      invitationId,
+      email,
+      resenderId,
+      userId: user.id,
+      expiresAt: expiresAt.toISOString(),
+    }, { entity: "Invitation", id: invitationId })
+
     logger.info(
       { invitationId, email, resenderId, userId: user.id, expiresAt },
       "[Invite] resent with new temp password and user upserted",
     )
   }
 
-  /**
-   * Reenvía la invitación usando email (sin invitationId).
-   * Regla: toma la invitación más reciente para ese email.
-   */
-  async resendInvitationByEmail(emailRaw: string, resenderId: string): Promise<void> {
+  async resendInvitationByEmail(req: Request, emailRaw: string, resenderId: string): Promise<void> {
     const email = emailRaw.trim().toLowerCase()
 
     const invitation = await prisma.invitation.findFirst({
@@ -332,8 +394,21 @@ export class InvitationService {
       orderBy: { createdAt: "desc" },
     })
 
-    if (!invitation) throw new NotFoundError("Invitation not found for this email")
-    if (invitation.status === "USED") throw new BadRequestError("Cannot resend a used invitation")
+    if (!invitation) {
+      auditWarn(req, "invitations.resendByEmail.failed", "Resend-by-email failed", {
+        reason: "not_found",
+        email,
+      }, { entity: "Invitation" })
+      throw new NotFoundError("Invitation not found for this email")
+    }
+    if (invitation.status === "USED") {
+      auditWarn(req, "invitations.resendByEmail.failed", "Resend-by-email failed", {
+        reason: "already_used",
+        invitationId: invitation.id,
+        email,
+      }, { entity: "Invitation", id: invitation.id })
+      throw new BadRequestError("Cannot resend a used invitation")
+    }
 
     const tempPassword = generateTempPassword()
     const tempPasswordHash = await hashPassword(tempPassword)
@@ -341,7 +416,6 @@ export class InvitationService {
     const tokenHash = hashToken(token)
     const expiresAt = new Date(Date.now() + INVITE_TTL_HOURS * 60 * 60 * 1000)
 
-    // Upsert usuario (con nombres/apellidos obligatorios)
     const user = await prisma.usuario.upsert({
       where: { email },
       create: {
@@ -359,7 +433,6 @@ export class InvitationService {
       select: { id: true, email: true },
     })
 
-    // Actualiza ESA invitación (la más reciente)
     await prisma.invitation.update({
       where: { id: invitation.id },
       data: {
@@ -383,6 +456,14 @@ export class InvitationService {
       inviterName: resender ? `${resender.nombres} ${resender.apellidos}` : undefined,
       expiresInHours: INVITE_TTL_HOURS,
     })
+
+    auditInfo(req, "invitations.resendByEmail.success", "Invitation resent by email", {
+      invitationId: invitation.id,
+      email,
+      resenderId,
+      userId: user.id,
+      expiresAt: expiresAt.toISOString(),
+    }, { entity: "Invitation", id: invitation.id })
 
     logger.info(
       { invitationId: invitation.id, email, resenderId, userId: user.id, expiresAt },
