@@ -30,11 +30,13 @@ export const listTurnosQuerySchema = z
     page: z.coerce.number().int().positive().default(1),
     pageSize: z.coerce.number().int().positive().max(100).default(20),
   })
-  .refine((data) => !data.dateFrom || !data.dateTo || data.dateTo >= data.dateFrom, {
-    message: "dateTo debe ser mayor o igual a dateFrom",
-    path: ["dateTo"],
-  });
-
+  .refine(
+    (data) => !data.dateFrom || !data.dateTo || data.dateTo >= data.dateFrom,
+    {
+      message: "dateTo debe ser mayor o igual a dateFrom",
+      path: ["dateTo"],
+    },
+  );
 
 /**
  * GET /turnos/me
@@ -54,10 +56,13 @@ export const listTurnosMeQuerySchema = z
     page: z.coerce.number().int().positive().default(1),
     pageSize: z.coerce.number().int().positive().max(100).default(20),
   })
-  .refine((data) => !data.dateFrom || !data.dateTo || data.dateTo >= data.dateFrom, {
-    message: "dateTo debe ser mayor o igual a dateFrom",
-    path: ["dateTo"],
-  });
+  .refine(
+    (data) => !data.dateFrom || !data.dateTo || data.dateTo >= data.dateFrom,
+    {
+      message: "dateTo debe ser mayor o igual a dateFrom",
+      path: ["dateTo"],
+    },
+  );
 
 /**
  * GET /turnos/:id
