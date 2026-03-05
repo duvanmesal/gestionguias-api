@@ -1,6 +1,6 @@
-import type { Prisma, StatusType } from "@prisma/client"
-import { prisma } from "../../../prisma/client"
-import { paisLookupSelect, paisSelect } from "./pais.select"
+import type { Prisma, StatusType } from "@prisma/client";
+import { prisma } from "../../../prisma/client";
+import { paisLookupSelect, paisSelect } from "./pais.select";
 
 export class PaisRepository {
   async list(where: Prisma.PaisWhereInput, page: number, pageSize: number) {
@@ -13,16 +13,24 @@ export class PaisRepository {
         take: pageSize,
         select: paisSelect,
       }),
-    ])
+    ]);
 
-    return { items, total }
+    return { items, total };
   }
 
   getById(id: number) {
     return prisma.pais.findUnique({
       where: { id },
       select: paisSelect,
-    })
+    });
+  }
+
+  findByCodigos(codigos: string[]) {
+    if (codigos.length === 0) return Promise.resolve([]);
+    return prisma.pais.findMany({
+      where: { codigo: { in: codigos } },
+      select: { id: true, codigo: true, nombre: true, status: true },
+    });
   }
 
   create(data: { codigo: string; nombre: string; status: StatusType }) {
@@ -33,7 +41,7 @@ export class PaisRepository {
         status: data.status,
       },
       select: paisSelect,
-    })
+    });
   }
 
   update(
@@ -48,18 +56,18 @@ export class PaisRepository {
         ...(data.status !== undefined ? { status: data.status } : {}),
       },
       select: paisSelect,
-    })
+    });
   }
 
   delete(id: number) {
     return prisma.pais.delete({
       where: { id },
       select: { id: true, codigo: true, nombre: true, status: true },
-    })
+    });
   }
 
   countBuquesByPaisId(id: number) {
-    return prisma.buque.count({ where: { paisId: id } })
+    return prisma.buque.count({ where: { paisId: id } });
   }
 
   lookup() {
@@ -67,8 +75,8 @@ export class PaisRepository {
       where: { status: "ACTIVO" },
       orderBy: [{ nombre: "asc" }],
       select: paisLookupSelect,
-    })
+    });
   }
 }
 
-export const paisRepository = new PaisRepository()
+export const paisRepository = new PaisRepository();

@@ -663,6 +663,353 @@ En UI admin, muestra:
 
 ---
 
+## 4.1.7 Bulk Upload de Países (JSON)
+
+### **POST `/api/v1/paises/bulk`**
+
+Carga masiva de países vía JSON. Soporta:
+
+* **UPSERT**: crea si no existe, actualiza si ya existe (por `codigo`).
+* **CREATE_ONLY**: crea solo si no existe (si existe, lo omite).
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPER_ADMIN`
+
+---
+
+### **Headers obligatorios**
+
+`Content-Type: application/json`
+
+---
+
+### **Body**
+
+```json
+{
+  "mode": "UPSERT",
+  "dryRun": false,
+  "items": [
+    { "codigo": "CO", "nombre": "Colombia", "status": "ACTIVO" },
+    { "codigo": "ES", "nombre": "España" }
+  ]
+}
+```
+
+#### **Campos**
+
+| Campo    | Tipo    | Requerido | Descripción                            |
+| -------- | ------- | --------- | -------------------------------------- |
+| `mode`   | enum    | No        | `UPSERT` (default) | `CREATE_ONLY`     |
+| `dryRun` | boolean | No        | Si `true`, valida y simula sin guardar |
+| `items`  | array   | Sí        | Lista de países (1..500)               |
+
+#### **Item**
+
+| Campo    | Tipo   | Requerido | Descripción                                                 |
+| -------- | ------ | --------- | ----------------------------------------------------------- |
+| `codigo` | string | Sí        | `trim`, min 2, max 10                                       |
+| `nombre` | string | Cond.     | Requerido al crear (UPSERT cuando no existe, y CREATE_ONLY) |
+| `status` | enum   | No        | `ACTIVO \| INACTIVO` (default: `ACTIVO`)                    |
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida el payload con Zod (`items` máximo **500**).
+2. Detecta duplicados dentro del payload por `codigo` (marca error por índice).
+3. Busca países existentes por `codigo`.
+4. Según `mode`:
+
+   * **CREATE_ONLY**: crea los que no existen.
+   * **UPSERT**: crea los que no existen y actualiza `nombre/status` si cambia.
+5. Devuelve resumen + errores por fila.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "mode": "UPSERT",
+    "dryRun": false,
+    "requested": 2,
+    "created": 2,
+    "updated": 0,
+    "skipped": 0,
+    "failed": 0,
+    "errors": []
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                                       |
+| ------ | -------------------------------------------- |
+| `401`  | Token inválido o ausente                     |
+| `403`  | No es `SUPER_ADMIN`                          |
+| `400`  | Body inválido (Zod), ej. items vacío o > 500 |
+
+📌 Errores por item (no aborta todo): se reflejan en `data.errors[]`, por ejemplo:
+
+* Duplicado en payload
+* Violación de unique (`codigo` o `nombre`) a nivel BD (Prisma `P2002`)
+
+---
+
+## 4.1.8 Bulk Upload de Países (CSV/XLSX)
+
+### **POST `/api/v1/paises/bulk/file?mode=UPSERT&dryRun=false`**
+
+Carga masiva de países vía archivo **CSV o XLSX**, enviándolo como **raw body** (binario).
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPER_ADMIN`
+
+---
+
+### **Query params**
+
+| Parámetro | Tipo    | Default  | Descripción             |
+| --------- | ------- | -------- | ----------------------- |
+| `mode`    | enum    | `UPSERT` | `UPSERT \| CREATE_ONLY` |
+| `dryRun`  | boolean | `false`  | Simula sin guardar      |
+
+---
+
+### **Headers**
+
+✅ Obligatorio según el archivo:
+
+* CSV: `Content-Type: text/csv` (o `text/plain`)
+* XLSX: `Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+
+---
+
+### **Formato del archivo**
+
+#### CSV (columnas)
+
+`codigo,nombre,status`
+
+Ejemplo:
+
+```csv
+codigo,nombre,status
+CO,Colombia,ACTIVO
+ES,España,ACTIVO
+```
+
+#### XLSX
+
+* Se lee **la primera hoja**.
+* La primera fila debe ser headers: `codigo | nombre | status`.
+
+📌 Headers son **flexibles**:
+
+* Insensible a mayúsculas/minúsculas.
+* Ignora tildes y espacios (ej: `Código`, `codigo`, `CÓDIGO` funcionan igual).
+
+---
+
+### **Respuesta 200**
+
+Misma estructura que `/bulk` (JSON), con resumen y errores por índice.
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                                     |
+| ------ | ------------------------------------------ |
+| `401`  | Token inválido o ausente                   |
+| `403`  | No es `SUPER_ADMIN`                        |
+| `400`  | Archivo vacío, sin filas, formato inválido |
+| `400`  | Query inválida (`mode`, `dryRun`)          |
+
+---
+
+## 4.2.7 Bulk Upload de Buques (JSON)
+
+### **POST `/api/v1/buques/bulk`**
+
+Carga masiva de buques vía JSON. Soporta UPSERT con **reglas de seguridad** para no alterar historial cuando un buque ya está referenciado en recaladas.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPER_ADMIN`
+
+---
+
+### **Headers obligatorios**
+
+`Content-Type: application/json`
+
+---
+
+### **Body**
+
+```json
+{
+  "mode": "UPSERT",
+  "dryRun": false,
+  "force": false,
+  "items": [
+    {
+      "codigo": "MSC-001",
+      "nombre": "MSC Seaview",
+      "paisId": 5,
+      "capacidad": 5200,
+      "naviera": "MSC Cruises",
+      "status": "ACTIVO"
+    }
+  ]
+}
+```
+
+#### **Campos**
+
+| Campo    | Tipo    | Requerido | Descripción                                            |
+| -------- | ------- | --------- | ------------------------------------------------------ |
+| `mode`   | enum    | No        | `UPSERT` (default) | `CREATE_ONLY`                     |
+| `dryRun` | boolean | No        | Si `true`, valida y simula sin guardar                 |
+| `force`  | boolean | No        | Si `true`, permite cambios sensibles aun con recaladas |
+| `items`  | array   | Sí        | Lista de buques (1..500)                               |
+
+#### **Item**
+
+| Campo       | Tipo   | Requerido | Descripción                                  |
+| ----------- | ------ | --------- | -------------------------------------------- |
+| `codigo`    | string | Sí        | Identificador estable. `trim`, min 2, max 20 |
+| `nombre`    | string | Cond.     | Requerido al crear                           |
+| `paisId`    | number | No        | Debe existir                                 |
+| `capacidad` | number | No        | Positivo, máximo 200000                      |
+| `naviera`   | string | No        | Texto, recomendado min 2                     |
+| `status`    | enum   | No        | `ACTIVO \| INACTIVO`                         |
+
+---
+
+### **Reglas de negocio (UPSERT SAFE)**
+
+✅ UPSERT usa **`codigo` como llave** (create si no existe, update si existe).
+
+**Si el buque ya tiene recaladas asociadas** (`recalada.buqueId`), entonces:
+
+* Por defecto (`force=false`) **NO se permite cambiar**:
+
+  * `nombre`
+  * `paisId`
+
+Esto evita cambios “retroactivos” que alteren la lectura histórica.
+
+✅ Si el admin realmente necesita hacerlo, debe enviar `force=true`.
+
+---
+
+### **Qué hace exactamente**
+
+1. Valida payload con Zod (`items` máximo 500).
+2. Valida duplicados dentro del payload por `codigo`.
+3. Prefetch de buques existentes por `codigo`.
+4. Valida masivamente que `paisId` existan (si vienen).
+5. Obtiene conteo de recaladas por buque para aplicar regla `UPSERT SAFE`.
+6. Ejecuta create/update de forma parcial y reporta errores por item.
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "mode": "UPSERT",
+    "dryRun": false,
+    "force": false,
+    "requested": 1,
+    "created": 1,
+    "updated": 0,
+    "skipped": 0,
+    "failed": 0,
+    "errors": []
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Ejemplo de error por regla UPSERT SAFE**
+
+Si intentas cambiar `nombre` con recaladas y `force=false`:
+
+```json
+{
+  "data": {
+    "mode": "UPSERT",
+    "dryRun": false,
+    "force": false,
+    "requested": 1,
+    "created": 0,
+    "updated": 0,
+    "skipped": 0,
+    "failed": 1,
+    "errors": [
+      {
+        "index": 0,
+        "codigo": "MSC-001",
+        "message": "No se permite cambiar nombre: buque tiene recaladas (use force=true si aplica)",
+        "details": { "recaladas": 12 }
+      }
+    ]
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                                   |
+| ------ | ---------------------------------------- |
+| `401`  | Token inválido o ausente                 |
+| `403`  | No es `SUPER_ADMIN`                      |
+| `400`  | Body inválido (Zod)                      |
+| `200`  | Parcial con fallos (ver `data.errors[]`) |
+
+Errores por item típicos:
+
+* `paisId` no existe
+* Unique violation (`codigo` o `nombre`) en BD (Prisma `P2002`)
+* Duplicado por `codigo` dentro del payload
+
+---
+
 ### 4.2 Buques
 
 | Método | Endpoint                | Descripción                              |
@@ -1261,6 +1608,93 @@ Sin body.
 * Si quieres reactivar, hazlo vía `PATCH /buques/:id` con `status=ACTIVO` (si tu negocio lo permite).
 
 ---
+
+
+## 4.2.8 Bulk Upload de Buques (CSV/XLSX)
+
+### **POST `/api/v1/buques/bulk/file?mode=UPSERT&dryRun=false&force=false`**
+
+Carga masiva de buques vía archivo CSV o XLSX como raw binary.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+`Authorization: Bearer <accessToken>`
+
+**Roles permitidos:** `SUPER_ADMIN`
+
+---
+
+### **Query params**
+
+| Parámetro | Tipo    | Default  | Descripción                                 |
+| --------- | ------- | -------- | ------------------------------------------- |
+| `mode`    | enum    | `UPSERT` | `UPSERT \| CREATE_ONLY`                     |
+| `dryRun`  | boolean | `false`  | Simula sin guardar                          |
+| `force`   | boolean | `false`  | Permite cambios sensibles aun con recaladas |
+
+---
+
+### **Headers**
+
+* CSV: `Content-Type: text/csv` o `text/plain`
+* XLSX: `Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+
+---
+
+### **Formato del archivo**
+
+#### CSV (columnas)
+
+`codigo,nombre,paisId,capacidad,naviera,status`
+
+Ejemplo:
+
+```csv
+codigo,nombre,paisId,capacidad,naviera,status
+MSC-001,MSC Seaview,5,5200,MSC Cruises,ACTIVO
+NCL-002,Norwegian Dawn,2,2400,NCL,ACTIVO
+```
+
+#### XLSX
+
+* Primera hoja.
+* Primera fila: headers.
+
+📌 Headers flexibles (normalización):
+
+* `pais id`, `paisId`, `PAÍS ID` terminan mapeando a `paisId`.
+
+---
+
+### **Respuesta 200**
+
+Misma estructura que `/buques/bulk` (JSON), incluyendo `force` y `errors[]`.
+
+---
+
+### **Errores posibles**
+
+| Código | Motivo                                     |
+| ------ | ------------------------------------------ |
+| `401`  | Token inválido o ausente                   |
+| `403`  | No es `SUPER_ADMIN`                        |
+| `400`  | Archivo inválido, vacío, sin filas         |
+| `400`  | Query inválida (`mode`, `dryRun`, `force`) |
+
+---
+
+## 4.3 Observaciones y buenas prácticas (Bulk)
+
+* ✅ Usa primero `dryRun=true` para validar el archivo y ver errores sin escribir en BD.
+* ✅ Si hay buques ya operados (con recaladas), evita cambiar `nombre` y `paisId` salvo que sea estrictamente necesario, y usa `force=true`.
+* ✅ Para cargas grandes, prefiere **CSV/XLSX**.
+* 🚫 No se soporta PDF como entrada de bulk.
+
+---
+
 
 ## 5. Seguridad y validación
 

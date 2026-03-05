@@ -1,4 +1,4 @@
-import { Router } from "express";
+import express, { Router } from "express";
 import { BuqueController } from "../modules/buques/buque.controller";
 
 import { requireAuth } from "../libs/auth";
@@ -10,6 +10,8 @@ import {
   createBuqueSchema,
   updateBuqueSchema,
   idParamSchema,
+  bulkBuqueRequestSchema,
+  bulkBuqueUploadQuerySchema,
 } from "../modules/buques/buque.schemas";
 
 const router = Router();
@@ -24,24 +26,53 @@ router.get(
   validate({ query: listBuqueQuerySchema }),
   BuqueController.list
 );
+
 router.get(
   "/:id",
   requireSupervisor,
   validate({ params: idParamSchema }),
   BuqueController.get
 );
+
 router.post(
   "/",
   requireSuperAdmin,
   validate({ body: createBuqueSchema }),
   BuqueController.create
 );
+
+// ✅ Bulk JSON
+router.post(
+  "/bulk",
+  requireSuperAdmin,
+  validate({ body: bulkBuqueRequestSchema }),
+  BuqueController.bulk
+);
+
+// ✅ Bulk File (CSV/XLSX) - body raw
+router.post(
+  "/bulk/file",
+  requireSuperAdmin,
+  validate({ query: bulkBuqueUploadQuerySchema }),
+  express.raw({
+    type: [
+      "text/csv",
+      "text/plain",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/octet-stream",
+    ],
+    limit: "5mb",
+  }),
+  BuqueController.bulkFile
+);
+
 router.patch(
   "/:id",
   requireSupervisor,
   validate({ params: idParamSchema, body: updateBuqueSchema }),
   BuqueController.update
 );
+
 router.delete(
   "/:id",
   requireSuperAdmin,
