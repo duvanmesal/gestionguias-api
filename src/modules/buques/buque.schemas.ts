@@ -1,5 +1,5 @@
-import { z } from 'zod'
-import { StatusType } from '@prisma/client'
+import { z } from "zod"
+import { StatusType } from "@prisma/client"
 
 export const idParamSchema = z.object({
   id: z.coerce.number().int().positive(),
@@ -30,3 +30,8 @@ export const updateBuqueSchema = z.object({
   naviera: z.string().trim().min(2).max(80).optional(),
   status: z.nativeEnum(StatusType).optional(),
 })
+
+export type IdParam = z.infer<typeof idParamSchema>
+export type ListBuqueQuery = z.infer<typeof listBuqueQuerySchema>
+export type CreateBuqueBody = z.infer<typeof createBuqueSchema>
+export type UpdateBuqueBody = z.infer<typeof updateBuqueSchema>
