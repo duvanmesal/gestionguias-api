@@ -1,4 +1,4 @@
-import { randomBytes, createHash, createHmac } from "crypto"
+import { randomBytes, createHash, createHmac, randomInt } from "crypto"
 import { env } from "../config/env"
 
 /**
@@ -56,4 +56,23 @@ export function generateEmailVerifyToken(): string {
 export function hashEmailVerifyToken(token: string): string {
   const pepper = env.TOKEN_PEPPER || "default_token_pepper_change_in_production"
   return createHmac("sha256", pepper).update(token).digest("hex")
+}
+
+/**
+ * Generates a 6-digit email verification code (mobile-friendly)
+ * Example: "004219"
+ */
+export function generateEmailVerifyCode(): string {
+  const n = randomInt(0, 1_000_000) // 0..999999
+  return String(n).padStart(6, "0")
+}
+
+/**
+ * Hash email verify code for storage (never store code in plain text)
+ * Uses HMAC-SHA256 with TOKEN_PEPPER + namespace.
+ */
+export function hashEmailVerifyCode(code: string): string {
+  const pepper = env.TOKEN_PEPPER || "default_token_pepper_change_in_production"
+  const raw = `email_verify_code:${code}`
+  return createHmac("sha256", pepper).update(raw).digest("hex")
 }

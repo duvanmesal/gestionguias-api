@@ -155,8 +155,48 @@ export const listUsersQuerySchema = z
   );
 
 export const verifyEmailConfirmSchema = z.object({
-  token: z.string().trim().min(10, "Invalid token"),
-});
+  token: z.string().trim().min(10, "Invalid token").optional(),
+  email: z.string().trim().toLowerCase().email("Invalid email format").optional(),
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, "Code must be 6 digits")
+    .optional(),
+})
+  .superRefine((data, ctx) => {
+    const hasToken = !!data.token;
+    const hasEmail = !!data.email;
+    const hasCode = !!data.code;
+
+    // token path
+    if (hasToken && (hasEmail || hasCode)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide either token OR (email + code)",
+        path: ["token"],
+      });
+      return;
+    }
+
+    // code path
+    if (!hasToken) {
+      if (hasEmail !== hasCode) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Both email and code are required",
+          path: [hasEmail ? "code" : "email"],
+        });
+      }
+
+      if (!hasEmail && !hasCode) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Provide either token OR (email + code)",
+          path: ["token"],
+        });
+      }
+    }
+  });
 
 export type LoginRequest = z.infer<typeof loginSchema>;
 export type RefreshRequest = z.infer<typeof refreshSchema>;

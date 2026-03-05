@@ -23,12 +23,12 @@ enum StatusType {
 
 // NUEVO: estados del Turno como slot materializado
 enum TurnoStatus {
-  AVAILABLE     // slot libre
-  ASSIGNED      // slot asignado a un guía
-  IN_PROGRESS   // (opcional) en curso
-  COMPLETED     // terminado
-  CANCELED      // cancelado
-  NO_SHOW       // (opcional) no se presentó
+  AVAILABLE // slot libre
+  ASSIGNED // slot asignado a un guía
+  IN_PROGRESS // (opcional) en curso
+  COMPLETED // terminado
+  CANCELED // cancelado
+  NO_SHOW // (opcional) no se presentó
 }
 
 enum Platform {
@@ -98,23 +98,23 @@ model Usuario {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  guia          Guia?
-  supervisor    Supervisor?
-  refreshTokens RefreshToken[]
-  passwordResetTokens PasswordResetToken[]
+  guia                    Guia?
+  supervisor              Supervisor?
+  refreshTokens           RefreshToken[]
+  passwordResetTokens     PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]
-  sessions      Session[]
+  sessions                Session[]
 
   sentInvitations    Invitation[] @relation("InviterRelation")
   receivedInvitation Invitation?  @relation("InviteeRelation")
 
   // Auditoría Atenciones
-  atencionesCreadas   Atencion[] @relation("AtencionCreatedBy")
+  atencionesCreadas    Atencion[] @relation("AtencionCreatedBy")
   atencionesCanceladas Atencion[] @relation("AtencionCanceledBy")
 
   // Auditoría Turnos
-  turnosCreados     Turno[] @relation("TurnoCreatedBy")
-  turnosCancelados  Turno[] @relation("TurnoCanceledBy")
+  turnosCreados    Turno[] @relation("TurnoCreatedBy")
+  turnosCancelados Turno[] @relation("TurnoCanceledBy")
 
   @@index([documentType, documentNumber])
   @@index([emailVerifiedAt])
@@ -147,12 +147,12 @@ model Invitation {
 }
 
 model PasswordResetToken {
-  id        String   @id @default(cuid())
+  id String @id @default(cuid())
 
-  userId    String
-  user      Usuario  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  user   Usuario @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  tokenHash String   @unique
+  tokenHash String    @unique
   expiresAt DateTime
   usedAt    DateTime?
 
@@ -165,18 +165,20 @@ model PasswordResetToken {
 }
 
 model EmailVerificationToken {
-  id        String   @id @default(cuid())
+  id String @id @default(cuid())
 
-  userId    String
-  user      Usuario  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  user   Usuario @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  tokenHash String   @unique
+  tokenHash String    @unique
+  codeHash  String?
   expiresAt DateTime
   usedAt    DateTime?
 
   createdAt DateTime @default(now())
 
   @@index([userId])
+  @@index([userId, codeHash])
   @@index([expiresAt])
   @@index([usedAt])
   @@map("email_verification_tokens")
@@ -280,7 +282,7 @@ model Buque {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
-  pais      Pais?     @relation(fields: [paisId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  pais      Pais?      @relation(fields: [paisId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   recaladas Recalada[]
 
   @@index([paisId])
@@ -310,9 +312,9 @@ model Recalada {
   operationalStatus RecaladaOperativeStatus @default(SCHEDULED)
 
   // Datos operativos (UI feliz)
-  terminal           String?
-  muelle             String?
-  pasajerosEstimados Int?
+  terminal            String?
+  muelle              String?
+  pasajerosEstimados  Int?
   tripulacionEstimada Int?
   observaciones       String?
   fuente              RecaladaSource @default(MANUAL)
@@ -338,21 +340,21 @@ model Recalada {
 }
 
 model Atencion {
-  id           Int        @id @default(autoincrement())
+  id           Int    @id @default(autoincrement())
   recaladaId   Int
   supervisorId String
 
   // Cupo materializable: al crear Atencion, se crean Turnos 1..turnosTotal
-  turnosTotal  Int
+  turnosTotal Int
 
-  descripcion  String?
+  descripcion String?
 
   // Ventana operativa (cerrada, siempre)
-  fechaInicio  DateTime
-  fechaFin     DateTime
+  fechaInicio DateTime
+  fechaFin    DateTime
 
   // Estado admin del registro
-  status       StatusType @default(ACTIVO)
+  status StatusType @default(ACTIVO)
 
   // Estado operativo
   operationalStatus AtencionOperativeStatus @default(OPEN)
@@ -369,7 +371,7 @@ model Atencion {
   recalada   Recalada   @relation(fields: [recaladaId], references: [id])
   supervisor Supervisor @relation(fields: [supervisorId], references: [id])
 
-  createdBy  Usuario @relation("AtencionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy  Usuario  @relation("AtencionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   canceledBy Usuario? @relation("AtencionCanceledBy", fields: [canceledById], references: [id], onDelete: SetNull)
 
   turnos Turno[]
@@ -383,16 +385,16 @@ model Atencion {
 }
 
 model Turno {
-  id         Int    @id @default(autoincrement())
+  id         Int @id @default(autoincrement())
   atencionId Int
 
   // Slot asignable a un guía (nullable si está libre)
-  guiaId     String?
+  guiaId String?
 
   // Cupón numerado 1..N
-  numero     Int
+  numero Int
 
-  status     TurnoStatus @default(AVAILABLE)
+  status TurnoStatus @default(AVAILABLE)
 
   // Por defecto heredan de la Atención, pero se dejan opcionales por flexibilidad futura
   fechaInicio DateTime?
@@ -405,8 +407,8 @@ model Turno {
   checkOutAt DateTime?
 
   // Auditoría
-  createdById String
-  canceledAt  DateTime?
+  createdById  String
+  canceledAt   DateTime?
   cancelReason String?
   canceledById String?
 
@@ -416,13 +418,12 @@ model Turno {
   atencion Atencion @relation(fields: [atencionId], references: [id])
   guia     Guia?    @relation(fields: [guiaId], references: [id])
 
-  createdBy  Usuario @relation("TurnoCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy  Usuario  @relation("TurnoCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   canceledBy Usuario? @relation("TurnoCanceledBy", fields: [canceledById], references: [id], onDelete: SetNull)
 
   // Reglas de integridad
   @@unique([atencionId, numero])
   @@unique([atencionId, guiaId])
-
   @@index([atencionId])
   @@index([guiaId])
   @@index([status])

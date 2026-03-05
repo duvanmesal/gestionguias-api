@@ -5,6 +5,7 @@ import type {
   LoginRequest,
   LogoutAllRequest,
   RegisterRequest,
+  VerifyEmailConfirmRequest,
 } from "./auth.schemas";
 
 import type {
@@ -79,9 +80,7 @@ export class AuthService {
   // -------------------------
   // Profile
   // -------------------------
-  register(
-    data: RegisterRequest,
-  ): Promise<{
+  register(data: RegisterRequest): Promise<{
     user: {
       id: string;
       email: string;
@@ -130,9 +129,9 @@ export class AuthService {
 
   verifyEmailConfirm(
     req: Request,
-    token: string,
+    input: VerifyEmailConfirmRequest,
   ): Promise<{ message: string }> {
-    return verifyEmailConfirmUsecase(req, token);
+    return verifyEmailConfirmUsecase(req, input);
   }
 }
 
