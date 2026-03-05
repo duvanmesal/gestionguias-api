@@ -1,5 +1,5 @@
-import { z } from 'zod'
-import { StatusType } from '@prisma/client'
+import { z } from "zod"
+import { StatusType } from "@prisma/client"
 
 export const idParamSchema = z.object({
   id: z.coerce.number().int().positive(),
@@ -24,3 +24,8 @@ export const updatePaisSchema = z.object({
   nombre: z.string().trim().min(2).optional(),
   status: z.nativeEnum(StatusType).optional(),
 })
+
+export type IdParam = z.infer<typeof idParamSchema>
+export type ListPaisQuery = z.infer<typeof listPaisQuerySchema>
+export type CreatePaisBody = z.infer<typeof createPaisSchema>
+export type UpdatePaisBody = z.infer<typeof updatePaisSchema>
