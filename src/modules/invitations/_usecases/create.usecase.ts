@@ -214,7 +214,11 @@ export async function createInvitationUsecase(
       // noop
     }
 
-    throw new Error("Failed to send invitation email");
+    throw new Error(
+  error instanceof Error
+    ? `Failed to send invitation email: ${error.message}`
+    : "Failed to send invitation email",
+);
   }
 
   return {

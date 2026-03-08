@@ -326,10 +326,16 @@ No compartas este correo. Si no solicitaste acceso, ignóralo.
     );
   } catch (error) {
     logger.error(
-      { error, email: data.email },
+      {
+        email: data.email,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        errorStack: error instanceof Error ? error.stack : undefined,
+      },
       "Failed to send invitation email",
     );
-    throw new Error("Failed to send invitation email");
+
+    throw error;
   }
 }
 

@@ -1443,19 +1443,24 @@ Permite **restablecer la contraseña** usando un **token de recuperación** prev
 
 ---
 
-## **1.12 Verificación y activación de cuenta (Verify Email)**
+# **1.12 Verificación y activación de cuenta (Verify Email) — multi-plataforma (implementado)**
 
-Este módulo implementa un flujo común de **verificación de correo** para activar cuentas y confirmar propiedad del email, sin filtrar información sensible (anti-enumeración).
+Este módulo implementa un flujo de **verificación de correo** para activar cuentas y confirmar propiedad del email, **sin filtrar información sensible** (anti-enumeración).
 
-Este mecanismo **ya se encuentra implementado** en el repositorio para el endpoint de solicitud (`request`). El endpoint de confirmación (`confirm`) queda planificado como siguiente paso.
+📌 **Comportamiento por plataforma (header `X-Client-Platform`):**
+
+* **WEB:** se envía **solo link con token**.
+* **MOBILE:** se envía **código de 6 dígitos** + debajo **link con token** como alternativa (fallback web).
+
+Esto mejora UX en mobile (sin salir de la app) y mantiene el flujo estándar web.
 
 ---
 
-### **1.12.1 Solicitud de verificación**
+## **1.12.1 Solicitud de verificación**
 
-#### POST `/auth/verify-email/request`
+### **POST `/auth/verify-email/request`**
 
-Permite solicitar un enlace de verificación enviando únicamente el correo electrónico.
+Permite solicitar un mensaje de verificación enviando únicamente el correo electrónico.
 
 * **Auth requerida:** ❌ No
 * **Headers obligatorios:**
@@ -1477,29 +1482,25 @@ Permite solicitar un enlace de verificación enviando únicamente el correo elec
 
   * **no existe**, o
   * pertenece a un usuario **inactivo (`activo=false`)**
-
-  → **no se genera token ni se envía correo** (pero la respuesta sigue siendo genérica).
+    → **no se genera token ni se envía correo** (pero la respuesta sigue siendo genérica).
 * Si el usuario existe y está activo:
 
   * Si **ya está verificado** (`emailVerifiedAt != null`) → **no-op** (misma respuesta genérica).
   * Si **no está verificado**:
 
-    * Se genera un **token de verificación de un solo uso**.
-    * Se guarda **únicamente el hash del token** en base de datos (nunca el token plano).
-    * Se invalidan tokens previos de verificación activos no usados (`usedAt = now`).
-    * Se envía un correo con enlace de verificación:
+    * Se genera un **token** de verificación (1 uso) y se guarda **solo el hash**.
+    * Si `X-Client-Platform=MOBILE`:
 
-      `APP_VERIFY_EMAIL_URL?token=xxxxx`
-* El token:
+      * Se genera además un **código de 6 dígitos** (OTP) y se guarda **solo su hash** (`codeHash`).
+      * El email incluye **código + link**.
+    * Si `X-Client-Platform=WEB`:
 
-  * Tiene un **TTL configurable** (`EMAIL_VERIFY_TTL_MINUTES`, default 60).
-  * Puede usarse **una sola vez** (se marca `usedAt` al confirmarse).
-
-Este diseño evita **enumeración de usuarios** y ataques por inferencia.
+      * El email incluye **solo link**.
+    * Se **invalidan tokens previos** activos del usuario (`usedAt = now`) para higiene.
 
 ---
 
-### **Respuesta 200**
+### **Respuesta 200 (genérica)**
 
 ```json
 {
@@ -1511,13 +1512,22 @@ Este diseño evita **enumeración de usuarios** y ataques por inferencia.
 }
 ```
 
-> ⚠️ La respuesta es **intencionalmente genérica** por motivos de seguridad.
+---
+
+### **Notas de implementación**
+
+* Link apunta al frontend:
+
+  * `APP_VERIFY_EMAIL_URL?token=xxxxx`
+* TTL configurable:
+
+  * `EMAIL_VERIFY_TTL_MINUTES` (aplica tanto a token como a código)
 
 ---
 
-### **Modelo de datos asociado (Prisma)**
+## 🗃️ Modelo de datos asociado (Prisma)
 
-#### Usuario (nuevo campo)
+### Usuario
 
 ```prisma
 model Usuario {
@@ -1527,7 +1537,7 @@ model Usuario {
 }
 ```
 
-#### Token de verificación (nuevo modelo)
+### Token de verificación (con soporte para código mobile)
 
 ```prisma
 model EmailVerificationToken {
@@ -1537,91 +1547,93 @@ model EmailVerificationToken {
   user      Usuario  @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   tokenHash String   @unique
+  codeHash  String?
   expiresAt DateTime
   usedAt    DateTime?
 
   createdAt DateTime @default(now())
 
   @@index([userId])
+  @@index([userId, codeHash])
   @@index([expiresAt])
   @@index([usedAt])
   @@map("email_verification_tokens")
 }
 ```
 
----
+📌 **Seguridad:**
 
-### **Consideraciones de seguridad**
-
-* Nunca se almacena el token en texto plano, solo `tokenHash`.
-* El hash del token se realiza con **HMAC + pepper (`TOKEN_PEPPER`)**.
-* Respuesta “ciega” (no revela si el email existe).
-* Rate limiting recomendado en `verify-email/request` si se considera endpoint sensible.
-* El enlace apunta al frontend:
-
-  * `APP_VERIFY_EMAIL_URL=http://localhost:3001/verify-email`
-  * `EMAIL_VERIFY_TTL_MINUTES=60`
-
----
-
-### **Flujo resumido (request)**
-
-1. Cliente envía email a `/auth/verify-email/request`.
-2. Backend valida formato del email.
-3. Si el usuario existe, está activo y no está verificado:
-
-   * genera token
-   * guarda hash en DB
-   * invalida tokens previos
-   * envía correo con enlace
-4. Backend responde **200 OK** siempre.
-5. El frontend recibe el token desde el link para llamar luego a `POST /auth/verify-email/confirm`.
+* No se guarda `token` ni `code` en texto plano.
+* `tokenHash`: HMAC + `TOKEN_PEPPER`
+* `codeHash`: HMAC + `TOKEN_PEPPER` usando namespace `email_verify_code:` (ej. `email_verify_code:123456`)
 
 ---
 
 ## **1.12.2 Confirmación de verificación (implementado)**
 
-#### POST `/auth/verify-email/confirm`
+### **POST `/auth/verify-email/confirm`**
 
-Confirma la propiedad del correo electrónico consumiendo un **token de verificación** previamente generado por `POST /auth/verify-email/request`.
-Este endpoint completa el flujo marcando el usuario como verificado y evitando reuso del token.
+Confirma la propiedad del correo electrónico consumiendo un token o código previamente generado.
 
 * **Auth requerida:** ❌ No
-
 * **Headers obligatorios:**
   `X-Client-Platform: WEB | MOBILE`
 
-* **Body:**
+---
+
+### **Modos soportados (2 formas)**
+
+#### A) Confirmación por Token (WEB o fallback desde MOBILE)
+
+**Body:**
 
 ```json
 {
-  "token": "verif_...token_plano..."
+  "token": "token_plano_del_link"
 }
 ```
+
+#### B) Confirmación por Código (MOBILE)
+
+**Body:**
+
+```json
+{
+  "email": "user@example.com",
+  "code": "123456"
+}
+```
+
+📌 Reglas del body:
+
+* Debe enviarse **solo una forma**:
+
+  * `token` **o**
+  * `(email + code)`
+* `code` debe ser exactamente **6 dígitos**.
 
 ---
 
 ### **Reglas de negocio**
 
-* El token debe cumplir:
+Para ambos métodos, se valida:
 
-  * existir en BD (por `tokenHash`)
+* El token/código debe:
+
+  * existir en BD (por `tokenHash` o por `user.email + codeHash`)
   * **no estar usado** (`usedAt = null`)
   * **no estar expirado** (`expiresAt > now`)
 * El usuario asociado debe:
 
   * existir
   * estar **activo** (`activo = true`)
-* Si el usuario ya estaba verificado (`emailVerifiedAt != null`):
 
-  * el endpoint es **idempotente**: se marca el token como usado (si aplica) y responde OK
-  * (en cualquier caso **no filtra información sensible**)
-* Al confirmar:
+Al confirmar exitosamente:
 
-  * se actualiza `usuario.emailVerifiedAt = now`
-  * se marca el token como **usado** (`usedAt = now`)
-  * se invalidan otros tokens activos del mismo usuario (`usedAt = now`) para higiene
-* Todo ocurre de forma **atómica** (transacción) para evitar condiciones de carrera.
+* Se actualiza: `usuario.emailVerifiedAt = now`
+* Se marca el registro de verificación como usado: `usedAt = now`
+* Se invalidan otros tokens activos del mismo usuario (`usedAt = now`) para higiene
+* Todo ocurre de forma **atómica** (transacción) para evitar doble consumo (double submit).
 
 ---
 
@@ -1641,29 +1653,62 @@ Este endpoint completa el flujo marcando el usuario como verificado y evitando r
 
 ### **Errores posibles**
 
-* `400` → token inválido/expirado/usado, o usuario inactivo (se responde de forma genérica: `Invalid or expired token`).
-* `422` → validación fallida (body sin token, token demasiado corto, etc).
+|  Código | Motivo                                                                       |
+| ------: | ---------------------------------------------------------------------------- |
+|     400 | Token inválido/expirado/usado → `"Invalid or expired token"`                 |
+|     400 | Código inválido/expirado/usado → `"Invalid or expired code"`                 |
+|     400 | Usuario inactivo (se responde igual que inválido para no filtrar)            |
+| 422/400 | Body inválido (por Zod): no envía forma válida o mezcla token con email+code |
 
 ---
 
-### **Consideraciones de seguridad**
+## 🧪 Cómo probar (Postman)
 
-* El token **no se almacena en texto plano**, solo `tokenHash` usando HMAC + `TOKEN_PEPPER`.
-* El endpoint no revela si un correo existe.
-* Recomendado aplicar `sensitiveLimiter` para mitigar abuso.
-* El frontend recibe el token desde el link:
+### Caso 1: WEB (solo link)
 
-  * `APP_VERIFY_EMAIL_URL?token=xxxxx`
+1. `POST /auth/verify-email/request`
+
+* Header: `X-Client-Platform: WEB`
+* Body: `{ "email": "..." }`
+
+2. Revisar email:
+
+* Debe incluir **solo link**, sin código.
+
+3. `POST /auth/verify-email/confirm`
+
+* Header: `X-Client-Platform: WEB`
+* Body: `{ "token": "..." }`
+
+### Caso 2: MOBILE (código + link)
+
+1. `POST /auth/verify-email/request`
+
+* Header: `X-Client-Platform: MOBILE`
+
+2. Revisar email:
+
+* Debe incluir **código 6 dígitos** + link fallback.
+
+3. `POST /auth/verify-email/confirm`
+
+* Header: `X-Client-Platform: MOBILE`
+* Body: `{ "email": "...", "code": "123456" }`
+
+### Caso 3: Expiración / inválido
+
+* Token/código inválido o expirado → `400` con mensaje genérico correspondiente.
 
 ---
 
-### **Flujo resumido (confirm)**
+## 🧾 Observabilidad (logs/audit)
 
-1. Cliente obtiene token desde el enlace del correo.
-2. Cliente llama `POST /auth/verify-email/confirm` con el token.
-3. Backend valida token (existencia/uso/expiración) y usuario activo.
-4. Backend marca `emailVerifiedAt` y consume token.
-5. Responde `200 OK`.
+Se registran eventos de auditoría para trazabilidad:
+
+* `auth.verify_email.requested`
+* `auth.verify_email.sent` (incluye `platform` y `mode: code+link | link`)
+* `auth.verify_email.confirmed` (`method: token | code`)
+* `auth.verify_email.already_verified`
 
 ---
 
@@ -2249,22 +2294,6 @@ En UI de asignación de turnos (panel Supervisor):
 
 ---
 
-# 🔁 Ajuste recomendado en documentación existente
-
-En tu doc actual ya tienes:
-
-* `GET /users` y `GET /users/search` (SUPER_ADMIN)
-* `GET /users/me`, `PATCH /users/me`, `PATCH /users/me/profile`
-
-✅ Ahora agrega una sección “Lookup operativo” (esta 1.17), y en tu módulo Turnos, cuando menciones “seleccionar guía”, referencia `GET /users/guides`.
-
----
-
-## Checklist Definition of Done (añadir a tu 1.16)
-
-
-
----
 
 # **1.16 Definition of Done (actualizado)**
 
@@ -2298,3 +2327,7 @@ En tu doc actual ya tienes:
   * 403 con guía
   * búsqueda con `search`
   * filtro `activo`
+
+* **Verify Email multi-plataforma implementado (WEB link-only, MOBILE code+link fallback).** *05/03/2026*
+* **Verify Email Confirm soporta 2 métodos: token OR (email+code 6 dígitos) con apply atómico.** *05/03/2026*
+* **Migración aplicada: `EmailVerificationToken.codeHash?` + índice `@@index([userId, codeHash])`.** *05/03/2026*
