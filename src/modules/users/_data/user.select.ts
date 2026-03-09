@@ -16,6 +16,7 @@ export const userMeSelect = {
   profileStatus: true,
   profileCompletedAt: true,
   documentType: true,
+  documentNumber: true,
   createdAt: true,
   updatedAt: true,
   guia: {
@@ -31,7 +32,7 @@ export const userMeSelect = {
       telefono: true,
     },
   },
-} satisfies Prisma.UsuarioSelect
+} satisfies Prisma.UsuarioSelect;
 
 export const userDetailSelect = {
   id: true,
