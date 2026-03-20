@@ -28,6 +28,8 @@ export async function createInvitationUsecase(
   inviterId: string,
 ): Promise<CreateInvitationResult> {
   const email = normalizeEmail(emailRaw);
+  const isProduction = process.env.NODE_ENV === "production";
+
   logger.info({ email, role, inviterId }, "[Invite] start createInvitation");
 
   const existingUser = await invitationRepository.findUserByEmail(email);
@@ -53,9 +55,8 @@ export async function createInvitationUsecase(
     throw new ConflictError("User with this email already exists");
   }
 
-  const activeInvitation = await invitationRepository.findActivePendingInvitation(
-    email,
-  );
+  const activeInvitation =
+    await invitationRepository.findActivePendingInvitation(email);
 
   if (activeInvitation) {
     auditFail(
@@ -76,7 +77,9 @@ export async function createInvitationUsecase(
       "[Invite] active invitation already exists",
     );
 
-    throw new ConflictError("An active invitation already exists for this email");
+    throw new ConflictError(
+      "An active invitation already exists for this email",
+    );
   }
 
   const tempPassword = generateTempPassword();
@@ -85,7 +88,6 @@ export async function createInvitationUsecase(
   const tokenHash = hashToken(token);
   const expiresAt = buildExpiresAt();
 
-  // DB writes (user + role profile + invitation)
   const user = await invitationRepository.upsertUserForInvitation({
     email,
     role,
@@ -100,9 +102,8 @@ export async function createInvitationUsecase(
     await invitationRepository.upsertSupervisorForUser(user.id);
   }
 
-  const lastInvitation = await invitationRepository.findLastInvitationIdByEmail(
-    email,
-  );
+  const lastInvitation =
+    await invitationRepository.findLastInvitationIdByEmail(email);
 
   const action: CreateInvitationAction = lastInvitation ? "RESENT" : "CREATED";
 
@@ -157,14 +158,15 @@ export async function createInvitationUsecase(
     { entity: "Invitation", id: invitation.id },
   );
 
-  // Send email (side effect)
   try {
     const inviter = await invitationRepository.findUserNameById(inviterId);
 
     await sendInvitationEmail({
       email,
       tempPassword,
-      inviterName: inviter ? `${inviter.nombres} ${inviter.apellidos}` : undefined,
+      inviterName: inviter
+        ? `${inviter.nombres} ${inviter.apellidos}`
+        : undefined,
       expiresInHours: INVITE_TTL_HOURS,
     });
 
@@ -186,14 +188,17 @@ export async function createInvitationUsecase(
       "[Invite] email sent",
     );
   } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown email error";
+
     logger.error(
       {
         invitationId: invitation.id,
         email,
         userId: user.id,
-        err: (error as Error)?.message,
+        err: message,
       },
-      "[Invite] email failed; marking invitation as EXPIRED",
+      "[Invite] email failed",
     );
 
     auditFail(
@@ -203,22 +208,29 @@ export async function createInvitationUsecase(
       {
         invitationId: invitation.id,
         email,
-        error: (error as Error)?.message,
+        error: message,
+        mode: isProduction ? "strict" : "development_fallback",
       },
       { entity: "Invitation", id: invitation.id },
     );
 
-    try {
-      await invitationRepository.updateStatus(invitation.id, "EXPIRED");
-    } catch {
-      // noop
+    if (isProduction) {
+      try {
+        await invitationRepository.updateStatus(invitation.id, "EXPIRED");
+      } catch {
+        // noop
+      }
+
+      throw new Error(`Failed to send invitation email: ${message}`);
     }
 
-    throw new Error(
-  error instanceof Error
-    ? `Failed to send invitation email: ${error.message}`
-    : "Failed to send invitation email",
-);
+    logger.warn(
+      {
+        invitationId: invitation.id,
+        email,
+      },
+      "[Invite] development fallback enabled: invitation kept as PENDING and temp password will be returned",
+    );
   }
 
   return {
