@@ -14,13 +14,18 @@ import {
   verifyEmailRequestSchema,
   verifyEmailConfirmSchema,
 } from "../modules/auth/auth.schemas"
-import { sensitiveLimiter } from "../middlewares/rate-limit"
+import {
+  sensitiveLimiter,
+  loginLimiter,
+  refreshLimiter,
+  logoutAllLimiter,
+} from "../middlewares/rate-limit"
 
 const router = Router()
 
 router.post(
   "/login",
-  sensitiveLimiter,
+  loginLimiter,
   detectClientPlatform,
   validate({ body: loginSchema }),
   authController.login.bind(authController),
@@ -28,6 +33,7 @@ router.post(
 
 router.post(
   "/refresh",
+  refreshLimiter,
   detectClientPlatform,
   conditionalValidate({
     WEB: undefined,
@@ -92,6 +98,7 @@ router.post(
 
 router.post(
   "/logout-all",
+  logoutAllLimiter,
   detectClientPlatform,
   requireAuth,
   authController.logoutAll.bind(authController),

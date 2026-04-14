@@ -70,8 +70,9 @@ export class TurnoService {
     turnoId: number,
     reason: string | undefined,
     actorUserId: string,
+    actorRol: RolType,
   ) {
-    return unassignTurnoUsecase(req, turnoId, reason, actorUserId);
+    return unassignTurnoUsecase(req, turnoId, reason, actorUserId, actorRol);
   }
 
   static cancel(

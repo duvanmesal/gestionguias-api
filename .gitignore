@@ -61,3 +61,5 @@ Thumbs.db
 prisma/migrations/
 gestionguias-api.zip
 docs-api.zip
+
+AGENTS.md

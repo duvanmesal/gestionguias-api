@@ -1,7 +1,8 @@
 import type { Request } from "express"
+import type { RolType } from "@prisma/client"
 
 import { logger } from "../../../libs/logger"
-import { ConflictError, NotFoundError } from "../../../libs/errors"
+import { ConflictError, ForbiddenError, NotFoundError } from "../../../libs/errors"
 
 import { turnoRepository } from "../_data/turno.repository"
 import { auditFail, auditOk } from "../_shared/turno.audit"
@@ -11,6 +12,7 @@ export async function unassignTurnoUsecase(
   turnoId: number,
   reason: string | undefined,
   actorUserId: string,
+  actorRol: RolType,
 ) {
   const current = await turnoRepository.findForUnassign(turnoId)
 
@@ -23,6 +25,21 @@ export async function unassignTurnoUsecase(
       { entity: "Turno", id: String(turnoId) },
     )
     throw new NotFoundError("Turno no encontrado")
+  }
+
+  // Si el actor es GUIA, solo puede liberar su propio turno
+  if (actorRol === "GUIA") {
+    const actorGuiaId = await turnoRepository.getActorGuiaIdOrThrow(actorUserId)
+    if (current.guiaId !== actorGuiaId) {
+      auditFail(
+        req,
+        "turnos.unassign.failed",
+        "Unassign turno failed",
+        { reason: "not_owner", turnoId, actorGuiaId, ownerGuiaId: current.guiaId },
+        { entity: "Turno", id: String(turnoId) },
+      )
+      throw new ForbiddenError("Solo puedes liberar tus propios turnos")
+    }
   }
 
   if (current.status === "IN_PROGRESS" || current.status === "COMPLETED") {

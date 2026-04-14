@@ -103,12 +103,13 @@ router.patch(
 
 /**
  * PATCH /turnos/:id/unassign
- * Desasigna un turno (modo supervisor)
- * Auth: SUPERVISOR / SUPER_ADMIN
+ * Libera un turno asignado.
+ * - SUPERVISOR / SUPER_ADMIN: cualquier turno en estado ASSIGNED
+ * - GUIA: solo su propio turno y solo si está en ASSIGNED (antes del check-in)
  */
 router.patch(
   "/:id/unassign",
-  requireSupervisor,
+  requireGuia,
   validate({ params: unassignTurnoParamsSchema, body: unassignTurnoBodySchema }),
   TurnoController.unassign,
 );

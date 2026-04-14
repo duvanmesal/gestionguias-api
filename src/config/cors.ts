@@ -11,9 +11,13 @@ export function buildCorsOptions(): CorsOptionsDelegate {
     String(process.env.CORS_ALLOW_CREDENTIALS ?? "").toLowerCase() === "true";
 
   // ❗️OJO: NO usar genéricos aquí. Deja el delegate "plano".
+  if (allowedOrigins.length === 0) {
+    throw new Error("CORS_ALLOWED_ORIGINS must be configured");
+  }
+
   const delegate: CorsOptionsDelegate = (req, cb) => {
     const origin = (req.headers?.origin as string | undefined) ?? undefined;
-    const isAllowed = !origin || allowedOrigins.includes(origin);
+    const isAllowed = !!origin && allowedOrigins.includes(origin);
 
     const options: CorsOptions = {
       origin: isAllowed ? origin : false,

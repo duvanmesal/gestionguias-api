@@ -92,7 +92,7 @@ async function main() {
   await fixShipsPaisIdIfNull()
 
   if (NODE_ENV === "development") {
-    // ✅ NOW dinámico (instante real actual)
+    // NOW dinámico (instante real actual)
     const NOW = new Date()
 
     await upsertDevWorkflows({
@@ -274,42 +274,42 @@ async function upsertSeedUsers(input: { nowBogota: Date }) {
   const users: SeedUser[] = [
     {
       email: env.SEED_SUPERVISOR_1_EMAIL ?? "supervisor1@test.com",
-      password: env.SEED_SUPERVISOR_1_PASS ?? "Test123!",
+      password: env.SEED_SUPERVISOR_1_PASS ?? "Test1234567890!",
       nombres: "María",
       apellidos: "González",
       rol: RolType.SUPERVISOR,
     },
     {
       email: env.SEED_SUPERVISOR_2_EMAIL ?? "supervisor2@test.com",
-      password: env.SEED_SUPERVISOR_2_PASS ?? "Test123!",
+      password: env.SEED_SUPERVISOR_2_PASS ?? "Test1234567890!",
       nombres: "Julián",
       apellidos: "Pérez",
       rol: RolType.SUPERVISOR,
     },
     {
       email: env.SEED_GUIA_1_EMAIL ?? "guia1@test.com",
-      password: env.SEED_GUIA_1_PASS ?? "Test123!",
+      password: env.SEED_GUIA_1_PASS ?? "Test1234567890!",
       nombres: "Carlos",
       apellidos: "Rodríguez",
       rol: RolType.GUIA,
     },
     {
       email: env.SEED_GUIA_2_EMAIL ?? "guia2@test.com",
-      password: env.SEED_GUIA_2_PASS ?? "Test123!",
+      password: env.SEED_GUIA_2_PASS ?? "Test1234567890!",
       nombres: "Ana",
       apellidos: "Martínez",
       rol: RolType.GUIA,
     },
     {
       email: env.SEED_GUIA_3_EMAIL ?? "guia3@test.com",
-      password: env.SEED_GUIA_3_PASS ?? "Test123!",
+      password: env.SEED_GUIA_3_PASS ?? "Test1234567890!",
       nombres: "Sofía",
       apellidos: "López",
       rol: RolType.GUIA,
     },
     {
       email: env.SEED_GUIA_4_EMAIL ?? "guia4@test.com",
-      password: env.SEED_GUIA_4_PASS ?? "Test123!",
+      password: env.SEED_GUIA_4_PASS ?? "Test1234567890!",
       nombres: "Mateo",
       apellidos: "García",
       rol: RolType.GUIA,

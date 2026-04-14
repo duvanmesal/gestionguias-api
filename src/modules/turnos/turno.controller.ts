@@ -246,6 +246,7 @@ export class TurnoController {
         params.id,
         body?.reason,
         req.user.userId,
+        req.user.rol,
       );
 
       logsService.audit(req, {

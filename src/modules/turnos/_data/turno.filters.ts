@@ -37,22 +37,61 @@ export function resolveDateRange(query: Pick<ListTurnosQuery, "dateFrom" | "date
   return { dateFrom, dateTo }
 }
 
-/**
- * Construye el AND necesario para obtener turnos cuya ventana se cruce con [dateFrom..dateTo].
- * Mantiene el mismo comportamiento del service original.
- */
-export function buildDateOverlapAnd(dateFrom?: Date, dateTo?: Date): Prisma.TurnoWhereInput[] {
-  const and: Prisma.TurnoWhereInput[] = []
+type TurnoDateField = NonNullable<ListTurnosQuery["dateField"]>
 
-  if (dateFrom || dateTo) {
+/**
+ * Construye el AND para filtrar turnos por fecha.
+ * - "overlap" (default): turnos cuya ventana [fechaInicio..fechaFin] se cruce con [dateFrom..dateTo]
+ * - "createdAt" | "checkInAt" | "checkOutAt" | "canceledAt": rango sobre la columna indicada
+ */
+export function buildDateAnd(
+  dateFrom?: Date,
+  dateTo?: Date,
+  dateField: TurnoDateField = "overlap",
+): Prisma.TurnoWhereInput[] {
+  const and: Prisma.TurnoWhereInput[] = []
+  if (!dateFrom && !dateTo) return and
+
+  if (dateField === "overlap") {
     and.push({ fechaInicio: { not: null } })
     and.push({ fechaFin: { not: null } })
-
     if (dateFrom) and.push({ fechaFin: { gte: dateFrom } })
     if (dateTo) and.push({ fechaInicio: { lte: dateTo } })
+    return and
   }
 
+  if (dateField === "createdAt") {
+    const range: Prisma.DateTimeFilter = {}
+    if (dateFrom) range.gte = dateFrom
+    if (dateTo) range.lte = dateTo
+    and.push({ createdAt: range })
+    return and
+  }
+
+  const range: Prisma.DateTimeNullableFilter = { not: null }
+  if (dateFrom) range.gte = dateFrom
+  if (dateTo) range.lte = dateTo
+
+  if (dateField === "checkInAt") and.push({ checkInAt: range })
+  else if (dateField === "checkOutAt") and.push({ checkOutAt: range })
+  else if (dateField === "canceledAt") and.push({ canceledAt: range })
+
   return and
+}
+
+/** @deprecated keep for any external import compatibility */
+export function buildDateOverlapAnd(dateFrom?: Date, dateTo?: Date): Prisma.TurnoWhereInput[] {
+  return buildDateAnd(dateFrom, dateTo, "overlap")
+}
+
+function buildAtencionRelationFilter(query: {
+  recaladaId?: number
+  buqueId?: number
+}): Prisma.AtencionWhereInput | undefined {
+  const inner: Prisma.AtencionWhereInput = {}
+  if (query.recaladaId) inner.recaladaId = query.recaladaId
+  if (query.buqueId) inner.recalada = { buqueId: query.buqueId }
+  return Object.keys(inner).length > 0 ? inner : undefined
 }
 
 export function buildListTurnosWhere(args: {
@@ -62,6 +101,7 @@ export function buildListTurnosWhere(args: {
 }): Prisma.TurnoWhereInput {
   const { query, dateFrom, dateTo } = args
 
+  const atencion = buildAtencionRelationFilter(query)
   const base: Prisma.TurnoWhereInput = {
     ...(query.atencionId ? { atencionId: query.atencionId } : {}),
     ...(query.status ? { status: query.status } : {}),
@@ -71,10 +111,10 @@ export function buildListTurnosWhere(args: {
         ? { guiaId: { not: null } }
         : { guiaId: null }
       : {}),
-    ...(query.recaladaId ? { atencion: { recaladaId: query.recaladaId } } : {}),
+    ...(atencion ? { atencion } : {}),
   }
 
-  const and = buildDateOverlapAnd(dateFrom, dateTo)
+  const and = buildDateAnd(dateFrom, dateTo, query.dateField ?? "overlap")
   return and.length > 0 ? { ...base, AND: and } : base
 }
 
@@ -86,13 +126,14 @@ export function buildListTurnosMeWhere(args: {
 }): Prisma.TurnoWhereInput {
   const { actorGuiaId, query, dateFrom, dateTo } = args
 
+  const atencion = buildAtencionRelationFilter(query)
   const base: Prisma.TurnoWhereInput = {
     guiaId: actorGuiaId,
     ...(query.atencionId ? { atencionId: query.atencionId } : {}),
     ...(query.status ? { status: query.status } : {}),
-    ...(query.recaladaId ? { atencion: { recaladaId: query.recaladaId } } : {}),
+    ...(atencion ? { atencion } : {}),
   }
 
-  const and = buildDateOverlapAnd(dateFrom, dateTo)
+  const and = buildDateAnd(dateFrom, dateTo, query.dateField ?? "overlap")
   return and.length > 0 ? { ...base, AND: and } : base
 }

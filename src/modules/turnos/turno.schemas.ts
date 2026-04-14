@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { TurnoStatus } from "@prisma/client";
 
+export const turnoDateFieldSchema = z
+  .enum(["overlap", "createdAt", "checkInAt", "checkOutAt", "canceledAt"])
+  .default("overlap");
+
 /**
  * GET /turnos
  * Query:
@@ -14,9 +18,11 @@ export const listTurnosQuerySchema = z
   .object({
     dateFrom: z.coerce.date().optional(),
     dateTo: z.coerce.date().optional(),
+    dateField: turnoDateFieldSchema,
 
     atencionId: z.coerce.number().int().positive().optional(),
     recaladaId: z.coerce.number().int().positive().optional(),
+    buqueId: z.coerce.number().int().positive().optional(),
 
     status: z.nativeEnum(TurnoStatus).optional(),
 
@@ -47,9 +53,11 @@ export const listTurnosMeQuerySchema = z
   .object({
     dateFrom: z.coerce.date().optional(),
     dateTo: z.coerce.date().optional(),
+    dateField: turnoDateFieldSchema,
 
     atencionId: z.coerce.number().int().positive().optional(),
     recaladaId: z.coerce.number().int().positive().optional(),
+    buqueId: z.coerce.number().int().positive().optional(),
 
     status: z.nativeEnum(TurnoStatus).optional(),
 

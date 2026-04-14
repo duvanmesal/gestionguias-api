@@ -27,6 +27,7 @@ export function buildAtencionesWhere(query: ListAtencionesQuery): Prisma.Atencio
   const AND: Prisma.AtencionWhereInput[] = []
 
   if (query.recaladaId) AND.push({ recaladaId: query.recaladaId })
+  if (query.buqueId) AND.push({ recalada: { buqueId: query.buqueId } })
   if (query.supervisorId) AND.push({ supervisorId: query.supervisorId })
   if (query.status) AND.push({ status: query.status })
   if (query.operationalStatus) AND.push({ operationalStatus: query.operationalStatus })

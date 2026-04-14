@@ -9,17 +9,17 @@ const Env = z.object({
   PORT: z.coerce.number().default(3000),
   DATABASE_URL: z.string().url(),
 
-  JWT_ACCESS_SECRET: z.string().min(16),
-  JWT_REFRESH_SECRET: z.string().min(16),
+  JWT_ACCESS_SECRET: z.string().min(32),
+  JWT_REFRESH_SECRET: z.string().min(32),
   JWT_ACCESS_TTL: z.string().default("15m"),
   JWT_REFRESH_TTL: z.string().default("7d"),
 
   LOG_LEVEL: z.string().default("info"),
 
-  REFRESH_TOKEN_PEPPER: z.string().min(16),
+  REFRESH_TOKEN_PEPPER: z.string().min(32),
 
-  SEED_SUPERADMIN_EMAIL: z.string().email().default("duvanmesa2415@gmail.com"),
-  SEED_SUPERADMIN_PASS: z.string().min(8).default("dev!123456"),
+  SEED_SUPERADMIN_EMAIL: z.string().email(),
+  SEED_SUPERADMIN_PASS: z.string().min(12),
 
   // Email
   SMTP_HOST: z.string().default("smtp-relay.brevo.com"),

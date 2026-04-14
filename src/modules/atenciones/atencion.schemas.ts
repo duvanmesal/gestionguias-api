@@ -25,6 +25,7 @@ export const listAtencionesQuerySchema = z
     to: z.coerce.date().optional(),
 
     recaladaId: z.coerce.number().int().positive().optional(),
+    buqueId: z.coerce.number().int().positive().optional(),
     supervisorId: z.string().trim().min(1).max(60).optional(),
 
     status: z.nativeEnum(StatusType).optional(),

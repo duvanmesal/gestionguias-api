@@ -20,6 +20,13 @@ import type {
 
 const REFRESH_COOKIE_PATH = (process.env.API_PREFIX || "") + "/auth/refresh";
 
+const REFRESH_COOKIE_BASE = {
+  httpOnly: true,
+  secure: true,
+  sameSite: "strict" as const,
+  path: REFRESH_COOKIE_PATH,
+};
+
 export class AuthController {
   async login(req: Request, res: Response, next: NextFunction) {
     try {
@@ -65,10 +72,7 @@ export class AuthController {
 
       if (platform === "WEB" && result.tokens.refreshToken) {
         res.cookie("rt", result.tokens.refreshToken, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "strict",
-          path: REFRESH_COOKIE_PATH,
+          ...REFRESH_COOKIE_BASE,
           maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
@@ -119,10 +123,7 @@ export class AuthController {
 
       if (platform === "WEB" && result.tokens.refreshToken) {
         res.cookie("rt", result.tokens.refreshToken, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "strict",
-          path: REFRESH_COOKIE_PATH,
+          ...REFRESH_COOKIE_BASE,
           maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
@@ -146,12 +147,7 @@ export class AuthController {
       await authService.logout(req, req.user.sid);
 
       if (platform === "WEB") {
-        res.clearCookie("rt", {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "strict",
-          path: REFRESH_COOKIE_PATH,
-        });
+        res.clearCookie("rt", REFRESH_COOKIE_BASE);
       }
 
       return res.status(204).send();
@@ -174,12 +170,7 @@ export class AuthController {
       await authService.logoutAll(req, req.user.userId, body.verification);
 
       if (req.clientPlatform === "WEB") {
-        res.clearCookie("rt", {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "strict",
-          path: REFRESH_COOKIE_PATH,
-        });
+        res.clearCookie("rt", REFRESH_COOKIE_BASE);
       }
 
       return res.status(204).send();
