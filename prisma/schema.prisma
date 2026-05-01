@@ -103,6 +103,7 @@ model Usuario {
   refreshTokens           RefreshToken[]
   passwordResetTokens     PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]
+  logoutAllCodes          LogoutAllVerificationCode[]
   sessions                Session[]
 
   sentInvitations    Invitation[] @relation("InviterRelation")
@@ -182,6 +183,25 @@ model EmailVerificationToken {
   @@index([expiresAt])
   @@index([usedAt])
   @@map("email_verification_tokens")
+}
+
+model LogoutAllVerificationCode {
+  id String @id @default(cuid())
+
+  userId String
+  user   Usuario @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  codeHash  String
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([userId, codeHash])
+  @@index([expiresAt])
+  @@index([usedAt])
+  @@map("logout_all_verification_codes")
 }
 
 model Session {

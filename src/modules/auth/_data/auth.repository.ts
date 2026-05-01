@@ -44,6 +44,15 @@ export type EmailVerifyCandidate = {
   usedAt: Date | null;
 };
 
+export type LogoutAllCodeCandidate = {
+  codeId: string;
+  userId: string;
+  userEmail: string;
+  userActive: boolean;
+  expiresAt: Date;
+  usedAt: Date | null;
+};
+
 export class AuthRepository {
   // -------- users --------
   findUserByEmailForLogin(email: string) {
@@ -68,6 +77,17 @@ export class AuthRepository {
         email: true,
         activo: true,
         passwordHash: true,
+      },
+    });
+  }
+
+  findUserByIdForLogoutAllCode(userId: string) {
+    return prisma.usuario.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        activo: true,
       },
     });
   }
@@ -482,6 +502,99 @@ export class AuthRepository {
           usedAt: null,
           expiresAt: { gt: args.now },
           NOT: { id: args.tokenId },
+        },
+        data: { usedAt: args.now },
+      });
+
+      return true;
+    });
+  }
+
+  // -------- logout-all verification codes --------
+  invalidateActiveLogoutAllCodes(userId: string, now: Date) {
+    return (prisma as any).logoutAllVerificationCode.updateMany({
+      where: { userId, usedAt: null, expiresAt: { gt: now } },
+      data: { usedAt: now },
+    });
+  }
+
+  createLogoutAllVerificationCode(data: {
+    userId: string;
+    codeHash: string;
+    expiresAt: Date;
+  }) {
+    return (prisma as any).logoutAllVerificationCode.create({
+      data: {
+        userId: data.userId,
+        codeHash: data.codeHash,
+        expiresAt: data.expiresAt,
+      },
+    });
+  }
+
+  async getLogoutAllCodeCandidate(
+    userId: string,
+    codeHash: string,
+  ): Promise<LogoutAllCodeCandidate | null> {
+    const record = await (prisma as any).logoutAllVerificationCode.findFirst({
+      where: {
+        userId,
+        codeHash,
+      },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        userId: true,
+        expiresAt: true,
+        usedAt: true,
+        user: {
+          select: {
+            id: true,
+            activo: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    if (!record || !record.user) return null;
+
+    return {
+      codeId: record.id,
+      userId: record.userId,
+      userEmail: record.user.email,
+      userActive: record.user.activo,
+      expiresAt: record.expiresAt,
+      usedAt: record.usedAt,
+    };
+  }
+
+  async consumeLogoutAllCode(args: {
+    codeId: string;
+    userId: string;
+    codeHash: string;
+    now: Date;
+  }): Promise<boolean> {
+    return prisma.$transaction(async (tx) => {
+      const used = await (tx as any).logoutAllVerificationCode.updateMany({
+        where: {
+          id: args.codeId,
+          userId: args.userId,
+          codeHash: args.codeHash,
+          usedAt: null,
+          expiresAt: { gt: args.now },
+        },
+        data: { usedAt: args.now },
+      });
+
+      if (used.count === 0) return false;
+
+      await (tx as any).logoutAllVerificationCode.updateMany({
+        where: {
+          userId: args.userId,
+          usedAt: null,
+          expiresAt: { gt: args.now },
+          NOT: { id: args.codeId },
         },
         data: { usedAt: args.now },
       });

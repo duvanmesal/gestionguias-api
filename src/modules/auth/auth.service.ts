@@ -23,6 +23,7 @@ import { loginUsecase } from "./_usecases/login.usecase";
 import { refreshUsecase } from "./_usecases/refresh.usecase";
 import { logoutUsecase } from "./_usecases/logout.usecase";
 import { logoutAllUsecase } from "./_usecases/logoutAll.usecase";
+import { requestLogoutAllCodeUsecase } from "./_usecases/requestLogoutAllCode.usecase";
 import { listSessionsUsecase } from "./_usecases/listSessions.usecase";
 import { revokeSessionUsecase } from "./_usecases/revokeSession.usecase";
 import { registerUsecase } from "./_usecases/register.usecase";
@@ -67,6 +68,10 @@ export class AuthService {
     verification: LogoutAllRequest["verification"],
   ): Promise<void> {
     return logoutAllUsecase(req, userId, verification);
+  }
+
+  requestLogoutAllCode(req: Request, userId: string): Promise<void> {
+    return requestLogoutAllCodeUsecase(req, userId);
   }
 
   listSessions(userId: string): Promise<SessionInfo[]> {

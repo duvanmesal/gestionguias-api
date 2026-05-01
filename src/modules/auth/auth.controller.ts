@@ -179,6 +179,24 @@ export class AuthController {
     }
   }
 
+  async requestLogoutAllCode(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      await authService.requestLogoutAllCode(req, req.user.userId);
+
+      return res.json(
+        ok({
+          message: "If the account is active, a confirmation code has been sent",
+        }),
+      );
+    } catch (error) {
+      return next(error);
+    }
+  }
+
   async sessions(req: Request, res: Response, next: NextFunction) {
     try {
       if (!req.user) {

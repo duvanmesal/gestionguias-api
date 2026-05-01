@@ -32,6 +32,12 @@ export interface VerifyEmailEmailData {
   code?: string;
 }
 
+export interface LogoutAllCodeEmailData {
+  to: string;
+  code: string;
+  ttlMinutes: number;
+}
+
 export type SendEmailInput = {
   to: string;
   subject: string;
@@ -656,6 +662,58 @@ function generateVerifyEmailHTML(data: VerifyEmailEmailData): string {
   `.trim();
 }
 
+function generateLogoutAllCodeHTML(data: LogoutAllCodeEmailData): string {
+  const { code, ttlMinutes } = data;
+
+  return `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+  <title>Código de seguridad - ${APP_NAME}</title>
+  <style type="text/css">
+    ${getBaseStyles()}
+  </style>
+</head>
+<body>
+  <span class="preheader">Código para cerrar todas las sesiones: ${code}. Válido por ${ttlMinutes} minutos.</span>
+  <div class="outer-wrapper">
+    <div class="container">
+      <div class="header">
+        <div style="width:64px;height:64px;margin:0 auto 20px auto;background:linear-gradient(135deg, ${COLORS.dangerRed} 0%, ${COLORS.accentGold} 100%);border-radius:16px;line-height:64px;font-size:28px;">
+          🔐
+        </div>
+        <h1>Código de Seguridad</h1>
+        <p class="header-subtitle">Confirmación para cerrar todas tus sesiones</p>
+      </div>
+      <div class="content">
+        <p>Hola,</p>
+        <p>Recibimos una solicitud para cerrar todas las sesiones activas de tu cuenta en <strong>${APP_NAME}</strong>.</p>
+        <p>Ingresa este código en la aplicación para confirmar la operación:</p>
+        <div class="code-display">
+          <p class="code-label">Código de confirmación</p>
+          <p class="code-value">${code}</p>
+        </div>
+        <div class="alert-box">
+          <p>⏰ <strong>Importante:</strong> Este código expira en <strong>${ttlMinutes} minutos</strong>.</p>
+        </div>
+        <div class="security-note">
+          <p><strong>🔒 Nota de seguridad:</strong> Si tú no solicitaste cerrar todas las sesiones, ignora este correo y cambia tu contraseña.</p>
+        </div>
+      </div>
+      <div class="footer">
+        <p class="footer-brand">${APP_NAME}</p>
+        <p class="footer-tagline">Este correo fue enviado automáticamente</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+  `.trim();
+}
+
 // ---- low-level sender (reutilizable) ----
 export async function sendEmail({
   to,
@@ -807,6 +865,40 @@ Si no solicitaste esta verificación, ignora este correo.
   } catch (error) {
     logger.error({ error, to: data.to }, "Failed to send verify email");
     throw new Error("Failed to send verify email");
+  }
+}
+
+export async function sendLogoutAllCodeEmail(
+  data: LogoutAllCodeEmailData,
+): Promise<void> {
+  try {
+    const html = generateLogoutAllCodeHTML(data);
+    const subject = `Código para cerrar sesiones – ${APP_NAME}`;
+    const preheader = `Código válido por ${data.ttlMinutes} minutos.`;
+
+    const info = await sendEmail({
+      to: data.to,
+      subject,
+      html,
+      text: `
+Código de seguridad - ${APP_NAME}
+
+Tu código para cerrar todas las sesiones es: ${data.code}
+
+Este código expira en ${data.ttlMinutes} minutos.
+
+Si no solicitaste esta acción, ignora este correo y cambia tu contraseña.
+      `.trim(),
+      headers: { "X-Preheader": preheader },
+    });
+
+    logger.info(
+      { to: data.to, messageId: info.messageId },
+      "Logout-all verification code sent successfully",
+    );
+  } catch (error) {
+    logger.error({ error, to: data.to }, "Failed to send logout-all code email");
+    throw new Error("Failed to send logout-all code email");
   }
 }
 

@@ -19,6 +19,7 @@ import {
   loginLimiter,
   refreshLimiter,
   logoutAllLimiter,
+  logoutAllCodeRequestLimiter,
 } from "../middlewares/rate-limit"
 
 const router = Router()
@@ -97,10 +98,19 @@ router.post(
 */
 
 router.post(
+  "/logout-all/request",
+  detectClientPlatform,
+  requireAuth,
+  logoutAllCodeRequestLimiter,
+  authController.requestLogoutAllCode.bind(authController),
+)
+
+router.post(
   "/logout-all",
   logoutAllLimiter,
   detectClientPlatform,
   requireAuth,
+  validate({ body: logoutAllSchema }),
   authController.logoutAll.bind(authController),
 )
 

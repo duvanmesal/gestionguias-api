@@ -404,6 +404,48 @@ Sin body.
 
 ## 1.4.4 Logout de todas las sesiones
 
+### **POST `/auth/logout-all/request`**
+
+Envía al correo del usuario autenticado un código de 6 dígitos requerido para cerrar todas las sesiones.
+
+---
+
+### **Auth requerida**
+
+✅ Sí
+
+`Authorization: Bearer <accessToken>`
+
+---
+
+### **Headers obligatorios**
+
+| Header              | Valores          | Descripción                              |
+| ------------------- | ---------------- | ---------------------------------------- |
+| `X-Client-Platform` | `WEB` | `MOBILE` | Registra la plataforma que pidió el código |
+
+---
+
+### **Body**
+
+❌ No usa body
+
+---
+
+### **Respuesta 200**
+
+```json
+{
+  "data": {
+    "message": "If the account is active, a confirmation code has been sent"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+---
+
 ### **POST `/auth/logout-all`**
 
 Cierra **todas** las sesiones activas del usuario (WEB y MOBILE) en todos los dispositivos.
@@ -429,16 +471,27 @@ Cierra **todas** las sesiones activas del usuario (WEB y MOBILE) en todos los di
 
 ### **Body**
 
-❌ No usa body
+```json
+{
+  "verification": {
+    "method": "code",
+    "code": "123456"
+  }
+}
+```
+
+📌 El código se solicita primero con `POST /auth/logout-all/request`.
 
 ---
 
 ### **Qué hace exactamente**
 
 1. Extrae el `userId` del access token.
-2. Revoca **todas** las sesiones del usuario en base de datos (incluye la actual).
-3. En **WEB**, limpia la cookie `rt` para evitar que el navegador siga intentando refresh.
-4. Responde `204 No Content`.
+2. Valida que el código de 6 dígitos exista, no haya sido usado y no esté expirado.
+3. Consume el código de forma atómica e invalida otros códigos activos del mismo usuario.
+4. Revoca **todas** las sesiones del usuario en base de datos (incluye la actual).
+5. En **WEB**, limpia la cookie `rt` para evitar que el navegador siga intentando refresh.
+6. Responde `204 No Content`.
 
 📌 Importante:
 
@@ -459,7 +512,9 @@ Sin body.
 | Código | Motivo                                     |
 | ------ | ------------------------------------------ |
 | `401`  | Access token inválido o ausente            |
+| `401`  | Código inválido, usado o expirado          |
 | `400`  | Falta `X-Client-Platform` o valor inválido |
+| `400`  | Body inválido según Zod                    |
 
 ---
 

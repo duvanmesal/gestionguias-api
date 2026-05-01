@@ -25,6 +25,9 @@ RUN npm ci
 # Copy source code
 COPY . .
 
+# Regenerate Prisma Client after npm ci replaced node_modules in build stage.
+RUN npx prisma generate
+
 # Build the application
 RUN npm run build
 

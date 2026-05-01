@@ -76,3 +76,14 @@ export function hashEmailVerifyCode(code: string): string {
   const raw = `email_verify_code:${code}`
   return createHmac("sha256", pepper).update(raw).digest("hex")
 }
+
+export function generateLogoutAllCode(): string {
+  const n = randomInt(0, 1_000_000)
+  return String(n).padStart(6, "0")
+}
+
+export function hashLogoutAllCode(code: string): string {
+  const pepper = env.TOKEN_PEPPER || "default_token_pepper_change_in_production"
+  const raw = `logout_all_code:${code}`
+  return createHmac("sha256", pepper).update(raw).digest("hex")
+}

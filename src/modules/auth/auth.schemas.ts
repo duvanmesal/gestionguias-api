@@ -68,16 +68,10 @@ export const updateUserSchema = z.object({
 });
 
 export const logoutAllSchema = z.object({
-  verification: z.discriminatedUnion("method", [
-    z.object({
-      method: z.literal("password"),
-      password: z.string().min(8, "Password too short"),
-    }),
-    z.object({
-      method: z.literal("mfa"),
-      code: z.string().min(4).max(10),
-    }),
-  ]),
+  verification: z.object({
+    method: z.literal("code"),
+    code: z.string().trim().regex(/^\d{6}$/, "Code must be 6 digits"),
+  }),
 });
 
 export const changePasswordSchema = z

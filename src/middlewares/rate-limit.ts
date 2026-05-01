@@ -41,3 +41,13 @@ export const logoutAllLimiter = rateLimit({
   legacyHeaders: false,
   message: tooManyMessage(),
 })
+
+// Logout-all code request: authenticated, per-user, less aggressive for UX retries.
+export const logoutAllCodeRequestLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as any).user?.userId || req.ip || "unknown",
+  message: tooManyMessage("Too many code requests. Try again in 10 minutes."),
+})

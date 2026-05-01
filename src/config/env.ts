@@ -48,6 +48,7 @@ const Env = z.object({
     .url()
     .default("http://localhost:3001/verify-email"),
   EMAIL_VERIFY_TTL_MINUTES: z.coerce.number().default(60),
+  LOGOUT_ALL_CODE_TTL_MINUTES: z.coerce.number().default(10),
 
   // CORS
   CORS_ALLOWED_ORIGINS: z
