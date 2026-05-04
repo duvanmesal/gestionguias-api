@@ -6,7 +6,7 @@ import { logger } from "../../../libs/logger"
 
 import { recaladaRepository } from "../_data/recalada.repository"
 import { auditFail, auditOk } from "../_shared/recalada.audit"
-import { socketService } from "../../../core/socket/socket.service"
+import { emitRecaladaRealtime } from "../../../core/socket/domain-events"
 
 export async function cancelRecaladaUsecase(
   req: Request,
@@ -130,7 +130,11 @@ export async function cancelRecaladaUsecase(
     { entity: "Recalada", id: String(id) },
   )
 
-  socketService.emitToSupervisors("recalada:canceled", { recaladaId: id })
+  emitRecaladaRealtime("recalada:canceled", {
+    recaladaId: id,
+    status: updated.status,
+    operationalStatus: updated.operationalStatus,
+  })
 
   return updated
 }

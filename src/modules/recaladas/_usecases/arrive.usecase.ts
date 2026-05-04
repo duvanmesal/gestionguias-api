@@ -6,7 +6,7 @@ import { logger } from "../../../libs/logger"
 
 import { recaladaRepository } from "../_data/recalada.repository"
 import { auditFail, auditOk } from "../_shared/recalada.audit"
-import { socketService } from "../../../core/socket/socket.service"
+import { emitRecaladaRealtime } from "../../../core/socket/domain-events"
 
 export async function arriveRecaladaUsecase(
   req: Request,
@@ -134,7 +134,11 @@ export async function arriveRecaladaUsecase(
     { entity: "Recalada", id: String(id) },
   )
 
-  socketService.emitToSupervisors("recalada:arrived", { recaladaId: id })
+  emitRecaladaRealtime("recalada:arrived", {
+    recaladaId: id,
+    status: updated.status,
+    operationalStatus: updated.operationalStatus,
+  })
 
   return updated
 }

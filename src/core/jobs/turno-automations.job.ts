@@ -1,6 +1,6 @@
 import { turnoRepository } from "../../modules/turnos/_data/turno.repository"
 import { NO_SHOW_GRACE_MS, AUTO_COMPLETE_MARGIN_MS } from "../../modules/turnos/_domain/turno.rules"
-import { socketService } from "../socket/socket.service"
+import { emitTurnoRealtime } from "../socket/domain-events"
 import { logger } from "../../libs/logger"
 
 const JOB_INTERVAL_MS = 60 * 1000 // cada 1 minuto
@@ -27,9 +27,7 @@ async function applyAutoNoShow() {
   await turnoRepository.bulkNoShow(ids, new Date())
 
   for (const t of expired) {
-    const evt = { turnoId: t.id, atencionId: t.atencionId, status: "NO_SHOW", guiaId: t.guiaId }
-    socketService.emitToAtencion(t.atencionId, "turno:noShow", evt)
-    socketService.emitToSupervisors("turno:noShow", evt)
+    emitTurnoRealtime("turno:noShow", { ...t, status: "NO_SHOW" }, { meta: { source: "job" } })
   }
 
   logger.info({ count: ids.length, ids }, "[Job] NO_SHOW automático aplicado")
@@ -44,9 +42,7 @@ async function applyAutoComplete() {
   await turnoRepository.bulkAutoComplete(ids, now)
 
   for (const t of expired) {
-    const evt = { turnoId: t.id, atencionId: t.atencionId, status: "COMPLETED", guiaId: t.guiaId }
-    socketService.emitToAtencion(t.atencionId, "turno:checkedOut", evt)
-    socketService.emitToSupervisors("turno:checkedOut", evt)
+    emitTurnoRealtime("turno:checkedOut", { ...t, status: "COMPLETED" }, { meta: { source: "job" } })
   }
 
   logger.info({ count: ids.length, ids }, "[Job] COMPLETED automático aplicado")

@@ -81,23 +81,33 @@ Usar este endpoint para bootstrap de sesión y onboarding en frontend/mobile.
   "apellidos": "Pérez",
   "telefono": "+57 300 123 4567",
   "documentType": "CC",
-  "documentNumber": "123456789"
+  "documentNumber": "123456789",
+  "currentPassword": "Password123!",
+  "newPassword": "NewPassword123!"
 }
 ```
 
 Reglas:
 
 - Solo se puede completar si `profileStatus` no es `COMPLETE`.
+- `documentType` debe ser uno de `CC`, `CE`, `PAS`, `NIT` u `OTRO`.
 - `documentNumber` se normaliza quitando espacios, guiones y puntos, y se convierte a mayúsculas.
 - Valida unicidad por `documentType + documentNumber`.
-- Escribe `profileStatus = COMPLETE` y `profileCompletedAt = now`.
+- Valida la contraseña actual usando `currentPassword` u `oldPassword`.
+- La nueva contraseña debe cumplir la misma complejidad de auth y ser distinta de la actual.
+- Escribe perfil, `passwordHash`, `profileStatus = COMPLETE` y `profileCompletedAt = now` de forma atómica.
 - Si el rol es `GUIA`, crea/actualiza la relación `Guia`.
 - Si el rol es `SUPERVISOR`, crea/actualiza la relación `Supervisor`.
+- Revoca las sesiones activas del usuario al completar onboarding, porque el flujo incluye cambio de contraseña.
+- Emite `auth:sessionRevoked` a cada sesión afectada y `auth:sessionsChanged` al usuario.
+- Los clientes web/mobile deben limpiar la sesión local y pedir login nuevamente tras completar onboarding.
 - La respuesta enmascara `documentNumber`.
 
 Errores frecuentes:
 
 - `404 NOT_FOUND` si el usuario no existe.
+- `401 UNAUTHORIZED` si la contraseña actual no coincide.
+- `400 BAD_REQUEST` si la nueva contraseña es igual a la actual.
 - `422 BUSINESS_RULE_VIOLATION` si el perfil ya está completo.
 - `409 CONFLICT` si el documento ya existe en otro usuario.
 

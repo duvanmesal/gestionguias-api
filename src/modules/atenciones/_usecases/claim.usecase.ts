@@ -10,6 +10,7 @@ import {
 import { atencionRepository } from "../_data/atencion.repository"
 import { assertOperacionPermitida } from "../_domain/atencion.rules"
 import { auditFail, auditOk } from "../_shared/atencion.audit"
+import { emitTurnoRealtime } from "../../../core/socket/domain-events"
 
 export async function claimFirstAvailableTurnoUsecase(
   req: Request,
@@ -130,6 +131,8 @@ export async function claimFirstAvailableTurnoUsecase(
       },
       { entity: "Turno", id: String(claimed.id) },
     )
+
+    emitTurnoRealtime("turno:claimed", claimed)
 
     return claimed
   } catch (err: any) {

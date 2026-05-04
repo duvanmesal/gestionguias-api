@@ -5,7 +5,10 @@ import { ConflictError, NotFoundError } from "../../../libs/errors"
 
 import { atencionRepository } from "../_data/atencion.repository"
 import { auditFail, auditOk } from "../_shared/atencion.audit"
-import { socketService } from "../../../core/socket/socket.service"
+import {
+  emitAtencionRealtime,
+  emitTurnoRealtime,
+} from "../../../core/socket/domain-events"
 
 export async function cancelAtencionUsecase(
   req: Request,
@@ -91,6 +94,7 @@ export async function cancelAtencionUsecase(
   }
 
   const when = new Date()
+  const assignedTurnos = await atencionRepository.listAssignedTurnosForRealtime(id)
   const updated = await atencionRepository.cancelAtencionAtomic({
     id,
     reason,
@@ -118,9 +122,20 @@ export async function cancelAtencionUsecase(
     { entity: "Atencion", id: String(id) },
   )
 
-  const evt = { atencionId: id, recaladaId: updated.recaladaId }
-  socketService.emitToAtencion(id, "atencion:canceled", evt)
-  socketService.emitToSupervisors("atencion:canceled", evt)
+  emitAtencionRealtime("atencion:canceled", {
+    atencionId: id,
+    recaladaId: updated.recaladaId,
+    status: updated.status,
+    operationalStatus: updated.operationalStatus,
+  })
+
+  for (const turno of assignedTurnos) {
+    emitTurnoRealtime(
+      "turno:canceled",
+      { ...turno, status: "CANCELED" },
+      { meta: { source: "atencion:canceled" } },
+    )
+  }
 
   return updated
 }

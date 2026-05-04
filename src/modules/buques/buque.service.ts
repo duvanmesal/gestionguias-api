@@ -14,6 +14,7 @@ import { updateBuqueUsecase } from "./_usecases/update.usecase";
 import { removeBuqueUsecase } from "./_usecases/remove.usecase";
 import { lookupBuquesUsecase } from "./_usecases/lookup.usecase";
 import { bulkUploadBuquesUsecase } from "./_usecases/bulk-upload.usecase";
+import { emitCatalogRealtime } from "../../core/socket/domain-events";
 
 /**
  * Facade del módulo Buques.
@@ -28,23 +29,50 @@ export class BuqueService {
     return getBuqueUsecase(id);
   }
 
-  static create(_req: Request, body: CreateBuqueBody) {
-    return createBuqueUsecase(body);
+  static async create(_req: Request, body: CreateBuqueBody) {
+    const item = await createBuqueUsecase(body);
+    emitCatalogRealtime("catalog:buque:created", {
+      buqueId: item.id,
+      status: item.status,
+      paisId: item.pais?.id ?? null,
+    });
+    return item;
   }
 
-  static update(_req: Request, id: number, body: UpdateBuqueBody) {
-    return updateBuqueUsecase(id, body);
+  static async update(_req: Request, id: number, body: UpdateBuqueBody) {
+    const item = await updateBuqueUsecase(id, body);
+    emitCatalogRealtime("catalog:buque:updated", {
+      buqueId: item.id,
+      status: item.status,
+      paisId: item.pais?.id ?? null,
+      fields: Object.keys(body ?? {}),
+    });
+    return item;
   }
 
-  static remove(_req: Request, id: number) {
-    return removeBuqueUsecase(id);
+  static async remove(_req: Request, id: number) {
+    const item = await removeBuqueUsecase(id);
+    emitCatalogRealtime("catalog:buque:removed", {
+      buqueId: item.id,
+      status: item.status,
+    });
+    return item;
   }
 
   static lookup(_req: Request) {
     return lookupBuquesUsecase();
   }
 
-  static bulkUpload(_req: Request, body: BulkBuqueRequestBody) {
-    return bulkUploadBuquesUsecase(body);
+  static async bulkUpload(_req: Request, body: BulkBuqueRequestBody) {
+    const result = await bulkUploadBuquesUsecase(body);
+    if (!result.dryRun && (result.created > 0 || result.updated > 0)) {
+      emitCatalogRealtime("catalog:buque:bulkChanged", {
+        created: result.created,
+        updated: result.updated,
+        mode: result.mode,
+        force: result.force,
+      });
+    }
+    return result;
   }
 }

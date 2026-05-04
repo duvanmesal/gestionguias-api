@@ -28,6 +28,13 @@ El documento antiguo `auth-usuarios.md` mezclaba autenticación con administraci
 - `usuarios.md` documenta perfiles, onboarding, RBAC de usuarios y guías.
 - `auth-usuarios.md` queda como archivo de compatibilidad con enlaces a ambos documentos.
 
+## Cambios recientes documentados
+
+- `auth.md` detalla la separacion entre cierre de sesion actual, cierre de una sesion especifica y cierre de todas las sesiones.
+- `auth.md` documenta `isCurrent` en `GET /auth/sessions` para que los clientes identifiquen la sesion del access token actual.
+- `auth.md` aclara que refrescar una sesion revocada manualmente responde `401` sin cerrar las demas sesiones.
+- `historias-usuario/01-autenticacion-sesion.md` incluye criterios funcionales para revocar una sesion mobile desde web sin perder la sesion web.
+
 ## Convenciones de lectura
 
 - Las rutas se describen sin repetir el prefijo completo. Si `API_PREFIX=/api/v1`, entonces `POST /auth/login` significa `POST /api/v1/auth/login`.

@@ -1,6 +1,7 @@
 import type { Request } from "express";
 
 import { logger } from "../../../libs/logger";
+import { socketService } from "../../../core/socket/socket.service";
 
 import { invitationRepository } from "../_data/invitation.repository";
 import { auditOk } from "../_shared/invitation.audit";
@@ -25,4 +26,10 @@ export async function markInvitationAsUsedUsecase(
   }
 
   logger.info({ invitationId, userId }, "[Invite] marked as used");
+  socketService.emitToAdmins("invitation:used", {
+    invitationId,
+    userId,
+    status: "USED",
+    usedAt: when,
+  });
 }

@@ -6,7 +6,7 @@ import { BadRequestError, ConflictError, NotFoundError } from "../../../libs/err
 import type { CreateAtencionBody } from "../atencion.schemas"
 
 import { atencionRepository } from "../_data/atencion.repository"
-import { socketService } from "../../../core/socket/socket.service"
+import { emitAtencionRealtime } from "../../../core/socket/domain-events"
 import {
   assertTurnosTotalValid,
   assertWindowDatesValid,
@@ -230,9 +230,11 @@ export async function createAtencionUsecase(
     { entity: "Atencion", id: String(created.id) },
   )
 
-  socketService.emitToSupervisors("atencion:created", {
+  emitAtencionRealtime("atencion:created", {
     atencionId: created.id,
     recaladaId: created.recaladaId,
+    status: created.status,
+    operationalStatus: created.operationalStatus,
   })
 
   return created

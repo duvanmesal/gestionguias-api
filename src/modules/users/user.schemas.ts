@@ -31,6 +31,47 @@ export const completeProfileSchema = z.object({
     )
     .trim()
     .transform((val) => val.replace(/[\s\-.]/g, "").toUpperCase()),
+  currentPassword: z
+    .string()
+    .min(1, "Current password is required")
+    .optional(),
+  oldPassword: z.string().min(1, "Old password is required").optional(),
+  newPassword: z
+    .string()
+    .min(8, "Password must be at least 8 characters")
+    .max(72, "Password too long")
+    .regex(
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
+      "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
+    ),
+}).superRefine((data, ctx) => {
+  const hasCurrent = !!data.currentPassword;
+  const hasOld = !!data.oldPassword;
+
+  if (!hasCurrent && !hasOld) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Either currentPassword or oldPassword is required",
+      path: ["currentPassword"],
+    });
+  }
+
+  if (hasCurrent && hasOld) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Provide only one: currentPassword OR oldPassword",
+      path: ["currentPassword"],
+    });
+  }
+
+  const current = data.currentPassword ?? data.oldPassword;
+  if (current && current === data.newPassword) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "New password must be different from current password",
+      path: ["newPassword"],
+    });
+  }
 });
 
 export const updateMeSchema = z

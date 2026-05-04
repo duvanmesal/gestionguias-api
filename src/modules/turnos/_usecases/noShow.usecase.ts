@@ -10,7 +10,7 @@ import {
 import { turnoRepository } from "../_data/turno.repository"
 import { assertOperacionPermitida, buildNoShowObservacion } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
-import { socketService } from "../../../core/socket/socket.service"
+import { emitTurnoRealtime } from "../../../core/socket/domain-events"
 
 export async function noShowTurnoUsecase(
   req: Request,
@@ -110,9 +110,7 @@ export async function noShowTurnoUsecase(
     { entity: "Turno", id: String(turnoId) },
   )
 
-  const evt = { turnoId: updated.id, atencionId: updated.atencionId, status: updated.status, guiaId: updated.guiaId }
-  socketService.emitToAtencion(updated.atencionId, "turno:noShow", evt)
-  socketService.emitToSupervisors("turno:noShow", evt)
+  emitTurnoRealtime("turno:noShow", updated)
 
   return updated
 }

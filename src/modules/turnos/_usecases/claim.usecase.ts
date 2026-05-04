@@ -10,7 +10,7 @@ import {
 import { turnoRepository } from "../_data/turno.repository"
 import { assertOperacionPermitida } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
-import { socketService } from "../../../core/socket/socket.service"
+import { emitTurnoRealtime } from "../../../core/socket/domain-events"
 
 export async function claimTurnoUsecase(req: Request, turnoId: number, actorUserId: string) {
   const actorGuiaId = await turnoRepository.getActorGuiaIdOrThrow(actorUserId)
@@ -147,9 +147,7 @@ export async function claimTurnoUsecase(req: Request, turnoId: number, actorUser
       { entity: "Turno", id: String(turnoId) },
     )
 
-    const evt = { turnoId: updated.id, atencionId: updated.atencionId, status: updated.status, guiaId: actorGuiaId }
-    socketService.emitToAtencion(updated.atencionId, "turno:claimed", evt)
-    socketService.emitToSupervisors("turno:claimed", evt)
+    emitTurnoRealtime("turno:claimed", updated)
 
     return updated
   } catch (err: any) {

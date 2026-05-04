@@ -10,7 +10,7 @@ import {
 import { turnoRepository } from "../_data/turno.repository"
 import { assertOperacionPermitida } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
-import { socketService } from "../../../core/socket/socket.service"
+import { emitTurnoRealtime } from "../../../core/socket/domain-events"
 
 export async function assignTurnoUsecase(
   req: Request,
@@ -184,12 +184,7 @@ export async function assignTurnoUsecase(
       { entity: "Turno", id: String(turnoId) },
     )
 
-    const evt = { turnoId: updated.id, atencionId: updated.atencionId, status: updated.status, guiaId }
-    socketService.emitToAtencion(updated.atencionId, "turno:assigned", evt)
-    socketService.emitToSupervisors("turno:assigned", evt)
-    if (updated.guia?.usuario.id) {
-      socketService.emitToGuia(updated.guia.usuario.id, "turno:assigned", evt)
-    }
+    emitTurnoRealtime("turno:assigned", updated)
 
     return updated
   } catch (err: any) {

@@ -6,7 +6,7 @@ import { ConflictError, NotFoundError } from "../../../libs/errors"
 import { turnoRepository } from "../_data/turno.repository"
 import { assertOperacionPermitida } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
-import { socketService } from "../../../core/socket/socket.service"
+import { emitTurnoRealtime } from "../../../core/socket/domain-events"
 
 export async function cancelTurnoUsecase(
   req: Request,
@@ -73,9 +73,7 @@ export async function cancelTurnoUsecase(
     { entity: "Turno", id: String(turnoId) },
   )
 
-  const evt = { turnoId: updated.id, atencionId: updated.atencionId, status: updated.status, guiaId: updated.guiaId }
-  socketService.emitToAtencion(updated.atencionId, "turno:canceled", evt)
-  socketService.emitToSupervisors("turno:canceled", evt)
+  emitTurnoRealtime("turno:canceled", updated)
 
   return updated
 }

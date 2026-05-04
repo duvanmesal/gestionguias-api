@@ -6,6 +6,7 @@ import { BusinessError, NotFoundError, UnauthorizedError } from "../../../libs/e
 import { logger } from "../../../libs/logger"
 import { logsService } from "../../../libs/logs/logs.service"
 import { hashPassword, verifyPassword } from "../../../libs/password"
+import { socketService } from "../../../core/socket/socket.service"
 
 import { userRepository } from "../_data/user.repository"
 
@@ -43,8 +44,18 @@ export async function changePasswordUsecase(
   const newPasswordHash = await hashPassword((data as any).newPassword)
 
   const now = new Date()
+  const sessions = await userRepository.listActiveSessionIds(id)
   await userRepository.updatePasswordHash(id, newPasswordHash)
   await userRepository.revokeActiveSessions(id, now)
+
+  for (const session of sessions) {
+    socketService.emitToSession(session.id, "auth:sessionRevoked", {
+      sessionId: session.id,
+      userId: id,
+      reason: "password_change",
+    })
+  }
+  socketService.emitToUser(id, "auth:sessionsChanged", { userId: id })
 
   logger.info({ userId: id }, "Password changed successfully")
 

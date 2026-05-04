@@ -5,6 +5,7 @@ import { logger } from "../../../libs/logger";
 import { ConflictError } from "../../../libs/errors";
 import { hashPassword } from "../../../libs/password";
 import { sendInvitationEmail } from "../../../libs/email";
+import { socketService } from "../../../core/socket/socket.service";
 
 import { invitationRepository } from "../_data/invitation.repository";
 import { auditFail, auditOk } from "../_shared/invitation.audit";
@@ -232,6 +233,17 @@ export async function createInvitationUsecase(
       "[Invite] development fallback enabled: invitation kept as PENDING and temp password will be returned",
     );
   }
+
+  socketService.emitToAdmins(
+    action === "CREATED" ? "invitation:created" : "invitation:resent",
+    {
+      invitationId: invitation.id,
+      email,
+      role,
+      status: invitation.status,
+      expiresAt: invitation.expiresAt,
+    },
+  );
 
   return {
     action,

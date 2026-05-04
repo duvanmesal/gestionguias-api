@@ -92,6 +92,11 @@ export const turnoClaimSelect = {
   checkOutAt: true,
   createdAt: true,
   updatedAt: true,
+  atencion: {
+    select: {
+      recaladaId: true,
+    },
+  },
   guia: {
     select: {
       id: true,

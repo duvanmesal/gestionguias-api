@@ -199,7 +199,57 @@ Reglas:
 }
 ```
 
-`DELETE /auth/sessions/:sessionId` solo revoca la sesión indicada si pertenece al usuario autenticado. Si esa sesión intenta refrescar después de haber sido revocada, el backend rechaza esa sesión con `401`, pero no cierra las demás. Para cerrar todas las sesiones debe usarse el flujo `logout-all` con código.
+### Modelo operativo de sesiones
+
+Cada login crea una fila independiente en `sessions`. La sesion queda asociada a:
+
+- usuario;
+- plataforma (`WEB` o `MOBILE`);
+- `deviceId` cuando aplica;
+- `userAgent`;
+- IP;
+- refresh token hasheado;
+- expiracion de refresh;
+- marca de revocacion cuando se cierra.
+
+La sesion activa que corresponde al access token usado para consultar `GET /auth/sessions` se marca con `isCurrent: true`. Las demas sesiones activas del mismo usuario se devuelven con `isCurrent: false`.
+
+Reglas importantes:
+
+- `GET /auth/sessions` solo lista sesiones del usuario autenticado, activas, no revocadas y con refresh no expirado.
+- `DELETE /auth/sessions/:sessionId` solo revoca la sesion indicada si pertenece al usuario autenticado.
+- Revocar una sesion ajena al access token actual no debe cerrar la sesion actual.
+- Si la sesion revocada intenta renovar token despues, `POST /auth/refresh` responde `401 UNAUTHORIZED` y no afecta otras sesiones.
+- Para cerrar todas las sesiones se debe usar `POST /auth/logout-all/request` y luego `POST /auth/logout-all` con codigo.
+- `POST /auth/logout` se reserva para cerrar la sesion actual identificada por el `sid` del access token.
+
+### Diferencia entre cierre especifico y cierre total
+
+| Operacion | Endpoint | Alcance | Efecto sobre la sesion web actual |
+| --- | --- | --- | --- |
+| Cerrar sesion actual | `POST /auth/logout` | Solo `sid` del token actual. | Se cierra y se limpia cookie `rt`. |
+| Cerrar sesion especifica | `DELETE /auth/sessions/:sessionId` | Solo la fila `Session.id` indicada. | Sigue activa si se revoco otra sesion. |
+| Cerrar todas | `POST /auth/logout-all` | Todas las sesiones activas del usuario. | Se cierra tambien la actual. |
+
+### Casos de error esperados en sesiones
+
+| Caso | Respuesta esperada | Motivo |
+| --- | --- | --- |
+| Revocar `sessionId` inexistente o de otro usuario | `404 NOT_FOUND` | No se debe filtrar existencia de sesiones ajenas. |
+| Revocar una sesion ya revocada | `400 BAD_REQUEST` | La operacion no se repite sobre una sesion terminal. |
+| Refrescar una sesion revocada manualmente | `401 UNAUTHORIZED` | La sesion individual ya no es valida. |
+| Carrera de rotacion de refresh token | `409 CONFLICT` | Se interpreta como reutilizacion potencial y se cierran todas las sesiones. |
+| Refresh token inexistente | `401 UNAUTHORIZED` | No hay sesion asociada al token recibido. |
+
+### Escenario de control esperado
+
+1. El usuario inicia sesion en web y en mobile.
+2. Web consulta `GET /auth/sessions` y recibe ambas sesiones.
+3. Web identifica su propia sesion con `isCurrent: true`.
+4. Web revoca la sesion mobile con `DELETE /auth/sessions/:mobileSessionId`.
+5. La sesion web permanece activa.
+6. Si mobile intenta refrescar, recibe `401` y debe limpiar su estado local.
+7. El listado web deja de mostrar la sesion mobile al invalidar/refrescar `GET /auth/sessions`.
 
 ## Cambio de contraseña autenticado
 
@@ -221,6 +271,7 @@ Reglas:
 - La nueva contraseña debe ser distinta.
 - La nueva contraseña debe tener 8 a 72 caracteres, mayúscula, minúscula, número y carácter especial.
 - Si cambia correctamente, se terminan las sesiones del usuario.
+- El onboarding `PATCH /users/me/profile` también cambia contraseña y revoca sesiones; ver [usuarios.md](./usuarios.md).
 - Respuesta exitosa:
 
 ```json

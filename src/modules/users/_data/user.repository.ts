@@ -148,12 +148,23 @@ export class UserRepository {
     })
   }
 
+  listActiveSessionIds(userId: string) {
+    return prisma.session.findMany({
+      where: { userId, revokedAt: null, refreshExpiresAt: { gt: new Date() } },
+      select: { id: true },
+    })
+  }
+
   deactivateUserAndRevokeTokensAtomic(userId: string, now: Date) {
     return prisma.$transaction([
       prisma.usuario.update({ where: { id: userId }, data: { activo: false } }),
       prisma.refreshToken.updateMany({
         where: { userId, revokedAt: null },
         data: { revokedAt: now },
+      }),
+      prisma.session.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: now, lastRotatedAt: now },
       }),
     ])
   }
@@ -182,6 +193,61 @@ export class UserRepository {
         profileCompletedAt: data.now,
       },
       select: userCompleteProfileSelect,
+    })
+  }
+
+  completeProfileAndPasswordAtomic(userId: string, data: {
+    nombres: string
+    apellidos: string
+    telefono: string
+    documentType: DocumentType
+    documentNumber: string
+    passwordHash: string
+    now: Date
+  }) {
+    return prisma.$transaction(async (tx) => {
+      const sessions = await tx.session.findMany({
+        where: { userId, revokedAt: null, refreshExpiresAt: { gt: data.now } },
+        select: { id: true },
+      })
+
+      const updatedUser = await tx.usuario.update({
+        where: { id: userId },
+        data: {
+          nombres: data.nombres,
+          apellidos: data.apellidos,
+          telefono: data.telefono,
+          documentType: data.documentType,
+          documentNumber: data.documentNumber,
+          passwordHash: data.passwordHash,
+          profileStatus: "COMPLETE",
+          profileCompletedAt: data.now,
+        },
+        select: userCompleteProfileSelect,
+      })
+
+      if (updatedUser.rol === "GUIA") {
+        await tx.guia.upsert({
+          where: { usuarioId: userId },
+          create: { usuarioId: userId },
+          update: {},
+        })
+      }
+
+      if (updatedUser.rol === "SUPERVISOR") {
+        await tx.supervisor.upsert({
+          where: { usuarioId: userId },
+          create: { usuarioId: userId },
+          update: {},
+        })
+      }
+
+      await tx.session.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: data.now, lastRotatedAt: data.now },
+      })
+
+      return { updatedUser, sessions }
     })
   }
 

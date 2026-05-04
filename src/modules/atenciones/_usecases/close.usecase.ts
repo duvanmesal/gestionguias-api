@@ -5,7 +5,7 @@ import { ConflictError, NotFoundError } from "../../../libs/errors"
 
 import { atencionRepository } from "../_data/atencion.repository"
 import { auditFail, auditOk } from "../_shared/atencion.audit"
-import { socketService } from "../../../core/socket/socket.service"
+import { emitAtencionRealtime } from "../../../core/socket/domain-events"
 
 export async function closeAtencionUsecase(req: Request, id: number, actorUserId: string) {
   const gate = await atencionRepository.findGateForClose(id)
@@ -100,9 +100,12 @@ export async function closeAtencionUsecase(req: Request, id: number, actorUserId
     { entity: "Atencion", id: String(id) },
   )
 
-  const evt = { atencionId: id, recaladaId: updated.recaladaId }
-  socketService.emitToAtencion(id, "atencion:closed", evt)
-  socketService.emitToSupervisors("atencion:closed", evt)
+  emitAtencionRealtime("atencion:closed", {
+    atencionId: id,
+    recaladaId: updated.recaladaId,
+    status: updated.status,
+    operationalStatus: updated.operationalStatus,
+  })
 
   return updated
 }

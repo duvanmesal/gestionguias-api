@@ -1,6 +1,7 @@
 import type { Request } from "express";
 
 import { logger } from "../../../libs/logger";
+import { socketService } from "../../../core/socket/socket.service";
 
 import { invitationRepository } from "../_data/invitation.repository";
 import { auditOk } from "../_shared/invitation.audit";
@@ -20,6 +21,11 @@ export async function expireOldInvitationsUsecase(req?: Request): Promise<number
         { entity: "Invitation" },
       );
     }
+
+    socketService.emitToAdmins("invitation:expired", {
+      count: result.count,
+      status: "EXPIRED",
+    });
   }
 
   return result.count;

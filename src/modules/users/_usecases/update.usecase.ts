@@ -6,6 +6,7 @@ import type { UpdateUserRequest } from "../../auth/auth.schemas"
 import { NotFoundError } from "../../../libs/errors"
 import { logger } from "../../../libs/logger"
 import { logsService } from "../../../libs/logs/logs.service"
+import { socketService } from "../../../core/socket/socket.service"
 
 import { userRepository } from "../_data/user.repository"
 import { buildUpdateUserData } from "../_domain/user.rules"
@@ -43,6 +44,20 @@ export async function updateUserUsecase(
       meta: { updatedBy, from: existingUser.rol, to: updatedUser.rol },
       message: "User role changed",
     })
+  }
+
+  const realtimePayload = {
+    userId: updatedUser.id,
+    rol: updatedUser.rol,
+    activo: updatedUser.activo,
+    fields: Object.keys(updateData),
+  }
+  socketService.emitToAdmins("user:updated", realtimePayload)
+  socketService.emitToUser(updatedUser.id, "user:updated", realtimePayload)
+  if (existingUser.rol === "GUIA" || updatedUser.rol === "GUIA") {
+    const payload = { userId: updatedUser.id }
+    socketService.emitToSupervisors("guides:lookupChanged", payload)
+    socketService.emitToAdmins("guides:lookupChanged", payload)
   }
 
   return updatedUser

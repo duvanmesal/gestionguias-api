@@ -86,8 +86,16 @@ export class TurnoRepository {
         checkInAt: true,
         checkOutAt: true,
         observaciones: true,
+        guia: {
+          select: {
+            usuario: {
+              select: { id: true },
+            },
+          },
+        },
         atencion: {
           select: {
+            recaladaId: true,
             status: true,
             operationalStatus: true,
             recalada: {
@@ -236,7 +244,13 @@ export class TurnoRepository {
     const cutoff = new Date(Date.now() - gracePeriodMs)
     return prisma.turno.findMany({
       where: { status: "ASSIGNED", fechaInicio: { lte: cutoff } },
-      select: { id: true, atencionId: true, guiaId: true },
+      select: {
+        id: true,
+        atencionId: true,
+        guiaId: true,
+        atencion: { select: { recaladaId: true } },
+        guia: { select: { usuario: { select: { id: true } } } },
+      },
     })
   }
 
@@ -244,7 +258,13 @@ export class TurnoRepository {
     const cutoff = new Date(Date.now() - marginMs)
     return prisma.turno.findMany({
       where: { status: "IN_PROGRESS", fechaFin: { lte: cutoff } },
-      select: { id: true, atencionId: true, guiaId: true },
+      select: {
+        id: true,
+        atencionId: true,
+        guiaId: true,
+        atencion: { select: { recaladaId: true } },
+        guia: { select: { usuario: { select: { id: true } } } },
+      },
     })
   }
 

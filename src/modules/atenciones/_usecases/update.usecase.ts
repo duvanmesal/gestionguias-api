@@ -7,7 +7,7 @@ import { BadRequestError, ConflictError, NotFoundError } from "../../../libs/err
 import type { UpdateAtencionBody } from "../atencion.schemas"
 
 import { atencionRepository } from "../_data/atencion.repository"
-import { socketService } from "../../../core/socket/socket.service"
+import { emitAtencionRealtime } from "../../../core/socket/domain-events"
 import {
   assertAtencionEditable,
   assertRecaladaOperable,
@@ -297,9 +297,12 @@ export async function updateAtencionUsecase(
     { entity: "Atencion", id: String(id) },
   )
 
-  const evt = { atencionId: id, recaladaId: current.recaladaId }
-  socketService.emitToSupervisors("atencion:updated", evt)
-  socketService.emitToAtencion(id, "atencion:updated", evt)
+  emitAtencionRealtime("atencion:updated", {
+    atencionId: id,
+    recaladaId: current.recaladaId,
+    status: result.status,
+    operationalStatus: result.operationalStatus,
+  })
 
   return result
 }

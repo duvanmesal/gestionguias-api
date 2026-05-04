@@ -362,6 +362,20 @@ export class AtencionRepository {
     })
   }
 
+  listAssignedTurnosForRealtime(atencionId: number, tx?: Tx) {
+    return db(tx).turno.findMany({
+      where: { atencionId, status: "ASSIGNED", guiaId: { not: null } },
+      select: {
+        id: true,
+        atencionId: true,
+        guiaId: true,
+        status: true,
+        atencion: { select: { recaladaId: true } },
+        guia: { select: { usuario: { select: { id: true } } } },
+      },
+    })
+  }
+
   getSummaryAtencion(atencionId: number, tx?: Tx) {
     return db(tx).atencion.findUnique({
       where: { id: atencionId },

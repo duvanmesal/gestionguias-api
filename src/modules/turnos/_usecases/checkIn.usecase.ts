@@ -10,7 +10,7 @@ import {
 import { turnoRepository } from "../_data/turno.repository"
 import { assertOperacionPermitida, ENFORCE_FIFO_CHECKIN, CHECKIN_EARLY_WINDOW_MS } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
-import { socketService } from "../../../core/socket/socket.service"
+import { emitTurnoRealtime } from "../../../core/socket/domain-events"
 
 export async function checkInTurnoUsecase(req: Request, turnoId: number, actorUserId: string) {
   const actorGuiaId = await turnoRepository.getActorGuiaIdOrThrow(actorUserId)
@@ -152,9 +152,7 @@ export async function checkInTurnoUsecase(req: Request, turnoId: number, actorUs
     { entity: "Turno", id: String(turnoId) },
   )
 
-  const evt = { turnoId: updated.id, atencionId: updated.atencionId, status: updated.status, guiaId: actorGuiaId }
-  socketService.emitToAtencion(updated.atencionId, "turno:checkedIn", evt)
-  socketService.emitToSupervisors("turno:checkedIn", evt)
+  emitTurnoRealtime("turno:checkedIn", updated)
 
   return updated
 }

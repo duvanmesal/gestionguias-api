@@ -6,6 +6,7 @@ import { ConflictError } from "../../../libs/errors"
 import { logger } from "../../../libs/logger"
 import { logsService } from "../../../libs/logs/logs.service"
 import { hashPassword } from "../../../libs/password"
+import { socketService } from "../../../core/socket/socket.service"
 
 import { userRepository } from "../_data/user.repository"
 
@@ -48,6 +49,16 @@ export async function createUserUsecase(
     meta: { createdBy, rol: user.rol },
     message: "User created",
   })
+
+  socketService.emitToAdmins("user:created", {
+    userId: user.id,
+    rol: user.rol,
+    activo: user.activo,
+  })
+  if (user.rol === "GUIA") {
+    socketService.emitToSupervisors("guides:lookupChanged", { userId: user.id })
+    socketService.emitToAdmins("guides:lookupChanged", { userId: user.id })
+  }
 
   return user
 }

@@ -4,6 +4,7 @@ import { BadRequestError, NotFoundError } from "../../../libs/errors";
 import { logger } from "../../../libs/logger";
 import { hashPassword } from "../../../libs/password";
 import { sendInvitationEmail } from "../../../libs/email";
+import { socketService } from "../../../core/socket/socket.service";
 
 import { invitationRepository } from "../_data/invitation.repository";
 import { auditFail, auditOk } from "../_shared/invitation.audit";
@@ -115,4 +116,12 @@ export async function resendInvitationByEmailUsecase(
     },
     "[Invite] resent by email with new temp password and user upserted",
   );
+
+  socketService.emitToAdmins("invitation:resent", {
+    invitationId: invitation.id,
+    email,
+    role: invitation.role,
+    status: "PENDING",
+    expiresAt,
+  });
 }

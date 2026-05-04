@@ -92,9 +92,21 @@ Como usuario autenticado, quiero ver mis sesiones activas y revocar una sesion e
 Criterios de aceptacion:
 
 - El usuario puede listar sus sesiones activas.
+- El listado marca la sesion actual con `isCurrent`.
 - El usuario puede revocar una sesion por `sessionId`.
+- Revocar una sesion especifica solo debe afectar esa sesion.
+- Si desde web se revoca una sesion mobile, la sesion web debe continuar activa.
+- Si una sesion revocada intenta renovar token despues, debe recibir `401` y limpiar su estado local.
+- Una sesion revocada manualmente no debe disparar cierre total de las demas sesiones.
 - Si la sesion ya esta revocada, el sistema rechaza la operacion.
 - Si la sesion no existe, el sistema informa que no fue encontrada.
+
+Reglas de negocio:
+
+- El cierre de la sesion actual pertenece al flujo de logout normal.
+- El cierre de todas las sesiones pertenece al flujo `logout-all` con codigo.
+- La deteccion de reutilizacion/carrera de refresh token sigue siendo un evento sensible y puede cerrar todas las sesiones.
+- La revocacion manual de una sesion no es reutilizacion de token; es una accion esperada del usuario.
 
 ## HU-AUTH-07 - Cambiar contrasena
 

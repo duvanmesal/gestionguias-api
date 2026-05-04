@@ -224,6 +224,17 @@ export class AuthRepository {
     });
   }
 
+  listActiveSessionIds(userId: string) {
+    return prisma.session.findMany({
+      where: {
+        userId,
+        revokedAt: null,
+        refreshExpiresAt: { gt: new Date() },
+      },
+      select: { id: true },
+    });
+  }
+
   listActiveSessions(userId: string) {
     return prisma.session.findMany({
       where: {

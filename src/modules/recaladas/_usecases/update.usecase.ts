@@ -8,7 +8,7 @@ import { recaladaRepository } from "../_data/recalada.repository"
 import { buildUpdateData } from "../_domain/recalada.rules"
 import type { UpdateRecaladaInput } from "../_domain/recalada.types"
 import { auditFail, auditOk } from "../_shared/recalada.audit"
-import { socketService } from "../../../core/socket/socket.service"
+import { emitRecaladaRealtime } from "../../../core/socket/domain-events"
 
 export async function updateRecaladaUsecase(
   req: Request,
@@ -205,7 +205,11 @@ export async function updateRecaladaUsecase(
     { entity: "Recalada", id: String(id) },
   )
 
-  socketService.emitToSupervisors("recalada:updated", { recaladaId: id })
+  emitRecaladaRealtime("recalada:updated", {
+    recaladaId: id,
+    status: updated.status,
+    operationalStatus: updated.operationalStatus,
+  })
 
   return updated
 }

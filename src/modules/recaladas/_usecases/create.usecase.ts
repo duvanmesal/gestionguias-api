@@ -12,7 +12,7 @@ import {
 } from "../_domain/recalada.rules"
 import type { CreateRecaladaInput } from "../_domain/recalada.types"
 import { auditFail, auditOk } from "../_shared/recalada.audit"
-import { socketService } from "../../../core/socket/socket.service"
+import { emitRecaladaRealtime } from "../../../core/socket/domain-events"
 
 export async function createRecaladaUsecase(
   req: Request,
@@ -186,7 +186,11 @@ export async function createRecaladaUsecase(
     { entity: "Recalada", id: String(created.id) },
   )
 
-  socketService.emitToSupervisors("recalada:created", { recaladaId: created.id })
+  emitRecaladaRealtime("recalada:created", {
+    recaladaId: created.id,
+    status: created.status,
+    operationalStatus: created.operationalStatus,
+  })
 
   return created
 }

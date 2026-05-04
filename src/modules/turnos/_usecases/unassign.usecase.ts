@@ -7,7 +7,7 @@ import { ConflictError, ForbiddenError, NotFoundError } from "../../../libs/erro
 import { turnoRepository } from "../_data/turno.repository"
 import { assertOperacionPermitida } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
-import { socketService } from "../../../core/socket/socket.service"
+import { emitTurnoRealtime } from "../../../core/socket/domain-events"
 
 export async function unassignTurnoUsecase(
   req: Request,
@@ -98,9 +98,9 @@ export async function unassignTurnoUsecase(
     { entity: "Turno", id: String(turnoId) },
   )
 
-  const evt = { turnoId: updated.id, atencionId: updated.atencionId, status: updated.status, guiaId: null }
-  socketService.emitToAtencion(updated.atencionId, "turno:unassigned", evt)
-  socketService.emitToSupervisors("turno:unassigned", evt)
+  emitTurnoRealtime("turno:unassigned", updated, {
+    guiaUserId: current.guia?.usuario.id ?? null,
+  })
 
   return updated
 }
