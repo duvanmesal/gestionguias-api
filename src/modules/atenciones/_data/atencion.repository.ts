@@ -62,6 +62,13 @@ export class AtencionRepository {
   findGuiaByUserId(userId: string, tx?: Tx) {
     return db(tx).guia.findUnique({
       where: { usuarioId: userId },
+      select: { id: true, usuario: { select: { activo: true } } },
+    })
+  }
+
+  findActiveForGuia(guiaId: string, tx?: Tx) {
+    return db(tx).turno.findFirst({
+      where: { guiaId, status: "IN_PROGRESS" },
       select: { id: true },
     })
   }
@@ -349,6 +356,12 @@ export class AtencionRepository {
     })
   }
 
+  countTurnosAssignedOrInProgress(atencionId: number, tx?: Tx) {
+    return db(tx).turno.count({
+      where: { atencionId, status: { in: ["ASSIGNED", "IN_PROGRESS"] } },
+    })
+  }
+
   getSummaryAtencion(atencionId: number, tx?: Tx) {
     return db(tx).atencion.findUnique({
       where: { id: atencionId },
@@ -375,7 +388,23 @@ export class AtencionRepository {
     return db(tx).turno.findFirst({
       where: { atencionId, status: "AVAILABLE", guiaId: null },
       orderBy: { numero: "asc" },
-      select: { id: true, numero: true },
+      select: { id: true, numero: true, fechaInicio: true, fechaFin: true },
+    })
+  }
+
+  findOverlappingTurnoForGuia(
+    args: { guiaId: string; fechaInicio: Date; fechaFin: Date; excludeTurnoId?: number },
+    tx?: Tx,
+  ) {
+    return db(tx).turno.findFirst({
+      where: {
+        guiaId: args.guiaId,
+        status: { in: ["ASSIGNED", "IN_PROGRESS"] },
+        ...(args.excludeTurnoId ? { id: { not: args.excludeTurnoId } } : {}),
+        fechaInicio: { lt: args.fechaFin },
+        fechaFin: { gt: args.fechaInicio },
+      },
+      select: { id: true, numero: true, fechaInicio: true, fechaFin: true, atencionId: true },
     })
   }
 

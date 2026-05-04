@@ -7,6 +7,7 @@ import { BadRequestError, ConflictError, NotFoundError } from "../../../libs/err
 import type { UpdateAtencionBody } from "../atencion.schemas"
 
 import { atencionRepository } from "../_data/atencion.repository"
+import { socketService } from "../../../core/socket/socket.service"
 import {
   assertAtencionEditable,
   assertRecaladaOperable,
@@ -188,6 +189,26 @@ export async function updateAtencionUsecase(
         "La ventana de la atención se solapa con otra atención existente en esta recalada",
       )
     }
+
+    const assignedOrInProgressCount =
+      await atencionRepository.countTurnosAssignedOrInProgress(id)
+
+    if (assignedOrInProgressCount > 0) {
+      auditFail(
+        req,
+        "atenciones.update.failed",
+        "Update atencion failed",
+        {
+          reason: "window_change_with_assigned_turnos",
+          atencionId: id,
+          assignedOrInProgressCount,
+        },
+        { entity: "Atencion", id: String(id) },
+      )
+      throw new ConflictError(
+        "No se puede cambiar la ventana: existen turnos asignados o en progreso",
+      )
+    }
   }
 
   if (body.fechaInicio) patch.fechaInicio = body.fechaInicio
@@ -275,6 +296,10 @@ export async function updateAtencionUsecase(
     },
     { entity: "Atencion", id: String(id) },
   )
+
+  const evt = { atencionId: id, recaladaId: current.recaladaId }
+  socketService.emitToSupervisors("atencion:updated", evt)
+  socketService.emitToAtencion(id, "atencion:updated", evt)
 
   return result
 }

@@ -29,6 +29,31 @@ export async function claimFirstAvailableTurnoUsecase(
     throw new ConflictError("El usuario autenticado no está registrado como guía")
   }
 
+  if (!guia.usuario.activo) {
+    auditFail(
+      req,
+      "atenciones.claim.failed",
+      "Claim turno failed",
+      { reason: "guia_inactive", atencionId, actorUserId },
+      { entity: "Guia" },
+    )
+    throw new ConflictError("Tu cuenta de guía está inactiva")
+  }
+
+  const inProgress = await atencionRepository.findActiveForGuia(guia.id)
+  if (inProgress) {
+    auditFail(
+      req,
+      "atenciones.claim.failed",
+      "Claim turno failed",
+      { reason: "guia_in_progress", atencionId, actorUserId, activeTurnoId: inProgress.id },
+      { entity: "Turno" },
+    )
+    throw new ConflictError(
+      "Ya tienes un turno en curso. Finalízalo antes de tomar otro.",
+    )
+  }
+
   try {
     const claimed = await atencionRepository.transaction(async (tx) => {
       const atencionGate = await atencionRepository.findGateForClaim(atencionId, tx)
@@ -56,6 +81,18 @@ export async function claimFirstAvailableTurnoUsecase(
         const candidate = await atencionRepository.findFirstAvailableTurno(atencionId, tx)
         if (!candidate) {
           throw new ConflictError("No hay cupos disponibles para esta atención")
+        }
+
+        if (candidate.fechaInicio && candidate.fechaFin) {
+          const overlap = await atencionRepository.findOverlappingTurnoForGuia(
+            { guiaId: guia.id, fechaInicio: candidate.fechaInicio, fechaFin: candidate.fechaFin },
+            tx,
+          )
+          if (overlap) {
+            throw new ConflictError(
+              "Ya tienes un turno asignado en ese horario en otra atención",
+            )
+          }
         }
 
         const updated = await atencionRepository.assignTurnoIfStillAvailable(

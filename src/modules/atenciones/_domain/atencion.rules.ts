@@ -126,4 +126,7 @@ export function assertAtencionEditable(operationalStatus: AtencionOperativeStatu
   if (operationalStatus === "CANCELED") {
     throw new ConflictError("No se puede editar una atención cancelada")
   }
+  if (operationalStatus === "CLOSED") {
+    throw new ConflictError("No se puede editar una atención cerrada")
+  }
 }

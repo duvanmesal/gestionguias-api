@@ -5,6 +5,7 @@ import { ConflictError, NotFoundError } from "../../../libs/errors"
 
 import { atencionRepository } from "../_data/atencion.repository"
 import { auditFail, auditOk } from "../_shared/atencion.audit"
+import { socketService } from "../../../core/socket/socket.service"
 
 export async function cancelAtencionUsecase(
   req: Request,
@@ -116,6 +117,10 @@ export async function cancelAtencionUsecase(
     },
     { entity: "Atencion", id: String(id) },
   )
+
+  const evt = { atencionId: id, recaladaId: updated.recaladaId }
+  socketService.emitToAtencion(id, "atencion:canceled", evt)
+  socketService.emitToSupervisors("atencion:canceled", evt)
 
   return updated
 }
