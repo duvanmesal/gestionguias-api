@@ -1,7 +1,10 @@
+import { createServer } from "http"
 import app from "./app"
 import { env } from "./config/env"
 import { logger } from "./libs/logger"
 import { prisma } from "./prisma/client"
+import { initSocketGateway } from "./core/socket/socket.gateway"
+import { startTurnoAutomationsJob } from "./core/jobs/turno-automations.job"
 
 async function startServer() {
   try {
@@ -9,8 +12,12 @@ async function startServer() {
     await prisma.$connect()
     logger.info("Database connected successfully")
 
+    const httpServer = createServer(app)
+    initSocketGateway(httpServer)
+    startTurnoAutomationsJob()
+
     // Start HTTP server
-    const server = app.listen(env.PORT, () => {
+    httpServer.listen(env.PORT, () => {
       logger.info(
         {
           port: env.PORT,
@@ -25,7 +32,7 @@ async function startServer() {
     const gracefulShutdown = async (signal: string) => {
       logger.info(`${signal} received, starting graceful shutdown`)
 
-      server.close(async () => {
+      httpServer.close(async () => {
         logger.info("HTTP server closed")
 
         try {
