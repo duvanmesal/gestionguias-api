@@ -47,4 +47,5 @@ export interface SessionInfo {
   userAgent: string | null
   createdAt: Date
   lastRotatedAt: Date | null
+  isCurrent?: boolean
 }

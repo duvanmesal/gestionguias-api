@@ -203,7 +203,7 @@ export class AuthController {
         return res.status(401).json({ error: "Unauthorized" });
       }
 
-      const sessions = await authService.listSessions(req.user.userId);
+      const sessions = await authService.listSessions(req.user.userId, req.user.sid);
       return res.json(ok({ sessions }));
     } catch (error) {
       return next(error);

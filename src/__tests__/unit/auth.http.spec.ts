@@ -181,4 +181,25 @@ describe("[HTTP] /api/v1/auth flow", () => {
 
     expect(unauth.status).toBe(401);
   });
+
+  test("POST /auth/refresh con sesión revocada → 401 sin cerrar las demás sesiones", async () => {
+    (crypto.hashRefreshToken as jest.Mock).mockReturnValue("RT_HASH");
+    (prisma.session.findUnique as jest.Mock).mockResolvedValueOnce({
+      id: "mobile-session",
+      userId: "u1",
+      refreshTokenHash: "RT_HASH",
+      platform: "MOBILE",
+      user: { id: "u1", email: "a@a.com", rol: "GUIA", activo: true },
+      refreshExpiresAt: new Date(Date.now() + 3600_000),
+      revokedAt: new Date(),
+    });
+
+    const res = await agent
+      .post("/api/v1/auth/refresh")
+      .set("X-Client-Platform", "mobile")
+      .send({ refreshToken: "SOME_VALUE" });
+
+    expect(res.status).toBe(401);
+    expect(prisma.session.updateMany).not.toHaveBeenCalled();
+  });
 });

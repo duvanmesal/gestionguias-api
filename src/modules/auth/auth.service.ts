@@ -74,8 +74,8 @@ export class AuthService {
     return requestLogoutAllCodeUsecase(req, userId);
   }
 
-  listSessions(userId: string): Promise<SessionInfo[]> {
-    return listSessionsUsecase(userId);
+  listSessions(userId: string, currentSessionId?: string): Promise<SessionInfo[]> {
+    return listSessionsUsecase(userId, currentSessionId);
   }
 
   revokeSession(sessionId: string, userId: string): Promise<void> {

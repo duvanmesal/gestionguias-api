@@ -116,7 +116,8 @@ La respuesta no incluye `tokens.refreshToken`. El refresh token se envía en coo
 - La plataforma de la sesión debe coincidir con `X-Client-Platform`.
 - El usuario debe estar activo.
 - El token se rota atómicamente.
-- Si una sesión revocada o una carrera indica reutilización, se revocan todas las sesiones del usuario y se responde `409 CONFLICT`.
+- Si la sesión ya fue revocada manualmente, el refresh responde `401 UNAUTHORIZED` sin afectar otras sesiones.
+- Si una carrera de rotación indica reutilización del refresh token, se revocan todas las sesiones del usuario y se responde `409 CONFLICT`.
 
 ## Logout
 
@@ -188,7 +189,8 @@ Reglas:
         "ip": "127.0.0.1",
         "userAgent": "Mozilla/5.0",
         "createdAt": "2026-05-04T10:00:00.000Z",
-        "lastRotatedAt": null
+        "lastRotatedAt": null,
+        "isCurrent": true
       }
     ]
   },
@@ -197,7 +199,7 @@ Reglas:
 }
 ```
 
-`DELETE /auth/sessions/:sessionId` solo revoca sesiones del usuario autenticado.
+`DELETE /auth/sessions/:sessionId` solo revoca la sesión indicada si pertenece al usuario autenticado. Si esa sesión intenta refrescar después de haber sido revocada, el backend rechaza esa sesión con `401`, pero no cierra las demás. Para cerrar todas las sesiones debe usarse el flujo `logout-all` con código.
 
 ## Cambio de contraseña autenticado
 

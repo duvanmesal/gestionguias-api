@@ -35,18 +35,15 @@ export async function refreshUsecase(
   }
 
   if (session.revokedAt) {
-    const now = new Date()
-    await authRepository.revokeAllUserSessions(session.userId, now)
-
     logsService.audit(req, {
       event: "auth.refresh.failed",
       level: "warn",
-      target: { entity: "User", id: String(session.userId) },
-      meta: { reason: "token_reuse_detected", platform, sessionId: session.id, ip, userAgent },
+      target: { entity: "Session", id: String(session.id) },
+      meta: { reason: "session_revoked", platform, sessionId: session.id, ip, userAgent },
       message: "Refresh failed",
     })
 
-    throw new ConflictError("Token reuse detected. All sessions have been terminated.")
+    throw new UnauthorizedError("Session has been revoked")
   }
 
   if (session.refreshExpiresAt && session.refreshExpiresAt < new Date()) {
