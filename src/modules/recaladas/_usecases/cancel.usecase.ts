@@ -6,6 +6,7 @@ import { logger } from "../../../libs/logger"
 
 import { recaladaRepository } from "../_data/recalada.repository"
 import { auditFail, auditOk } from "../_shared/recalada.audit"
+import { socketService } from "../../../core/socket/socket.service"
 
 export async function cancelRecaladaUsecase(
   req: Request,
@@ -78,8 +79,8 @@ export async function cancelRecaladaUsecase(
   }
 
   const [atencionesCount, turnosCount] = await Promise.all([
-    recaladaRepository.countAtenciones(id),
-    recaladaRepository.countTurnos(id),
+    recaladaRepository.countActiveAtenciones(id),
+    recaladaRepository.countActiveTurnos(id),
   ])
 
   if (atencionesCount > 0 || turnosCount > 0) {
@@ -87,11 +88,11 @@ export async function cancelRecaladaUsecase(
       req,
       "recaladas.cancel.failed",
       "Cancel recalada failed",
-      { reason: "has_dependencies", recaladaId: id, atencionesCount, turnosCount },
+      { reason: "has_active_dependencies", recaladaId: id, atencionesCount, turnosCount },
       { entity: "Recalada", id: String(id) },
     )
     throw new BadRequestError(
-      "No se puede cancelar la recalada porque tiene atenciones/turnos asociados. Defina política de cascada (cancelar o bloquear) para habilitar esta acción.",
+      "No se puede cancelar la recalada porque tiene atenciones o turnos activos. Cancélalos primero.",
     )
   }
 
@@ -128,6 +129,8 @@ export async function cancelRecaladaUsecase(
     },
     { entity: "Recalada", id: String(id) },
   )
+
+  socketService.emitToSupervisors("recalada:canceled", { recaladaId: id })
 
   return updated
 }

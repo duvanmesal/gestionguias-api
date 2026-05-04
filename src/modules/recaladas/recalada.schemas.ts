@@ -17,7 +17,7 @@ export const createRecaladaSchema = z
     terminal: z.string().trim().min(2).max(80).optional(),
     muelle: z.string().trim().min(1).max(80).optional(),
 
-    // ✅ Viejo: total_turistas >= 1 (si mandan el campo)
+    // Viejo: total_turistas >= 1 (si mandan el campo)
     pasajerosEstimados: z.coerce.number().int().min(1).max(300000).optional(),
 
     tripulacionEstimada: z.coerce

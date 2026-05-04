@@ -1,13 +1,14 @@
 import type { Request } from "express"
 import type { Prisma } from "@prisma/client"
 
-import { BadRequestError, NotFoundError } from "../../../libs/errors"
+import { BadRequestError, ConflictError, NotFoundError } from "../../../libs/errors"
 import { logger } from "../../../libs/logger"
 
 import { recaladaRepository } from "../_data/recalada.repository"
 import { buildUpdateData } from "../_domain/recalada.rules"
 import type { UpdateRecaladaInput } from "../_domain/recalada.types"
 import { auditFail, auditOk } from "../_shared/recalada.audit"
+import { socketService } from "../../../core/socket/socket.service"
 
 export async function updateRecaladaUsecase(
   req: Request,
@@ -117,6 +118,68 @@ export async function updateRecaladaUsecase(
     }
   }
 
+  // Revalidar solapamiento de buque si cambian buque o fechas
+  const effectiveBuqueId = typeof nextBuqueId === "number" ? nextBuqueId : current.buqueId
+  const effectiveFechaLlegada = (data.fechaLlegada as Date | undefined) ?? current.fechaLlegada
+  const effectiveFechaSalida = (data.fechaSalida as Date | null | undefined) ?? current.fechaSalida
+  const buqueOrDatesChanged =
+    typeof nextBuqueId === "number" ||
+    (data.fechaLlegada !== undefined) ||
+    (data.fechaSalida !== undefined)
+
+  if (buqueOrDatesChanged) {
+    const overlap = await recaladaRepository.findOverlappingForBuque({
+      buqueId: effectiveBuqueId,
+      fechaLlegada: effectiveFechaLlegada,
+      fechaSalida: effectiveFechaSalida,
+      excludeId: id,
+    })
+
+    if (overlap) {
+      auditFail(
+        req,
+        "recaladas.update.failed",
+        "Update recalada failed",
+        {
+          reason: "buque_overlap",
+          buqueId: effectiveBuqueId,
+          existingRecaladaId: overlap.id,
+          existingCodigo: overlap.codigoRecalada,
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      )
+      throw new ConflictError(
+        `El buque ya tiene una recalada activa en ese período (${overlap.codigoRecalada}). Ajusta las fechas.`,
+      )
+    }
+
+    const outsideAtencion = await recaladaRepository.findAtencionOutsideWindow({
+      recaladaId: id,
+      fechaLlegada: effectiveFechaLlegada,
+      fechaSalida: effectiveFechaSalida,
+    })
+
+    if (outsideAtencion) {
+      auditFail(
+        req,
+        "recaladas.update.failed",
+        "Update recalada failed",
+        {
+          reason: "atencion_outside_new_window",
+          recaladaId: id,
+          atencionId: outsideAtencion.id,
+          fechaLlegada: effectiveFechaLlegada.toISOString(),
+          fechaSalida: effectiveFechaSalida?.toISOString() ?? null,
+        },
+        { entity: "Recalada", id: String(id) },
+      )
+      throw new ConflictError(
+        `No se puede cambiar la ventana de la recalada: la atención ${outsideAtencion.id} quedaría fuera del nuevo rango.`,
+      )
+    }
+  }
+
   const updated = await recaladaRepository.update(id, data)
 
   logger.info(
@@ -141,6 +204,8 @@ export async function updateRecaladaUsecase(
     },
     { entity: "Recalada", id: String(id) },
   )
+
+  socketService.emitToSupervisors("recalada:updated", { recaladaId: id })
 
   return updated
 }

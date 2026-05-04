@@ -1,7 +1,7 @@
 import type { Request } from "express"
 import type { RecaladaSource, StatusType } from "@prisma/client"
 
-import { NotFoundError } from "../../../libs/errors"
+import { ConflictError, NotFoundError } from "../../../libs/errors"
 import { logger } from "../../../libs/logger"
 
 import { recaladaRepository } from "../_data/recalada.repository"
@@ -12,6 +12,7 @@ import {
 } from "../_domain/recalada.rules"
 import type { CreateRecaladaInput } from "../_domain/recalada.types"
 import { auditFail, auditOk } from "../_shared/recalada.audit"
+import { socketService } from "../../../core/socket/socket.service"
 
 export async function createRecaladaUsecase(
   req: Request,
@@ -78,10 +79,33 @@ export async function createRecaladaUsecase(
     }
   }
 
-  const [buque, pais] = await Promise.all([
+  const [buque, pais, overlap] = await Promise.all([
     recaladaRepository.findBuqueById(input.buqueId),
     recaladaRepository.findPaisById(input.paisOrigenId),
+    recaladaRepository.findOverlappingForBuque({
+      buqueId: input.buqueId,
+      fechaLlegada: input.fechaLlegada,
+      fechaSalida: input.fechaSalida,
+    }),
   ])
+
+  if (overlap) {
+    auditFail(
+      req,
+      "recaladas.create.failed",
+      "Create recalada failed",
+      {
+        reason: "buque_overlap",
+        buqueId: input.buqueId,
+        existingRecaladaId: overlap.id,
+        existingCodigo: overlap.codigoRecalada,
+      },
+      { entity: "Recalada" },
+    )
+    throw new ConflictError(
+      `El buque ya tiene una recalada activa en ese período (${overlap.codigoRecalada}). Cancélala o ajusta las fechas.`,
+    )
+  }
 
   if (!buque) {
     auditFail(
@@ -161,6 +185,8 @@ export async function createRecaladaUsecase(
     },
     { entity: "Recalada", id: String(created.id) },
   )
+
+  socketService.emitToSupervisors("recalada:created", { recaladaId: created.id })
 
   return created
 }

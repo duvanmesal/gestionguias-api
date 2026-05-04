@@ -6,6 +6,7 @@ import { logger } from "../../../libs/logger"
 
 import { recaladaRepository } from "../_data/recalada.repository"
 import { auditFail, auditOk } from "../_shared/recalada.audit"
+import { socketService } from "../../../core/socket/socket.service"
 
 export async function arriveRecaladaUsecase(
   req: Request,
@@ -69,7 +70,47 @@ export async function arriveRecaladaUsecase(
     )
   }
 
-  const when = arrivedAt ?? new Date()
+  const now = new Date()
+  const when = arrivedAt ?? now
+
+  if (when > now) {
+    auditFail(
+      req,
+      "recaladas.arrive.failed",
+      "Arrive recalada failed",
+      {
+        reason: "arrivedAt_future",
+        recaladaId: id,
+        arrivedAt: when.toISOString(),
+        now: now.toISOString(),
+      },
+      { entity: "Recalada", id: String(id) },
+    )
+    throw new BadRequestError("arrivedAt no puede ser una fecha futura")
+  }
+
+  // arrivedAt no puede ser más de 24 horas antes de la fechaLlegada programada
+  if (current.fechaLlegada) {
+    const toleranceMs = 24 * 60 * 60 * 1000
+    const earliestAllowed = new Date(current.fechaLlegada.getTime() - toleranceMs)
+    if (when < earliestAllowed) {
+      auditFail(
+        req,
+        "recaladas.arrive.failed",
+        "Arrive recalada failed",
+        {
+          reason: "arrivedAt_too_early",
+          recaladaId: id,
+          fechaLlegada: current.fechaLlegada.toISOString(),
+          arrivedAt: when.toISOString(),
+        },
+        { entity: "Recalada", id: String(id) },
+      )
+      throw new BadRequestError(
+        "El arribo real no puede registrarse más de 24 horas antes de la llegada programada.",
+      )
+    }
+  }
 
   const data: Prisma.RecaladaUpdateInput = {
     operationalStatus: "ARRIVED",
@@ -92,6 +133,8 @@ export async function arriveRecaladaUsecase(
     { actorUserId, recaladaId: id, arrivedAt: when.toISOString() },
     { entity: "Recalada", id: String(id) },
   )
+
+  socketService.emitToSupervisors("recalada:arrived", { recaladaId: id })
 
   return updated
 }

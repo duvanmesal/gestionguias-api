@@ -39,11 +39,41 @@ export class RecaladaRepository {
     return prisma.recalada.findUnique({ where: { id }, select: { id: true } })
   }
 
+  findOverlappingForBuque(args: {
+    buqueId: number
+    fechaLlegada: Date
+    fechaSalida?: Date | null
+    excludeId?: number
+  }) {
+    return prisma.recalada.findFirst({
+      where: {
+        buqueId: args.buqueId,
+        id: args.excludeId ? { not: args.excludeId } : undefined,
+        operationalStatus: { notIn: ["CANCELED", "DEPARTED"] },
+        AND: [
+          // existing ends after new starts (or is open-ended)
+          {
+            OR: [
+              { fechaSalida: null },
+              { fechaSalida: { gt: args.fechaLlegada } },
+            ],
+          },
+          // new ends after existing starts (or new is open-ended)
+          args.fechaSalida
+            ? { fechaLlegada: { lt: args.fechaSalida } }
+            : {},
+        ],
+      },
+      select: { id: true, codigoRecalada: true, fechaLlegada: true, fechaSalida: true },
+    })
+  }
+
   findByIdForUpdate(id: number) {
     return prisma.recalada.findUnique({
       where: { id },
       select: {
         id: true,
+        buqueId: true,
         operationalStatus: true,
         fechaLlegada: true,
         fechaSalida: true,
@@ -58,6 +88,7 @@ export class RecaladaRepository {
         id: true,
         operationalStatus: true,
         arrivedAt: true,
+        fechaSalida: true,
       },
     })
   }
@@ -68,6 +99,7 @@ export class RecaladaRepository {
       select: {
         id: true,
         operationalStatus: true,
+        fechaLlegada: true,
       },
     })
   }
@@ -107,6 +139,34 @@ export class RecaladaRepository {
     return prisma.atencion.findMany({
       where: { recaladaId },
       select: atencionSelectForRecalada,
+      orderBy: { fechaInicio: "asc" },
+    })
+  }
+
+  findAtencionOutsideWindow(args: {
+    recaladaId: number
+    fechaLlegada: Date
+    fechaSalida?: Date | null
+  }) {
+    const outside: Prisma.AtencionWhereInput[] = [
+      { fechaInicio: { lt: args.fechaLlegada } },
+      { fechaFin: { lt: args.fechaLlegada } },
+    ]
+
+    if (args.fechaSalida) {
+      outside.push(
+        { fechaInicio: { gt: args.fechaSalida } },
+        { fechaFin: { gt: args.fechaSalida } },
+      )
+    }
+
+    return prisma.atencion.findFirst({
+      where: {
+        recaladaId: args.recaladaId,
+        operationalStatus: { not: "CANCELED" },
+        OR: outside,
+      },
+      select: { id: true, fechaInicio: true, fechaFin: true },
       orderBy: { fechaInicio: "asc" },
     })
   }
@@ -179,6 +239,25 @@ export class RecaladaRepository {
 
   countTurnos(recaladaId: number) {
     return prisma.turno.count({ where: { atencion: { recaladaId } } })
+  }
+
+  countActiveAtenciones(recaladaId: number) {
+    return prisma.atencion.count({
+      where: { recaladaId, operationalStatus: { not: "CANCELED" } },
+    })
+  }
+
+  countActiveTurnos(recaladaId: number) {
+    return prisma.turno.count({
+      where: { atencion: { recaladaId }, status: { not: "CANCELED" } },
+    })
+  }
+
+  // Atenciones en estado OPEN (sin cerrar ni cancelar) — usadas para validar depart
+  countOpenAtenciones(recaladaId: number) {
+    return prisma.atencion.count({
+      where: { recaladaId, operationalStatus: "OPEN" },
+    })
   }
 }
 

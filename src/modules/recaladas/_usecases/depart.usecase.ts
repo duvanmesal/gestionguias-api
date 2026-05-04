@@ -1,11 +1,12 @@
 import type { Request } from "express"
 import type { Prisma } from "@prisma/client"
 
-import { BadRequestError, NotFoundError } from "../../../libs/errors"
+import { BadRequestError, ConflictError, NotFoundError } from "../../../libs/errors"
 import { logger } from "../../../libs/logger"
 
 import { recaladaRepository } from "../_data/recalada.repository"
 import { auditFail, auditOk } from "../_shared/recalada.audit"
+import { socketService } from "../../../core/socket/socket.service"
 
 export async function departRecaladaUsecase(
   req: Request,
@@ -67,22 +68,78 @@ export async function departRecaladaUsecase(
     )
   }
 
-  const when = departedAt ?? new Date()
+  const now = new Date()
+  const when = departedAt ?? now
 
-  if (current.arrivedAt && when < current.arrivedAt) {
+  if (when > now) {
     auditFail(
       req,
       "recaladas.depart.failed",
       "Depart recalada failed",
       {
-        reason: "departedAt_lt_arrivedAt",
+        reason: "departedAt_future",
+        recaladaId: id,
+        departedAt: when.toISOString(),
+        now: now.toISOString(),
+      },
+      { entity: "Recalada", id: String(id) },
+    )
+    throw new BadRequestError("departedAt no puede ser una fecha futura")
+  }
+
+  if (current.arrivedAt && when <= current.arrivedAt) {
+    auditFail(
+      req,
+      "recaladas.depart.failed",
+      "Depart recalada failed",
+      {
+        reason: "departedAt_lte_arrivedAt",
         recaladaId: id,
         arrivedAt: current.arrivedAt.toISOString(),
         departedAt: when.toISOString(),
       },
       { entity: "Recalada", id: String(id) },
     )
-    throw new BadRequestError("departedAt debe ser >= arrivedAt")
+    throw new BadRequestError(
+      "El zarpe real debe ser posterior al arribo real. El buque no puede zarpar en el mismo instante en que llegó.",
+    )
+  }
+
+  // El zarpe real no puede registrarse más de 24 horas antes de la salida programada
+  if (current.fechaSalida) {
+    const toleranceMs = 24 * 60 * 60 * 1000
+    const earliestAllowed = new Date(current.fechaSalida.getTime() - toleranceMs)
+    if (when < earliestAllowed) {
+      auditFail(
+        req,
+        "recaladas.depart.failed",
+        "Depart recalada failed",
+        {
+          reason: "departedAt_too_early",
+          recaladaId: id,
+          fechaSalida: current.fechaSalida.toISOString(),
+          departedAt: when.toISOString(),
+        },
+        { entity: "Recalada", id: String(id) },
+      )
+      throw new BadRequestError(
+        "El zarpe real no puede registrarse más de 24 horas antes de la salida programada.",
+      )
+    }
+  }
+
+  const openAtenciones = await recaladaRepository.countOpenAtenciones(id)
+  if (openAtenciones > 0) {
+    auditFail(
+      req,
+      "recaladas.depart.failed",
+      "Depart recalada failed",
+      { reason: "has_open_atenciones", recaladaId: id, openAtenciones },
+      { entity: "Recalada", id: String(id) },
+    )
+    throw new ConflictError(
+      `No se puede marcar DEPARTED: existen ${openAtenciones} atención(es) aún abiertas. Ciérralas o cancélalas primero.`,
+    )
   }
 
   const data: Prisma.RecaladaUpdateInput = {
@@ -104,6 +161,8 @@ export async function departRecaladaUsecase(
     { actorUserId, recaladaId: id, departedAt: when.toISOString() },
     { entity: "Recalada", id: String(id) },
   )
+
+  socketService.emitToSupervisors("recalada:departed", { recaladaId: id })
 
   return updated
 }
