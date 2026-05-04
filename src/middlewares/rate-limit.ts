@@ -42,6 +42,16 @@ export const logoutAllLimiter = rateLimit({
   message: tooManyMessage(),
 })
 
+// Change-password: solo cuenta intentos fallidos (exitosos no penalizan)
+export const changePasswordLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: tooManyMessage("Too many password change attempts. Try again in 10 minutes."),
+})
+
 // Logout-all code request: authenticated, per-user, less aggressive for UX retries.
 export const logoutAllCodeRequestLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,

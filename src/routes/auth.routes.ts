@@ -18,6 +18,7 @@ import {
   sensitiveLimiter,
   loginLimiter,
   refreshLimiter,
+  changePasswordLimiter,
   logoutAllLimiter,
   logoutAllCodeRequestLimiter,
 } from "../middlewares/rate-limit"
@@ -135,7 +136,7 @@ router.delete(
 // cambiar contraseña (usuario autenticado)
 router.post(
   "/change-password",
-  sensitiveLimiter,
+  changePasswordLimiter,
   detectClientPlatform,
   requireAuth,
   validate({ body: changePasswordSchema }),

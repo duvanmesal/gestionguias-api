@@ -14,12 +14,12 @@ export const refreshSchema = z.object({
   refreshToken: z.string().min(10, "Invalid refresh token").optional(),
 });
 
-// ✅ NEW: forgot password (request recovery)
+// forgot password (request recovery)
 export const forgotPasswordSchema = z.object({
   email: z.string().trim().toLowerCase().email("Invalid email format"),
 });
 
-// ✅ NEW: reset password (consume token + set new password)
+// reset password (consume token + set new password)
 export const resetPasswordSchema = z.object({
   token: z.string().trim().min(10, "Invalid token"),
   newPassword: z
@@ -32,7 +32,7 @@ export const resetPasswordSchema = z.object({
     ),
 });
 
-// ✅ NEW: request email verification link/token
+// request email verification link/token
 export const verifyEmailRequestSchema = z.object({
   email: z.string().trim().toLowerCase().email("Invalid email format"),
 });
