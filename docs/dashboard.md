@@ -1,210 +1,194 @@
-# 📊 **Módulo Dashboard — Overview Operativo por Rol (Backend)**
+# Dashboard
 
-## 1. Objetivo
+Última revisión contra código: 2026-05-04.
 
-Proveer un endpoint único `GET /dashboard/overview` que devuelva un **resumen listo para pintar** el dashboard del front, evitando:
+Fuente principal: `src/routes/dashboard.routes.ts`, `src/modules/dashboard/*`.
 
-- Múltiples llamadas innecesarias (y 403 por permisos cruzados).
-- Cálculos duplicados en el front (conteos, disponibilidad, próximos hitos).
-- Filtros “peligrosos” que exponen data fuera del rol.
+## Propósito
 
-El endpoint está diseñado para ser **rol-aware**:
+El dashboard entrega un overview listo para pintar por rol. La UI no debería recalcular reglas de negocio; debe renderizar `widgets` y, cuando necesite compatibilidad o detalle, leer los bloques `supervisor` o `guia`.
 
-- `SUPERVISOR` / `SUPER_ADMIN`: vista operativa del puerto (conteos del día + próximos hitos).
-- `GUIA`: vista personal (turno activo, próximo turno, atenciones disponibles con cupos reales).
+## Ruta
 
----
+`GET /dashboard/overview`
 
-## 2. Endpoint principal
+Requiere autenticación.
 
-### ✅ GET `/dashboard/overview`
+Roles soportados:
 
-**Auth requerida:** ✅ Sí  
-**Middleware:** `requireAuth`  
-**Roles permitidos:** `GUIA`, `SUPERVISOR`, `SUPER_ADMIN`
+- `SUPER_ADMIN`
+- `SUPERVISOR`
+- `GUIA`
 
-**Route:** `src/routes/dashboard.routes.ts`
+Si llega otro rol, responde `403 FORBIDDEN`.
 
----
+## Query
 
-## 3. Query Params y “Día Operativo” por zona horaria
+| Campo | Tipo | Default | Descripción |
+| --- | --- | --- | --- |
+| `date` | `YYYY-MM-DD` | día actual según offset | Día de referencia. |
+| `tzOffsetMinutes` | number | `-300` | Offset respecto a UTC. Bogotá = `-300`. |
+| `upcomingLimit` | number | `8`, máximo `20` | Límite de hitos para supervisor. |
+| `availableAtencionesLimit` | number | `10`, máximo `50` | Límite de atenciones disponibles para guía. |
 
-Este endpoint permite pedir el overview para un día específico y resolver correctamente el “hoy” del negocio (por ejemplo Bogotá) aunque el servidor esté en UTC.
+## Respuesta base
 
-### 3.1 `overviewQuerySchema`
-
-Archivo: `src/modules/dashboard/dashboard.schemas.ts`
-
-Query:
-
-- `date?: string`  
-  Formato `YYYY-MM-DD`. Si no se envía, se calcula con base en `tzOffsetMinutes`.
-
-- `tzOffsetMinutes: number` (default `-300`)  
-  Offset en minutos respecto a UTC. Bogotá = `-300`.
-
-- `upcomingLimit: number` (default `8`)  
-  Límite de hitos a retornar para Supervisor.
-
-- `availableAtencionesLimit: number` (default `10`)  
-  Límite de atenciones disponibles para Guía.
-
-### 3.2 Cómo se calcula el “día”
-
-El servicio:
-
-1. Obtiene `date`:
-   - si viene en query, se usa.
-   - si no viene, se deriva del “ahora” con `tzOffsetMinutes` → `YYYY-MM-DD`.
-
-2. Construye un rango UTC `[start, end)` que representa ese día local:
-   - `start`: YYYY-MM-DD 00:00 local convertido a UTC
-   - `end`: día siguiente 00:00 local convertido a UTC
-
-**Resultado:** conteos y filtros del “día” quedan consistentes con la operación real.
-
----
-
-## 4. Shape de respuesta
-
-Archivo: `src/modules/dashboard/dashboard.types.ts`
-
-### 4.1 `DashboardOverviewResponse`
-
-```ts
+```json
 {
-  role: RolType;
-  date: string; // YYYY-MM-DD según tzOffsetMinutes
-  tzOffsetMinutes: number;
-  generatedAt: string; // ISO
-  supervisor?: SupervisorOverview;
-  guia?: GuiaOverview;
+  "data": {
+    "role": "GUIA",
+    "date": "2026-05-04",
+    "tzOffsetMinutes": -300,
+    "generatedAt": "2026-05-04T15:00:00.000Z",
+    "serverTime": "2026-05-04T15:00:00.000Z",
+    "dateContext": {
+      "date": "2026-05-04",
+      "timezoneHint": "UTC-05:00"
+    },
+    "widgets": []
+  },
+  "meta": null,
+  "error": null
 }
-````
+```
 
-> En la práctica, el front puede pintar widgets con la data agregada en `supervisor` o `guia` (y opcionalmente un arreglo `widgets` si decides exponerlos desde el backend para UI 100% driven por server).
+## Widgets
 
----
+Cada widget tiene esta forma:
 
-## 5. Lógica por rol
+```json
+{
+  "id": "guia-next-turno",
+  "type": "card",
+  "title": "Próximo turno",
+  "subtitle": "Tu siguiente experiencia ya está lista.",
+  "tone": "info",
+  "icon": "ticket",
+  "data": {},
+  "actions": [
+    {
+      "label": "Ver detalles",
+      "action": "navigate",
+      "to": "/turnos/1"
+    }
+  ]
+}
+```
 
-Archivo: `src/modules/dashboard/dashboard.service.ts`
+Tipos:
 
-### 5.1 Supervisor / Super Admin
+- `card`
+- `list`
+- `kpi`
+- `cta`
+- `alert`
 
-Se construye `SupervisorOverview` con:
+Tonos:
 
-#### 5.1.1 Conteos del “día”
+- `neutral`
+- `info`
+- `success`
+- `warning`
+- `danger`
 
-* `recaladas`: recaladas activas cuya `fechaLlegada` cae dentro del rango del día.
-* `atenciones`: atenciones activas que **intersecan** el día:
+## Overview para supervisor y super admin
 
-  * `fechaInicio < end` y `fechaFin > start`
-* `turnos`: turnos cuyas atenciones activas intersecan el día.
+Para `SUPER_ADMIN` y `SUPERVISOR`, la respuesta incluye `supervisor`.
 
-> Esto evita perder atenciones que inician antes de medianoche o terminan después.
+Métricas calculadas para el día:
 
-#### 5.1.2 Próximos hitos (`upcoming`)
+- número de recaladas del día;
+- atenciones que intersectan el día;
+- turnos asociados a atenciones que intersectan el día;
+- breakdown por estado de turno;
+- guías activos, asignados y libres;
+- hitos próximos.
 
-Se arma una lista de `DashboardMilestone` y se ordena por fecha ascendente:
+Shape:
 
-Tipos (`kind`):
+```json
+{
+  "supervisor": {
+    "counts": {
+      "recaladas": 2,
+      "atenciones": 4,
+      "turnos": 40,
+      "turnosAssigned": 10,
+      "turnosAvailable": 20,
+      "turnosInProgress": 2,
+      "turnosDone": 6,
+      "turnosCanceled": 2
+    },
+    "guides": {
+      "activos": 15,
+      "asignados": 8,
+      "libres": 7
+    },
+    "turnosBreakdown": {
+      "AVAILABLE": 20,
+      "ASSIGNED": 10
+    },
+    "upcoming": []
+  }
+}
+```
 
-* `RECALADA_ARRIVAL`
-* `RECALADA_DEPARTURE`
-* `ATENCION_START`
-* `ATENCION_END`
+Widgets posibles:
 
-Fuentes:
+- `sup-operation-today`
+- `sup-alerts`
+- `sup-guides`
+- `sup-upcoming`
 
-* **Llegadas**: recaladas `SCHEDULED` con `fechaLlegada >= now`.
-* **Salidas**: recaladas `ARRIVED` con `fechaSalida != null` y `fechaSalida >= now`.
-* **Atención start/end**: atenciones `OPEN` con `fechaInicio >= now` y `fechaFin >= now`.
+Hitos posibles:
 
-Cada hito incluye:
+- `RECALADA_ARRIVAL`
+- `RECALADA_DEPARTURE`
+- `ATENCION_START`
+- `ATENCION_END`
 
-* `at` (ISO)
-* `title` (texto listo para UI)
-* `ref` con IDs (recaladaId / atencionId)
+## Overview para guía
 
----
+Para `GUIA`, la respuesta incluye `guia`.
 
-### 5.2 Guía
+Shape:
 
-Se construye `GuiaOverview` así:
+```json
+{
+  "guia": {
+    "nextTurno": null,
+    "activeTurno": null,
+    "atencionesDisponibles": []
+  }
+}
+```
 
-#### 5.2.1 Determinar `guiaId` a partir del usuario autenticado
+Reglas:
 
-* Se busca `Guia` por `usuarioId`.
-* Si el usuario no está asociado a guía:
+- El sistema resuelve la fila `Guia` desde el `usuarioId`.
+- Si el usuario no tiene fila `Guia`, devuelve `nextTurno: null`, `activeTurno: null` y `atencionesDisponibles: []`.
+- `activeTurno` representa turno en curso.
+- `nextTurno` representa el próximo turno asignado del guía.
+- `atencionesDisponibles` se limita con `availableAtencionesLimit`.
+- Los widgets de semana del guía se calculan con el rango semanal según `date` y `tzOffsetMinutes`.
 
-  * se retorna `nextTurno = null`, `activeTurno = null`, `atencionesDisponibles = []` (sin reventar el endpoint).
+Widgets posibles:
 
-#### 5.2.2 Turno activo (`activeTurno`)
+- `guia-active-turno`
+- `guia-next-turno`
+- `guia-disponibles`
+- `guia-week-kpis`
+- `guia-empty`
 
-Se consulta un turno del guía que esté:
+## Reglas de negocio
 
-* `status = IN_PROGRESS`, o
-* fallback operativo:
+- El backend decide qué datos corresponden a cada rol.
+- La UI puede ordenar o dar estilo, pero no cambiar semántica de estados.
+- Los clientes deben tratar `widgets` como la capa principal de presentación.
+- Los bloques `supervisor` y `guia` se mantienen como datos raw de compatibilidad.
 
-  * `checkInAt != null` y `checkOutAt = null` con `status in (ASSIGNED, IN_PROGRESS)`
+## Errores
 
-Esto cubre casos donde todavía no estás usando `IN_PROGRESS` de forma estricta pero ya haces check-in/out.
-
-#### 5.2.3 Próximo turno (`nextTurno`)
-
-Primer turno del guía con:
-
-* `status in (ASSIGNED, IN_PROGRESS)`
-* atención no vencida (`atencion.fechaFin > now`)
-* ordenado por `atencion.fechaInicio asc`
-
-#### 5.2.4 Atenciones disponibles (`atencionesDisponibles`)
-
-Se listan atenciones:
-
-* `status = ACTIVO`
-* `operationalStatus = OPEN`
-* `fechaFin > now`
-* y que tengan **al menos 1 turno AVAILABLE**
-
-Luego se calcula cupo real por atención con `groupBy` de turnos:
-
-* `availableTurnos = count(turnos where status=AVAILABLE)`
-
-**Esto garantiza cupo real**, no estimado por cálculo del front.
-
----
-
-## 6. Relación con el Front (por qué esto arregla tus 403)
-
-* El dashboard del front ya no necesita llamar `/users/search` cuando el rol no lo permite.
-* El front puede renderizar dashboard/sidebars usando:
-
-  * para Supervisor: conteos + upcoming
-  * para Guía: activeTurno, nextTurno, atencionesDisponibles
-* Se reduce el número de requests y se mejora la estabilidad UX.
-
----
-
-## 7. Archivos involucrados
-
-* `src/routes/dashboard.routes.ts`
-* `src/modules/dashboard/dashboard.controller.ts`
-* `src/modules/dashboard/dashboard.schemas.ts`
-* `src/modules/dashboard/dashboard.service.ts`
-* `src/modules/dashboard/dashboard.types.ts`
-* `docs/dashboard.md` ✅ (nuevo)
-
----
-
-## 8. Resultado
-
-✅ Dashboard “server-driven” por rol
-✅ Día consistente por zona horaria (`tzOffsetMinutes`)
-✅ Conteos operativos reales (intersección del día)
-✅ Hitos próximos ordenados para UI
-✅ Guía con flujo real: activo, próximo, disponibles con cupo real
-✅ Menos endpoints en el front, menos 403, menos fricción
-
----
+- `400 VALIDATION_ERROR` si `date` no es `YYYY-MM-DD` o límites salen de rango.
+- `401 UNAUTHORIZED` si no hay sesión válida.
+- `403 FORBIDDEN` si el rol no es soportado por dashboard.
