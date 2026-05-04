@@ -32,6 +32,15 @@ export function assertOperacionPermitida(gate: OperativeGate) {
  */
 export const ENFORCE_FIFO_CHECKIN = false
 
+/** Ventana máxima de anticipación para check-in (30 min antes del inicio) */
+export const CHECKIN_EARLY_WINDOW_MS = 30 * 60 * 1000
+
+/** Grace period antes de marcar NO_SHOW automático (30 min después del inicio) */
+export const NO_SHOW_GRACE_MS = 30 * 60 * 1000
+
+/** Margen antes de cierre automático (30 min después del fin programado) */
+export const AUTO_COMPLETE_MARGIN_MS = 30 * 60 * 1000
+
 export function buildNoShowObservacion(reason?: string): string {
   const base = "NO_SHOW"
   if (!reason?.trim()) return base

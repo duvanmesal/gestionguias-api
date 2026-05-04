@@ -10,6 +10,7 @@ import {
 import { turnoRepository } from "../_data/turno.repository"
 import { assertOperacionPermitida } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
+import { socketService } from "../../../core/socket/socket.service"
 
 export async function checkOutTurnoUsecase(req: Request, turnoId: number, actorUserId: string) {
   const actorGuiaId = await turnoRepository.getActorGuiaIdOrThrow(actorUserId)
@@ -73,6 +74,19 @@ export async function checkOutTurnoUsecase(req: Request, turnoId: number, actorU
 
   const now = new Date()
 
+  if (current.fechaInicio && now < current.fechaInicio) {
+    auditFail(
+      req,
+      "turnos.checkout.failed",
+      "Check-out failed",
+      { reason: "before_fechaInicio", turnoId, fechaInicio: current.fechaInicio },
+      { entity: "Turno", id: String(turnoId) },
+    )
+    throw new BadRequestError(
+      "No se puede hacer check-out antes del inicio programado del turno",
+    )
+  }
+
   const updated = await turnoRepository.transaction(async (tx) => {
     const result = await turnoRepository.checkOutIfStillInProgress({ turnoId, guiaId: actorGuiaId, now }, tx)
 
@@ -104,6 +118,10 @@ export async function checkOutTurnoUsecase(req: Request, turnoId: number, actorU
     },
     { entity: "Turno", id: String(turnoId) },
   )
+
+  const evt = { turnoId: updated.id, atencionId: updated.atencionId, status: updated.status, guiaId: actorGuiaId }
+  socketService.emitToAtencion(updated.atencionId, "turno:checkedOut", evt)
+  socketService.emitToSupervisors("turno:checkedOut", evt)
 
   return updated
 }

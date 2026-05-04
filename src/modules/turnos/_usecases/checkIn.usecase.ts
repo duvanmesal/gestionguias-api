@@ -8,8 +8,9 @@ import {
 } from "../../../libs/errors"
 
 import { turnoRepository } from "../_data/turno.repository"
-import { assertOperacionPermitida, ENFORCE_FIFO_CHECKIN } from "../_domain/turno.rules"
+import { assertOperacionPermitida, ENFORCE_FIFO_CHECKIN, CHECKIN_EARLY_WINDOW_MS } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
+import { socketService } from "../../../core/socket/socket.service"
 
 export async function checkInTurnoUsecase(req: Request, turnoId: number, actorUserId: string) {
   const actorGuiaId = await turnoRepository.getActorGuiaIdOrThrow(actorUserId)
@@ -71,6 +72,34 @@ export async function checkInTurnoUsecase(req: Request, turnoId: number, actorUs
     throw new ConflictError("No puedes hacer check-in en un turno asignado a otro guía")
   }
 
+  const now = new Date()
+
+  if (current.fechaInicio && now < new Date(current.fechaInicio.getTime() - CHECKIN_EARLY_WINDOW_MS)) {
+    auditFail(
+      req,
+      "turnos.checkin.failed",
+      "Check-in failed",
+      { reason: "too_early", turnoId, fechaInicio: current.fechaInicio },
+      { entity: "Turno", id: String(turnoId) },
+    )
+    throw new BadRequestError(
+      "Demasiado temprano para hacer check-in (más de 30 minutos antes del inicio del turno)",
+    )
+  }
+
+  if (current.fechaFin && now > current.fechaFin) {
+    auditFail(
+      req,
+      "turnos.checkin.failed",
+      "Check-in failed",
+      { reason: "past_fin", turnoId, fechaFin: current.fechaFin },
+      { entity: "Turno", id: String(turnoId) },
+    )
+    throw new BadRequestError(
+      "El turno ya finalizó su horario programado. Contacta al supervisor.",
+    )
+  }
+
   if (ENFORCE_FIFO_CHECKIN) {
     const prevPending = await turnoRepository.findPrevPendingAssignedTurno({
       atencionId: current.atencionId,
@@ -90,8 +119,6 @@ export async function checkInTurnoUsecase(req: Request, turnoId: number, actorUs
       )
     }
   }
-
-  const now = new Date()
 
   const updated = await turnoRepository.transaction(async (tx) => {
     const result = await turnoRepository.checkInIfStillAssigned({ turnoId, guiaId: actorGuiaId, now }, tx)
@@ -124,6 +151,10 @@ export async function checkInTurnoUsecase(req: Request, turnoId: number, actorUs
     },
     { entity: "Turno", id: String(turnoId) },
   )
+
+  const evt = { turnoId: updated.id, atencionId: updated.atencionId, status: updated.status, guiaId: actorGuiaId }
+  socketService.emitToAtencion(updated.atencionId, "turno:checkedIn", evt)
+  socketService.emitToSupervisors("turno:checkedIn", evt)
 
   return updated
 }

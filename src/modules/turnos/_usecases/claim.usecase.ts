@@ -10,6 +10,7 @@ import {
 import { turnoRepository } from "../_data/turno.repository"
 import { assertOperacionPermitida } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
+import { socketService } from "../../../core/socket/socket.service"
 
 export async function claimTurnoUsecase(req: Request, turnoId: number, actorUserId: string) {
   const actorGuiaId = await turnoRepository.getActorGuiaIdOrThrow(actorUserId)
@@ -37,6 +38,20 @@ export async function claimTurnoUsecase(req: Request, turnoId: number, actorUser
       operationalStatus: current.atencion.recalada.operationalStatus,
     },
   })
+
+  const inProgress = await turnoRepository.findActiveForGuia(actorGuiaId)
+  if (inProgress) {
+    auditFail(
+      req,
+      "turnos.claim.failed",
+      "Claim turno failed",
+      { reason: "guia_in_progress", turnoId, actorGuiaId, activeTurnoId: inProgress.id },
+      { entity: "Turno", id: String(turnoId) },
+    )
+    throw new ConflictError(
+      "Ya tienes un turno en curso. Finalízalo antes de tomar otro.",
+    )
+  }
 
   if (current.status !== "AVAILABLE" || current.guiaId !== null) {
     auditFail(
@@ -68,6 +83,34 @@ export async function claimTurnoUsecase(req: Request, turnoId: number, actorUser
       { entity: "Turno", id: String(turnoId) },
     )
     throw new ConflictError("Ya tienes un turno asignado en esta atención")
+  }
+
+  if (current.fechaInicio && current.fechaFin) {
+    const overlap = await turnoRepository.findOverlappingTurnoForGuia({
+      guiaId: actorGuiaId,
+      fechaInicio: current.fechaInicio,
+      fechaFin: current.fechaFin,
+      excludeTurnoId: turnoId,
+    })
+    if (overlap) {
+      auditFail(
+        req,
+        "turnos.claim.failed",
+        "Claim turno failed",
+        {
+          reason: "guia_schedule_overlap",
+          turnoId,
+          actorGuiaId,
+          conflictingTurnoId: overlap.id,
+          fechaInicio: current.fechaInicio,
+          fechaFin: current.fechaFin,
+        },
+        { entity: "Turno", id: String(turnoId) },
+      )
+      throw new ConflictError(
+        "Ya tienes un turno asignado en ese horario en otra atención",
+      )
+    }
   }
 
   try {
@@ -103,6 +146,10 @@ export async function claimTurnoUsecase(req: Request, turnoId: number, actorUser
       },
       { entity: "Turno", id: String(turnoId) },
     )
+
+    const evt = { turnoId: updated.id, atencionId: updated.atencionId, status: updated.status, guiaId: actorGuiaId }
+    socketService.emitToAtencion(updated.atencionId, "turno:claimed", evt)
+    socketService.emitToSupervisors("turno:claimed", evt)
 
     return updated
   } catch (err: any) {

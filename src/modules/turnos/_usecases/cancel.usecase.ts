@@ -4,7 +4,9 @@ import { logger } from "../../../libs/logger"
 import { ConflictError, NotFoundError } from "../../../libs/errors"
 
 import { turnoRepository } from "../_data/turno.repository"
+import { assertOperacionPermitida } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
+import { socketService } from "../../../core/socket/socket.service"
 
 export async function cancelTurnoUsecase(
   req: Request,
@@ -12,7 +14,7 @@ export async function cancelTurnoUsecase(
   cancelReason: string | undefined,
   actorUserId: string,
 ) {
-  const current = await turnoRepository.findForCancel(turnoId)
+  const current = await turnoRepository.findGateForOperacion(turnoId)
 
   if (!current) {
     auditFail(
@@ -25,35 +27,26 @@ export async function cancelTurnoUsecase(
     throw new NotFoundError("Turno no encontrado")
   }
 
-  if (current.status === "COMPLETED") {
+  assertOperacionPermitida({
+    atencion: {
+      status: current.atencion.status,
+      operationalStatus: current.atencion.operationalStatus,
+    },
+    recalada: {
+      status: current.atencion.recalada.status,
+      operationalStatus: current.atencion.recalada.operationalStatus,
+    },
+  })
+
+  if (current.status !== "AVAILABLE" && current.status !== "ASSIGNED") {
     auditFail(
       req,
       "turnos.cancel.failed",
       "Cancel turno failed",
-      { reason: "completed", turnoId },
+      { reason: "invalid_status", turnoId, status: current.status },
       { entity: "Turno", id: String(turnoId) },
     )
-    throw new ConflictError("No se puede cancelar un turno completado")
-  }
-  if (current.status === "IN_PROGRESS") {
-    auditFail(
-      req,
-      "turnos.cancel.failed",
-      "Cancel turno failed",
-      { reason: "in_progress", turnoId },
-      { entity: "Turno", id: String(turnoId) },
-    )
-    throw new ConflictError("No se puede cancelar un turno en progreso")
-  }
-  if (current.status === "CANCELED") {
-    auditFail(
-      req,
-      "turnos.cancel.failed",
-      "Cancel turno failed",
-      { reason: "already_canceled", turnoId },
-      { entity: "Turno", id: String(turnoId) },
-    )
-    throw new ConflictError("El turno ya está cancelado")
+    throw new ConflictError("Solo se puede cancelar un turno AVAILABLE o ASSIGNED")
   }
 
   const now = new Date()
@@ -79,6 +72,10 @@ export async function cancelTurnoUsecase(
     },
     { entity: "Turno", id: String(turnoId) },
   )
+
+  const evt = { turnoId: updated.id, atencionId: updated.atencionId, status: updated.status, guiaId: updated.guiaId }
+  socketService.emitToAtencion(updated.atencionId, "turno:canceled", evt)
+  socketService.emitToSupervisors("turno:canceled", evt)
 
   return updated
 }

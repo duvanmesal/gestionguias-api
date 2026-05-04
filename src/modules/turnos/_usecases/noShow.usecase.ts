@@ -10,6 +10,7 @@ import {
 import { turnoRepository } from "../_data/turno.repository"
 import { assertOperacionPermitida, buildNoShowObservacion } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
+import { socketService } from "../../../core/socket/socket.service"
 
 export async function noShowTurnoUsecase(
   req: Request,
@@ -52,6 +53,25 @@ export async function noShowTurnoUsecase(
     throw new ConflictError("Solo se puede marcar NO_SHOW si el turno está ASSIGNED")
   }
 
+  const now = new Date()
+  if (current.fechaInicio && now < current.fechaInicio) {
+    auditFail(
+      req,
+      "turnos.noShow.failed",
+      "NO_SHOW failed",
+      {
+        reason: "turno_not_started",
+        turnoId,
+        fechaInicio: current.fechaInicio.toISOString(),
+        now: now.toISOString(),
+      },
+      { entity: "Turno", id: String(turnoId) },
+    )
+    throw new BadRequestError(
+      "No se puede marcar NO_SHOW antes de que comience el turno",
+    )
+  }
+
   const extra = buildNoShowObservacion(reason)
   const mergedObs = current.observaciones?.trim()
     ? `${current.observaciones.trim()} | ${extra}`
@@ -89,6 +109,10 @@ export async function noShowTurnoUsecase(
     },
     { entity: "Turno", id: String(turnoId) },
   )
+
+  const evt = { turnoId: updated.id, atencionId: updated.atencionId, status: updated.status, guiaId: updated.guiaId }
+  socketService.emitToAtencion(updated.atencionId, "turno:noShow", evt)
+  socketService.emitToSupervisors("turno:noShow", evt)
 
   return updated
 }

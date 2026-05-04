@@ -10,6 +10,7 @@ import {
 import { turnoRepository } from "../_data/turno.repository"
 import { assertOperacionPermitida } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
+import { socketService } from "../../../core/socket/socket.service"
 
 export async function assignTurnoUsecase(
   req: Request,
@@ -38,6 +39,31 @@ export async function assignTurnoUsecase(
       { entity: "Guia", id: guiaId },
     )
     throw new NotFoundError("Guía no encontrado (guiaId)")
+  }
+
+  if (!guia.usuario.activo) {
+    auditFail(
+      req,
+      "turnos.assign.failed",
+      "Assign turno failed",
+      { reason: "guia_inactive", guiaId, turnoId },
+      { entity: "Guia", id: guiaId },
+    )
+    throw new BadRequestError("No se puede asignar: el guía está inactivo")
+  }
+
+  const inProgress = await turnoRepository.findActiveForGuia(guiaId)
+  if (inProgress) {
+    auditFail(
+      req,
+      "turnos.assign.failed",
+      "Assign turno failed",
+      { reason: "guia_in_progress", guiaId, turnoId, activeTurnoId: inProgress.id },
+      { entity: "Turno", id: String(turnoId) },
+    )
+    throw new ConflictError(
+      "El guía ya tiene un turno en curso (IN_PROGRESS). Debe finalizar antes de recibir otro.",
+    )
   }
 
   const current = await turnoRepository.findGateForOperacion(turnoId)
@@ -96,6 +122,34 @@ export async function assignTurnoUsecase(
     throw new ConflictError("El guía ya tiene un turno asignado en esta atención")
   }
 
+  if (current.fechaInicio && current.fechaFin) {
+    const overlap = await turnoRepository.findOverlappingTurnoForGuia({
+      guiaId,
+      fechaInicio: current.fechaInicio,
+      fechaFin: current.fechaFin,
+      excludeTurnoId: turnoId,
+    })
+    if (overlap) {
+      auditFail(
+        req,
+        "turnos.assign.failed",
+        "Assign turno failed",
+        {
+          reason: "guia_schedule_overlap",
+          turnoId,
+          guiaId,
+          conflictingTurnoId: overlap.id,
+          fechaInicio: current.fechaInicio,
+          fechaFin: current.fechaFin,
+        },
+        { entity: "Turno", id: String(turnoId) },
+      )
+      throw new ConflictError(
+        "El guía ya tiene un turno asignado en ese horario en otra atención",
+      )
+    }
+  }
+
   try {
     const updated = await turnoRepository.transaction(async (tx) => {
       const result = await turnoRepository.assignIfStillAvailable({ turnoId, guiaId }, tx)
@@ -129,6 +183,13 @@ export async function assignTurnoUsecase(
       },
       { entity: "Turno", id: String(turnoId) },
     )
+
+    const evt = { turnoId: updated.id, atencionId: updated.atencionId, status: updated.status, guiaId }
+    socketService.emitToAtencion(updated.atencionId, "turno:assigned", evt)
+    socketService.emitToSupervisors("turno:assigned", evt)
+    if (updated.guia?.usuario.id) {
+      socketService.emitToGuia(updated.guia.usuario.id, "turno:assigned", evt)
+    }
 
     return updated
   } catch (err: any) {

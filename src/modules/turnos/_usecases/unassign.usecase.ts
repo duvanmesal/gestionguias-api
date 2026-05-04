@@ -5,7 +5,9 @@ import { logger } from "../../../libs/logger"
 import { ConflictError, ForbiddenError, NotFoundError } from "../../../libs/errors"
 
 import { turnoRepository } from "../_data/turno.repository"
+import { assertOperacionPermitida } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
+import { socketService } from "../../../core/socket/socket.service"
 
 export async function unassignTurnoUsecase(
   req: Request,
@@ -14,7 +16,7 @@ export async function unassignTurnoUsecase(
   actorUserId: string,
   actorRol: RolType,
 ) {
-  const current = await turnoRepository.findForUnassign(turnoId)
+  const current = await turnoRepository.findGateForOperacion(turnoId)
 
   if (!current) {
     auditFail(
@@ -26,6 +28,17 @@ export async function unassignTurnoUsecase(
     )
     throw new NotFoundError("Turno no encontrado")
   }
+
+  assertOperacionPermitida({
+    atencion: {
+      status: current.atencion.status,
+      operationalStatus: current.atencion.operationalStatus,
+    },
+    recalada: {
+      status: current.atencion.recalada.status,
+      operationalStatus: current.atencion.recalada.operationalStatus,
+    },
+  })
 
   // Si el actor es GUIA, solo puede liberar su propio turno
   if (actorRol === "GUIA") {
@@ -84,6 +97,10 @@ export async function unassignTurnoUsecase(
     },
     { entity: "Turno", id: String(turnoId) },
   )
+
+  const evt = { turnoId: updated.id, atencionId: updated.atencionId, status: updated.status, guiaId: null }
+  socketService.emitToAtencion(updated.atencionId, "turno:unassigned", evt)
+  socketService.emitToSupervisors("turno:unassigned", evt)
 
   return updated
 }

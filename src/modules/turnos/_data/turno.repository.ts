@@ -26,16 +26,20 @@ export class TurnoRepository {
   async getActorGuiaIdOrThrow(actorUserId: string, tx?: Tx): Promise<string> {
     const guia = await db(tx).guia.findUnique({
       where: { usuarioId: actorUserId },
-      select: { id: true },
+      select: { id: true, usuario: { select: { activo: true } } },
     })
 
     if (!guia) throw new ConflictError("El usuario autenticado no está asociado a un guía")
+    if (!guia.usuario.activo) throw new ConflictError("Tu cuenta de guía está inactiva")
 
     return guia.id
   }
 
   findGuiaById(guiaId: string, tx?: Tx) {
-    return db(tx).guia.findUnique({ where: { id: guiaId }, select: { id: true } })
+    return db(tx).guia.findUnique({
+      where: { id: guiaId },
+      select: { id: true, usuario: { select: { activo: true } } },
+    })
   }
 
   // -------------------------
@@ -77,6 +81,8 @@ export class TurnoRepository {
         guiaId: true,
         numero: true,
         status: true,
+        fechaInicio: true,
+        fechaFin: true,
         checkInAt: true,
         checkOutAt: true,
         observaciones: true,
@@ -123,6 +129,22 @@ export class TurnoRepository {
     return db(tx).turno.findFirst({
       where: { atencionId: args.atencionId, guiaId: args.guiaId },
       select: { id: true },
+    })
+  }
+
+  findOverlappingTurnoForGuia(
+    args: { guiaId: string; fechaInicio: Date; fechaFin: Date; excludeTurnoId?: number },
+    tx?: Tx,
+  ) {
+    return db(tx).turno.findFirst({
+      where: {
+        guiaId: args.guiaId,
+        status: { in: ["ASSIGNED", "IN_PROGRESS"] },
+        ...(args.excludeTurnoId ? { id: { not: args.excludeTurnoId } } : {}),
+        fechaInicio: { lt: args.fechaFin },
+        fechaFin: { gt: args.fechaInicio },
+      },
+      select: { id: true, numero: true, fechaInicio: true, fechaFin: true, atencionId: true },
     })
   }
 
@@ -204,6 +226,39 @@ export class TurnoRepository {
     return tx.turno.updateMany({
       where: { id: args.turnoId, status: "ASSIGNED" },
       data: { status: "NO_SHOW", observaciones: args.mergedObs },
+    })
+  }
+
+  // -------------------------
+  // Automation job helpers
+  // -------------------------
+  findExpiredAssigned(gracePeriodMs: number) {
+    const cutoff = new Date(Date.now() - gracePeriodMs)
+    return prisma.turno.findMany({
+      where: { status: "ASSIGNED", fechaInicio: { lte: cutoff } },
+      select: { id: true, atencionId: true, guiaId: true },
+    })
+  }
+
+  findExpiredInProgress(marginMs: number) {
+    const cutoff = new Date(Date.now() - marginMs)
+    return prisma.turno.findMany({
+      where: { status: "IN_PROGRESS", fechaFin: { lte: cutoff } },
+      select: { id: true, atencionId: true, guiaId: true },
+    })
+  }
+
+  bulkNoShow(turnoIds: number[], now: Date) {
+    return prisma.turno.updateMany({
+      where: { id: { in: turnoIds }, status: "ASSIGNED" },
+      data: { status: "NO_SHOW", observaciones: "NO_SHOW automático por inasistencia" },
+    })
+  }
+
+  bulkAutoComplete(turnoIds: number[], now: Date) {
+    return prisma.turno.updateMany({
+      where: { id: { in: turnoIds }, status: "IN_PROGRESS" },
+      data: { status: "COMPLETED", checkOutAt: now, observaciones: "Cierre automático" },
     })
   }
 }
