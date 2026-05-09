@@ -1,6 +1,7 @@
 // src/libs/email.ts
 import { logger } from "./logger";
 import { env } from "../config/env";
+import { BadGatewayError } from "./errors";
 
 const EMAIL_FROM = env.EMAIL_FROM;
 const RESEND_API_BASE_URL = env.RESEND_API_BASE_URL.replace(/\/+$/, "");
@@ -436,8 +437,17 @@ async function sendWithOutbox(input: SendEmailInput): Promise<SendEmailResult> {
 
 async function parseResendError(response: Response): Promise<string> {
   try {
-    const payload = (await response.json()) as { message?: string; name?: string };
-    return payload.message || payload.name || `Resend API returned ${response.status}`;
+    const payload = (await response.json()) as {
+      message?: string;
+      name?: string;
+      error?: string;
+    };
+    return (
+      payload.message ||
+      payload.error ||
+      payload.name ||
+      `Resend API returned ${response.status}`
+    );
   } catch {
     return `Resend API returned ${response.status}`;
   }
@@ -465,7 +475,11 @@ async function sendWithResend(input: SendEmailInput): Promise<SendEmailResult> {
 
   if (!response.ok) {
     const message = await parseResendError(response);
-    throw new Error(`Resend email send failed: ${message}`);
+    throw new BadGatewayError("Email provider rejected the message", {
+      provider: "resend",
+      status: response.status,
+      reason: message,
+    });
   }
 
   const payload = (await response.json()) as { id?: string };
@@ -930,7 +944,7 @@ Si no solicitaste este cambio, ignora este correo.
     );
   } catch (error) {
     logger.error({ error, to: data.to }, "Failed to send password reset email");
-    throw new Error("Failed to send password reset email");
+    throw error;
   }
 }
 
@@ -968,7 +982,7 @@ Si no solicitaste esta verificación, ignora este correo.
     );
   } catch (error) {
     logger.error({ error, to: data.to }, "Failed to send verify email");
-    throw new Error("Failed to send verify email");
+    throw error;
   }
 }
 
@@ -1002,7 +1016,7 @@ Si no solicitaste esta acción, ignora este correo y cambia tu contraseña.
     );
   } catch (error) {
     logger.error({ error, to: data.to }, "Failed to send logout-all code email");
-    throw new Error("Failed to send logout-all code email");
+    throw error;
   }
 }
 
@@ -1065,7 +1079,7 @@ export async function sendTestEmail(
     );
   } catch (error) {
     logger.error({ error, to }, "Failed to send test email");
-    throw new Error("Failed to send test email");
+    throw error;
   }
 }
 
