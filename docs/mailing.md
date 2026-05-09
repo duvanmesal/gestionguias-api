@@ -1,6 +1,6 @@
 # Mailing e invitaciones
 
-Última revisión contra código: 2026-05-04.
+Última revisión contra código: 2026-05-09.
 
 Fuente principal: `src/routes/invitations.routes.ts`, `src/routes/email.routes.ts`, `src/modules/invitations/*`, `src/libs/email.ts`, `src/config/env.ts`.
 
@@ -11,7 +11,7 @@ Este documento cubre:
 - invitaciones administrativas;
 - reenvío de invitaciones;
 - consulta de invitaciones;
-- endpoints de prueba SMTP;
+- endpoints técnicos de email;
 - correos transaccionales usados por auth.
 
 La autenticación y recuperación de contraseña se explican funcionalmente en [auth.md](./auth.md).
@@ -20,11 +20,10 @@ La autenticación y recuperación de contraseña se explican funcionalmente en [
 
 | Variable | Default |
 | --- | --- |
-| `SMTP_HOST` | `smtp-relay.brevo.com` |
-| `SMTP_PORT` | `587` |
-| `SMTP_USER` | vacío |
-| `SMTP_PASS` | vacío |
-| `EMAIL_FROM` | `duvanmesa2415@gmail.com` |
+| `EMAIL_PROVIDER` | `production`: `resend`; `development`/`test`: `outbox` |
+| `RESEND_API_KEY` | vacío |
+| `RESEND_API_BASE_URL` | `https://api.resend.com` |
+| `EMAIL_FROM` | `Gestion de Guias <onboarding@resend.dev>` |
 | `APP_LOGIN_URL` | `http://localhost:3001/login` |
 | `APP_RESET_PASSWORD_URL` | `http://localhost:3001/reset-password` |
 | `APP_VERIFY_EMAIL_URL` | `http://localhost:3001/verify-email` |
@@ -185,9 +184,23 @@ Funciones internas del service:
 
 No tienen ruta pública observada.
 
+## Transporte de email
+
+El servicio usa dos transportes:
+
+- `resend`: envía correos reales por HTTP hacia Resend API. Es el modo recomendado para Render test/demo.
+- `outbox`: no envía red; registra el correo generado como salida local segura. Es el fallback por defecto en `development` y `test`.
+
+En producción, configurar en Render:
+
+- `EMAIL_PROVIDER=resend`
+- `RESEND_API_KEY`
+- `EMAIL_FROM` con un remitente permitido por Resend
+- URLs públicas del front en `APP_LOGIN_URL`, `APP_RESET_PASSWORD_URL` y `APP_VERIFY_EMAIL_URL`
+
 ## Emails técnicos
 
-### Verificar conexión SMTP
+### Verificar configuración de email
 
 `GET /emails/verify`
 
