@@ -108,9 +108,9 @@ router.post(
 
 router.post(
   "/logout-all",
-  logoutAllLimiter,
   detectClientPlatform,
   requireAuth,
+  logoutAllLimiter,
   validate({ body: logoutAllSchema }),
   authController.logoutAll.bind(authController),
 )

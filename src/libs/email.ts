@@ -1,16 +1,13 @@
 // src/libs/email.ts
-import nodemailer from "nodemailer";
 import { logger } from "./logger";
 import { env } from "../config/env";
 
-const SMTP_HOST = env.SMTP_HOST;
-const SMTP_PORT = env.SMTP_PORT;
-const SMTP_USER = env.SMTP_USER;
-const SMTP_PASS = env.SMTP_PASS;
 const EMAIL_FROM = env.EMAIL_FROM;
+const RESEND_API_BASE_URL = env.RESEND_API_BASE_URL.replace(/\/+$/, "");
 const APP_LOGIN_URL = env.APP_LOGIN_URL;
 const APP_VERIFY_EMAIL_URL = env.APP_VERIFY_EMAIL_URL;
 const APP_NAME = process.env.APP_NAME || "Gestión de Guías Turísticos";
+const SERVICE_USER_AGENT = "gestionguias-api/0.1.0";
 
 export interface InvitationEmailData {
   email: string;
@@ -45,6 +42,32 @@ export type SendEmailInput = {
   text?: string;
   headers?: Record<string, string>;
 };
+
+export type EmailProvider = "resend" | "outbox";
+
+export type SendEmailResult = {
+  provider: EmailProvider;
+  messageId: string;
+  response?: string;
+  accepted: string[];
+  rejected: string[];
+};
+
+export type OutboxEmailMessage = SendEmailInput & {
+  id: string;
+  from: string;
+  createdAt: string;
+};
+
+const emailOutbox: OutboxEmailMessage[] = [];
+
+export function getEmailOutboxMessages(): OutboxEmailMessage[] {
+  return [...emailOutbox];
+}
+
+export function clearEmailOutbox(): void {
+  emailOutbox.length = 0;
+}
 
 // ============================================
 // DESIGN TOKENS (Premium Dark Theme)
@@ -361,19 +384,101 @@ function getBaseStyles(): string {
   `;
 }
 
-// ---- transporter (Brevo 587 = STARTTLS) ----
-export const transporter = nodemailer.createTransport({
-  host: SMTP_HOST,
-  port: SMTP_PORT,
-  secure: SMTP_PORT === 465, // 465 = SSL; 587 = STARTTLS
-  auth: {
-    user: SMTP_USER,
-    pass: SMTP_PASS,
-  },
-  tls: {
-    minVersion: "TLSv1.2",
-  },
-});
+export function getEmailProvider(): EmailProvider {
+  if (env.EMAIL_PROVIDER) return env.EMAIL_PROVIDER;
+  return env.NODE_ENV === "production" ? "resend" : "outbox";
+}
+
+function assertResendConfigured() {
+  if (!env.RESEND_API_KEY) {
+    throw new Error("RESEND_API_KEY is required when EMAIL_PROVIDER=resend");
+  }
+
+  if (!EMAIL_FROM) {
+    throw new Error("EMAIL_FROM is required when EMAIL_PROVIDER=resend");
+  }
+}
+
+function buildOutboxMessageId(): string {
+  const random = Math.random().toString(36).slice(2, 10);
+  return `outbox_${Date.now()}_${random}`;
+}
+
+async function sendWithOutbox(input: SendEmailInput): Promise<SendEmailResult> {
+  const messageId = buildOutboxMessageId();
+  emailOutbox.push({
+    id: messageId,
+    from: EMAIL_FROM,
+    createdAt: new Date().toISOString(),
+    ...input,
+  });
+
+  logger.info(
+    {
+      provider: "outbox",
+      to: input.to,
+      subject: input.subject,
+      messageId,
+      hasHtml: !!input.html,
+      hasText: !!input.text,
+    },
+    "[email] outbox message generated",
+  );
+
+  return {
+    provider: "outbox",
+    messageId,
+    response: "Stored in local outbox",
+    accepted: [input.to],
+    rejected: [],
+  };
+}
+
+async function parseResendError(response: Response): Promise<string> {
+  try {
+    const payload = (await response.json()) as { message?: string; name?: string };
+    return payload.message || payload.name || `Resend API returned ${response.status}`;
+  } catch {
+    return `Resend API returned ${response.status}`;
+  }
+}
+
+async function sendWithResend(input: SendEmailInput): Promise<SendEmailResult> {
+  assertResendConfigured();
+
+  const response = await fetch(`${RESEND_API_BASE_URL}/emails`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+      "User-Agent": SERVICE_USER_AGENT,
+    },
+    body: JSON.stringify({
+      from: EMAIL_FROM,
+      to: [input.to],
+      subject: input.subject,
+      html: input.html,
+      text: input.text,
+      headers: input.headers,
+    }),
+  });
+
+  if (!response.ok) {
+    const message = await parseResendError(response);
+    throw new Error(`Resend email send failed: ${message}`);
+  }
+
+  const payload = (await response.json()) as { id?: string };
+  const messageId = payload.id || `resend_${Date.now()}`;
+
+  return {
+    provider: "resend",
+    messageId,
+    response: `Resend accepted email with status ${response.status}`,
+    accepted: [input.to],
+    rejected: [],
+  };
+}
 
 // ---- INVITATION TEMPLATE ----
 function generateInvitationHTML(data: InvitationEmailData): string {
@@ -721,18 +826,17 @@ export async function sendEmail({
   html,
   text,
   headers,
-}: SendEmailInput) {
-  const info = await transporter.sendMail({
-    from: EMAIL_FROM,
-    to,
-    subject,
-    html,
-    text,
-    headers,
-  });
+}: SendEmailInput): Promise<SendEmailResult> {
+  const provider = getEmailProvider();
+  const payload = { to, subject, html, text, headers };
+  const info =
+    provider === "resend"
+      ? await sendWithResend(payload)
+      : await sendWithOutbox(payload);
 
   logger.info(
     {
+      provider: info.provider,
       to,
       subject,
       messageId: info.messageId,
@@ -905,7 +1009,7 @@ Si no solicitaste esta acción, ignora este correo y cambia tu contraseña.
 // ---- API: prueba de mailing ----
 export async function sendTestEmail(
   to: string,
-  subject = "Prueba SMTP – Gestión de Guías",
+  subject = "Prueba de correo - Gestión de Guías",
   message = "Hola, esto es una prueba de envío de correo.",
 ): Promise<void> {
   try {
@@ -932,7 +1036,7 @@ export async function sendTestEmail(
   <div class="wrapper">
     <div class="card">
       <div class="header">
-        <h2>🚀 Prueba de correo SMTP</h2>
+        <h2>🚀 Prueba de correo</h2>
       </div>
       <div class="body">
         <p>Este mensaje confirma que el servicio de mailing está <strong style="color:${COLORS.textPrimary};">funcionando correctamente</strong>.</p>
@@ -952,7 +1056,7 @@ export async function sendTestEmail(
       subject,
       html,
       text: message,
-      headers: { "X-Preheader": "Prueba de transporte SMTP" },
+      headers: { "X-Preheader": "Prueba de transporte de email" },
     });
 
     logger.info(
@@ -968,8 +1072,12 @@ export async function sendTestEmail(
 // ---- Health-check del transporte ----
 export async function verifyEmailConnection(): Promise<boolean> {
   try {
-    await transporter.verify();
-    logger.info("Email service connection verified");
+    const provider = getEmailProvider();
+    if (provider === "resend") {
+      assertResendConfigured();
+    }
+
+    logger.info({ provider }, "Email service configuration verified");
     return true;
   } catch (error) {
     logger.error({ error }, "Email service connection failed");

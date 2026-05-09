@@ -9,6 +9,7 @@ import { apiRouter } from "./routes"
 import { logger } from "./libs/logger"
 import { env } from "./config/env"
 import { requestContext } from "./middlewares/requestContext"
+import { globalLimiter } from "./middlewares/rate-limit"
 import { responseLog } from "./middlewares/response-log"
 
 const app = express()
@@ -33,13 +34,16 @@ app.use(cookieParser())
 // 4) Request context (requestId + startTime) ANTES de logs
 app.use(requestContext)
 
-// 5) Logs HTTP (pino-http)
+// 5) Global rate limiter
+app.use(globalLimiter)
+
+// 7) Logs HTTP (pino-http)
 app.use(requestLogger)
 
-// 6) Response log (status + duration) hacia microservicio (opcional recomendado)
+// 8) Response log (status + duration) hacia microservicio (opcional recomendado)
 app.use(responseLog)
 
-// 7) Rutas públicas
+// 9) Rutas públicas
 app.use(`${env.API_PREFIX ?? "/api"}/health`, healthRouter)
 app.use(env.API_PREFIX, apiRouter)
 

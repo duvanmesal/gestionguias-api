@@ -22,11 +22,10 @@ const Env = z.object({
   SEED_SUPERADMIN_PASS: z.string().min(12),
 
   // Email
-  SMTP_HOST: z.string().default("smtp-relay.brevo.com"),
-  SMTP_PORT: z.coerce.number().default(587),
-  SMTP_USER: z.string().default(""),
-  SMTP_PASS: z.string().default(""),
-  EMAIL_FROM: z.string().default("duvanmesa2415@gmail.com"),
+  EMAIL_PROVIDER: z.enum(["resend", "outbox"]).optional(),
+  RESEND_API_KEY: z.string().default(""),
+  RESEND_API_BASE_URL: z.string().url().default("https://api.resend.com"),
+  EMAIL_FROM: z.string().default("Gestion de Guias <onboarding@resend.dev>"),
 
   APP_LOGIN_URL: z.string().url().default("http://localhost:3001/login"),
 
