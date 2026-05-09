@@ -2,7 +2,7 @@ import type { Request } from "express";
 import type { RolType } from "@prisma/client";
 
 import { logger } from "../../../libs/logger";
-import { ConflictError } from "../../../libs/errors";
+import { AppError, ConflictError } from "../../../libs/errors";
 import { hashPassword } from "../../../libs/password";
 import { sendInvitationEmail } from "../../../libs/email";
 import { socketService } from "../../../core/socket/socket.service";
@@ -220,6 +220,10 @@ export async function createInvitationUsecase(
         await invitationRepository.updateStatus(invitation.id, "EXPIRED");
       } catch {
         // noop
+      }
+
+      if (error instanceof AppError) {
+        throw error;
       }
 
       throw new Error(`Failed to send invitation email: ${message}`);
