@@ -51,3 +51,9 @@ export class BadRequestError extends AppError {
     super(400, "BAD_REQUEST", message, details)
   }
 }
+
+export class BadGatewayError extends AppError {
+  constructor(message = "Bad gateway", details?: any) {
+    super(502, "BAD_GATEWAY", message, details)
+  }
+}

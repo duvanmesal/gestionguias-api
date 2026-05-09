@@ -140,6 +140,15 @@ describe("email provider", () => {
         subject: "Test",
         text: "Hello",
       }),
-    ).rejects.toThrow("Resend email send failed: Domain not verified");
+    ).rejects.toMatchObject({
+      status: 502,
+      code: "BAD_GATEWAY",
+      message: "Email provider rejected the message",
+      details: {
+        provider: "resend",
+        status: 422,
+        reason: "Domain not verified",
+      },
+    });
   });
 });
