@@ -22,10 +22,10 @@ const Env = z.object({
   SEED_SUPERADMIN_PASS: z.string().min(12),
 
   // Email
-  EMAIL_PROVIDER: z.enum(["resend", "outbox"]).optional(),
-  RESEND_API_KEY: z.string().default(""),
-  RESEND_API_BASE_URL: z.string().url().default("https://api.resend.com"),
-  EMAIL_FROM: z.string().default("Gestion de Guias <onboarding@resend.dev>"),
+  EMAIL_PROVIDER: z.enum(["brevo", "outbox"]).optional(),
+  BREVO_API_KEY: z.string().default(""),
+  BREVO_API_BASE_URL: z.string().url().default("https://api.brevo.com"),
+  EMAIL_FROM: z.string().default("Gestion de Guias <duvanmesa2415@gmail.com>"),
 
   APP_LOGIN_URL: z.string().url().default("http://localhost:3001/login"),
 

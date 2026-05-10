@@ -20,10 +20,10 @@ La autenticación y recuperación de contraseña se explican funcionalmente en [
 
 | Variable | Default |
 | --- | --- |
-| `EMAIL_PROVIDER` | `production`: `resend`; `development`/`test`: `outbox` |
-| `RESEND_API_KEY` | vacío |
-| `RESEND_API_BASE_URL` | `https://api.resend.com` |
-| `EMAIL_FROM` | `Gestion de Guias <onboarding@resend.dev>` |
+| `EMAIL_PROVIDER` | `production`: `brevo`; `development`/`test`: `outbox` |
+| `BREVO_API_KEY` | vacío |
+| `BREVO_API_BASE_URL` | `https://api.brevo.com` |
+| `EMAIL_FROM` | `Gestion de Guias <duvanmesa2415@gmail.com>` |
 | `APP_LOGIN_URL` | `http://localhost:3001/login` |
 | `APP_RESET_PASSWORD_URL` | `http://localhost:3001/reset-password` |
 | `APP_VERIFY_EMAIL_URL` | `http://localhost:3001/verify-email` |
@@ -188,14 +188,15 @@ No tienen ruta pública observada.
 
 El servicio usa dos transportes:
 
-- `resend`: envía correos reales por HTTP hacia Resend API. Es el modo recomendado para Render test/demo.
+- `brevo`: envía correos reales por HTTP hacia Brevo Transactional Email API.
 - `outbox`: no envía red; registra el correo generado como salida local segura. Es el fallback por defecto en `development` y `test`.
 
 En producción, configurar en Render:
 
-- `EMAIL_PROVIDER=resend`
-- `RESEND_API_KEY`
-- `EMAIL_FROM` con un remitente permitido por Resend
+- `EMAIL_PROVIDER=brevo`
+- `BREVO_API_KEY`
+- `BREVO_API_BASE_URL=https://api.brevo.com`
+- `EMAIL_FROM` con un remitente permitido por Brevo
 - URLs públicas del front en `APP_LOGIN_URL`, `APP_RESET_PASSWORD_URL` y `APP_VERIFY_EMAIL_URL`
 
 ## Emails técnicos
