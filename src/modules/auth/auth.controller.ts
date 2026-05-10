@@ -23,7 +23,7 @@ const REFRESH_COOKIE_PATH = (process.env.API_PREFIX || "") + "/auth/refresh";
 const REFRESH_COOKIE_BASE = {
   httpOnly: true,
   secure: true,
-  sameSite: "strict" as const,
+  sameSite: "none" as const,
   path: REFRESH_COOKIE_PATH,
 };
 

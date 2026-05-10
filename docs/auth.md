@@ -90,7 +90,7 @@ La respuesta no incluye `tokens.refreshToken`. El refresh token se envía en coo
 - nombre: `rt`
 - `httpOnly: true`
 - `secure: true`
-- `sameSite: strict`
+- `sameSite: none`
 - path: `${API_PREFIX}/auth/refresh`
 
 ## Refresh

@@ -4,7 +4,7 @@ import { env } from "../config/env";
 import { BadGatewayError } from "./errors";
 
 const EMAIL_FROM = env.EMAIL_FROM;
-const RESEND_API_BASE_URL = env.RESEND_API_BASE_URL.replace(/\/+$/, "");
+const BREVO_API_BASE_URL = env.BREVO_API_BASE_URL.replace(/\/+$/, "");
 const APP_LOGIN_URL = env.APP_LOGIN_URL;
 const APP_VERIFY_EMAIL_URL = env.APP_VERIFY_EMAIL_URL;
 const APP_NAME = process.env.APP_NAME || "Gestión de Guías Turísticos";
@@ -44,7 +44,7 @@ export type SendEmailInput = {
   headers?: Record<string, string>;
 };
 
-export type EmailProvider = "resend" | "outbox";
+export type EmailProvider = "brevo" | "outbox";
 
 export type SendEmailResult = {
   provider: EmailProvider;
@@ -387,17 +387,31 @@ function getBaseStyles(): string {
 
 export function getEmailProvider(): EmailProvider {
   if (env.EMAIL_PROVIDER) return env.EMAIL_PROVIDER;
-  return env.NODE_ENV === "production" ? "resend" : "outbox";
+  return env.NODE_ENV === "production" ? "brevo" : "outbox";
 }
 
-function assertResendConfigured() {
-  if (!env.RESEND_API_KEY) {
-    throw new Error("RESEND_API_KEY is required when EMAIL_PROVIDER=resend");
+function assertBrevoConfigured() {
+  if (!env.BREVO_API_KEY) {
+    throw new Error("BREVO_API_KEY is required when EMAIL_PROVIDER=brevo");
   }
 
   if (!EMAIL_FROM) {
-    throw new Error("EMAIL_FROM is required when EMAIL_PROVIDER=resend");
+    throw new Error("EMAIL_FROM is required when EMAIL_PROVIDER=brevo");
   }
+}
+
+function parseEmailAddress(value: string): { name?: string; email: string } {
+  const match = value.match(/^\s*(?:"?([^"<]*)"?\s*)?<([^<>@\s]+@[^<>@\s]+)>\s*$/);
+
+  if (match) {
+    const name = match[1]?.trim();
+    return {
+      email: match[2],
+      ...(name ? { name } : {}),
+    };
+  }
+
+  return { email: value.trim() };
 }
 
 function buildOutboxMessageId(): string {
@@ -435,60 +449,63 @@ async function sendWithOutbox(input: SendEmailInput): Promise<SendEmailResult> {
   };
 }
 
-async function parseResendError(response: Response): Promise<string> {
+async function parseBrevoError(response: Response): Promise<string> {
   try {
     const payload = (await response.json()) as {
       message?: string;
+      code?: string;
       name?: string;
       error?: string;
     };
     return (
       payload.message ||
       payload.error ||
+      payload.code ||
       payload.name ||
-      `Resend API returned ${response.status}`
+      `Brevo API returned ${response.status}`
     );
   } catch {
-    return `Resend API returned ${response.status}`;
+    return `Brevo API returned ${response.status}`;
   }
 }
 
-async function sendWithResend(input: SendEmailInput): Promise<SendEmailResult> {
-  assertResendConfigured();
+async function sendWithBrevo(input: SendEmailInput): Promise<SendEmailResult> {
+  assertBrevoConfigured();
 
-  const response = await fetch(`${RESEND_API_BASE_URL}/emails`, {
+  const response = await fetch(`${BREVO_API_BASE_URL}/v3/smtp/email`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+      "api-key": env.BREVO_API_KEY,
+      accept: "application/json",
       "Content-Type": "application/json",
       "User-Agent": SERVICE_USER_AGENT,
     },
     body: JSON.stringify({
-      from: EMAIL_FROM,
-      to: [input.to],
+      sender: parseEmailAddress(EMAIL_FROM),
+      to: [{ email: input.to }],
       subject: input.subject,
-      html: input.html,
-      text: input.text,
+      ...(input.html ? { htmlContent: input.html } : {}),
+      ...(input.text && !input.html ? { textContent: input.text } : {}),
       headers: input.headers,
     }),
   });
 
   if (!response.ok) {
-    const message = await parseResendError(response);
+    const message = await parseBrevoError(response);
     throw new BadGatewayError("Email provider rejected the message", {
-      provider: "resend",
+      provider: "brevo",
       status: response.status,
       reason: message,
     });
   }
 
-  const payload = (await response.json()) as { id?: string };
-  const messageId = payload.id || `resend_${Date.now()}`;
+  const payload = (await response.json()) as { messageId?: string };
+  const messageId = payload.messageId || `brevo_${Date.now()}`;
 
   return {
-    provider: "resend",
+    provider: "brevo",
     messageId,
-    response: `Resend accepted email with status ${response.status}`,
+    response: `Brevo accepted email with status ${response.status}`,
     accepted: [input.to],
     rejected: [],
   };
@@ -844,8 +861,8 @@ export async function sendEmail({
   const provider = getEmailProvider();
   const payload = { to, subject, html, text, headers };
   const info =
-    provider === "resend"
-      ? await sendWithResend(payload)
+    provider === "brevo"
+      ? await sendWithBrevo(payload)
       : await sendWithOutbox(payload);
 
   logger.info(
@@ -1087,8 +1104,8 @@ export async function sendTestEmail(
 export async function verifyEmailConnection(): Promise<boolean> {
   try {
     const provider = getEmailProvider();
-    if (provider === "resend") {
-      assertResendConfigured();
+    if (provider === "brevo") {
+      assertBrevoConfigured();
     }
 
     logger.info({ provider }, "Email service configuration verified");

@@ -56,8 +56,8 @@ describe("email provider", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it("fails clearly when resend is selected without RESEND_API_KEY", async () => {
-    applyBaseEnv({ EMAIL_PROVIDER: "resend", RESEND_API_KEY: "" });
+  it("fails clearly when brevo is selected without BREVO_API_KEY", async () => {
+    applyBaseEnv({ EMAIL_PROVIDER: "brevo", BREVO_API_KEY: "" });
     const email = await loadEmailModule();
 
     await expect(
@@ -66,20 +66,20 @@ describe("email provider", () => {
         subject: "Test",
         text: "Hello",
       }),
-    ).rejects.toThrow("RESEND_API_KEY is required");
+    ).rejects.toThrow("BREVO_API_KEY is required");
   });
 
-  it("sends through Resend HTTP API when configured", async () => {
+  it("sends through Brevo HTTP API when configured", async () => {
     applyBaseEnv({
-      EMAIL_PROVIDER: "resend",
-      RESEND_API_KEY: "re_test_key",
+      EMAIL_PROVIDER: "brevo",
+      BREVO_API_KEY: "xkeysib_test_key",
       EMAIL_FROM: "Gestion de Guias <noreply@example.com>",
     });
     const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
     fetchMock.mockResolvedValue({
       ok: true,
-      status: 200,
-      json: async () => ({ id: "email_123" }),
+      status: 201,
+      json: async () => ({ messageId: "<email_123@relay.domain.com>" }),
     } as Response);
     const email = await loadEmailModule();
 
@@ -92,17 +92,18 @@ describe("email provider", () => {
     });
 
     expect(result).toMatchObject({
-      provider: "resend",
-      messageId: "email_123",
+      provider: "brevo",
+      messageId: "<email_123@relay.domain.com>",
       accepted: ["user@example.com"],
       rejected: [],
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.resend.com/emails",
+      "https://api.brevo.com/v3/smtp/email",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
-          Authorization: "Bearer re_test_key",
+          "api-key": "xkeysib_test_key",
+          accept: "application/json",
           "Content-Type": "application/json",
           "User-Agent": "gestionguias-api/0.1.0",
         }),
@@ -111,19 +112,18 @@ describe("email provider", () => {
 
     const [, request] = fetchMock.mock.calls[0];
     expect(JSON.parse(String(request?.body))).toMatchObject({
-      from: "Gestion de Guias <noreply@example.com>",
-      to: ["user@example.com"],
+      sender: { name: "Gestion de Guias", email: "noreply@example.com" },
+      to: [{ email: "user@example.com" }],
       subject: "Welcome",
-      html: "<p>Hello</p>",
-      text: "Hello",
+      htmlContent: "<p>Hello</p>",
       headers: { "X-Preheader": "Welcome" },
     });
   });
 
-  it("throws sanitized errors for Resend API failures", async () => {
+  it("throws sanitized errors for Brevo API failures", async () => {
     applyBaseEnv({
-      EMAIL_PROVIDER: "resend",
-      RESEND_API_KEY: "re_secret_key",
+      EMAIL_PROVIDER: "brevo",
+      BREVO_API_KEY: "xkeysib_secret_key",
       EMAIL_FROM: "Gestion de Guias <noreply@example.com>",
     });
     const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
@@ -145,7 +145,7 @@ describe("email provider", () => {
       code: "BAD_GATEWAY",
       message: "Email provider rejected the message",
       details: {
-        provider: "resend",
+        provider: "brevo",
         status: 422,
         reason: "Domain not verified",
       },
