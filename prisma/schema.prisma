@@ -249,15 +249,17 @@ model RefreshToken {
 }
 
 model Guia {
-  id        String   @id @default(cuid())
-  usuarioId String   @unique
-  telefono  String?
-  direccion String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String   @id @default(cuid())
+  usuarioId      String   @unique
+  telefono       String?
+  direccion      String?
+  pendingPenalty Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-  turnos  Turno[]
+  usuario          Usuario          @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  turnos           Turno[]
+  disponibilidades Disponibilidad[]
 
   @@map("guias")
 }
@@ -394,7 +396,8 @@ model Atencion {
   createdBy  Usuario  @relation("AtencionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   canceledBy Usuario? @relation("AtencionCanceledBy", fields: [canceledById], references: [id], onDelete: SetNull)
 
-  turnos Turno[]
+  turnos           Turno[]
+  disponibilidades Disponibilidad[]
 
   @@index([recaladaId])
   @@index([supervisorId])
@@ -448,4 +451,19 @@ model Turno {
   @@index([guiaId])
   @@index([status])
   @@map("turnos")
+}
+
+model Disponibilidad {
+  id         String   @id @default(cuid())
+  atencionId Int
+  guiaId     String
+  marcadoAt  DateTime @default(now())
+  penalizado Boolean  @default(false)
+
+  atencion Atencion @relation(fields: [atencionId], references: [id])
+  guia     Guia     @relation(fields: [guiaId], references: [id])
+
+  @@unique([atencionId, guiaId])
+  @@index([atencionId])
+  @@map("disponibilidades")
 }
