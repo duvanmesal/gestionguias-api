@@ -7,6 +7,7 @@ import { logger } from "../../../libs/logger"
 import { recaladaRepository } from "../_data/recalada.repository"
 import { auditFail, auditOk } from "../_shared/recalada.audit"
 import { emitRecaladaRealtime } from "../../../core/socket/domain-events"
+import { autoAssignTurnosForRecaladaUsecase } from "../../disponibilidad/_usecases/autoAssign.usecase"
 
 export async function arriveRecaladaUsecase(
   req: Request,
@@ -139,6 +140,10 @@ export async function arriveRecaladaUsecase(
     status: updated.status,
     operationalStatus: updated.operationalStatus,
   })
+
+  autoAssignTurnosForRecaladaUsecase(id).catch((err) =>
+    logger.error({ err, recaladaId: id }, "[Recaladas] error en auto-asignación de turnos"),
+  )
 
   return updated
 }

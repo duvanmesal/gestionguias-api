@@ -11,6 +11,9 @@ import { turnoRepository } from "../_data/turno.repository"
 import { assertOperacionPermitida, buildNoShowObservacion } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
 import { emitTurnoRealtime } from "../../../core/socket/domain-events"
+import { disponibilidadRepository } from "../../disponibilidad/disponibilidad.repository"
+import { autoAssignNextInQueue } from "../../disponibilidad/_usecases/autoAssign.usecase"
+import { socketService } from "../../../core/socket/socket.service"
 
 export async function noShowTurnoUsecase(
   req: Request,
@@ -111,6 +114,25 @@ export async function noShowTurnoUsecase(
   )
 
   emitTurnoRealtime("turno:noShow", updated)
+
+  // Penalizar al guía ausente y notificarle
+  if (current.guiaId) {
+    await disponibilidadRepository.setPenalty(current.guiaId)
+
+    const guiaAusente = await turnoRepository.findGuiaById(current.guiaId)
+    if (guiaAusente?.usuario?.id) {
+      socketService.emitToGuia(guiaAusente.usuario.id, "disponibilidad:penalizado", {
+        turnoId,
+        atencionId: updated.atencionId,
+        mensaje: "Fuiste marcado como NO_SHOW. En la próxima atención irás al final de la cola.",
+      })
+    }
+
+    // Reasignar al siguiente en cola
+    autoAssignNextInQueue(updated.atencionId, turnoId).catch((err) =>
+      logger.error({ err, turnoId, atencionId: updated.atencionId }, "[Turnos] error reasignando tras NO_SHOW"),
+    )
+  }
 
   return updated
 }

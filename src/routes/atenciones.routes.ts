@@ -4,6 +4,7 @@ import { requireSupervisor, requireGuia } from "../libs/rbac";
 import { validate } from "../libs/zod-mw";
 
 import { AtencionController } from "../modules/atenciones/atencion.controller";
+import { DisponibilidadController } from "../modules/disponibilidad/disponibilidad.controller";
 
 import {
   createAtencionSchema,
@@ -22,6 +23,34 @@ import {
 const router = Router();
 
 router.use(requireAuth);
+
+/**
+ * GET /atenciones/:id/disponibilidad/me
+ * Estado propio de disponibilidad del guía autenticado
+ * Auth: GUIA
+ */
+router.get("/:id/disponibilidad/me", requireGuia, DisponibilidadController.getMe);
+
+/**
+ * GET /atenciones/:id/disponibilidad
+ * Cola de guías disponibles ordenada por posición
+ * Auth: SUPERVISOR / SUPER_ADMIN
+ */
+router.get("/:id/disponibilidad", requireSupervisor, DisponibilidadController.list);
+
+/**
+ * POST /atenciones/:id/disponibilidad
+ * Guía marca disponibilidad para la atención
+ * Auth: GUIA
+ */
+router.post("/:id/disponibilidad", requireGuia, DisponibilidadController.marcar);
+
+/**
+ * DELETE /atenciones/:id/disponibilidad
+ * Guía desmarca disponibilidad (solo antes del arribo)
+ * Auth: GUIA
+ */
+router.delete("/:id/disponibilidad", requireGuia, DisponibilidadController.desmarcar);
 
 /**
  * GET /atenciones/:id/turnos

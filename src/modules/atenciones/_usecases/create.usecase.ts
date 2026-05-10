@@ -7,6 +7,7 @@ import type { CreateAtencionBody } from "../atencion.schemas"
 
 import { atencionRepository } from "../_data/atencion.repository"
 import { emitAtencionRealtime } from "../../../core/socket/domain-events"
+import { socketService } from "../../../core/socket/socket.service"
 import {
   assertTurnosTotalValid,
   assertWindowDatesValid,
@@ -235,6 +236,15 @@ export async function createAtencionUsecase(
     recaladaId: created.recaladaId,
     status: created.status,
     operationalStatus: created.operationalStatus,
+  })
+
+  socketService.emitToAllGuias("atencion:nueva", {
+    atencionId: created.id,
+    recaladaId: created.recaladaId,
+    fechaInicio: created.fechaInicio,
+    fechaFin: created.fechaFin,
+    turnosTotal: created.turnosTotal,
+    descripcion: created.descripcion ?? null,
   })
 
   return created
