@@ -38,7 +38,7 @@ export class TurnoRepository {
   findGuiaById(guiaId: string, tx?: Tx) {
     return db(tx).guia.findUnique({
       where: { id: guiaId },
-      select: { id: true, usuario: { select: { activo: true } } },
+      select: { id: true, usuario: { select: { id: true, activo: true } } },
     })
   }
 

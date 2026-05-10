@@ -34,4 +34,8 @@ export const socketService = {
   emitToAdmins(event: string, payload: unknown): void {
     _io?.to("admins").emit(event, payload)
   },
+
+  emitToAllGuias(event: string, payload: unknown): void {
+    _io?.to("guias").emit(event, payload)
+  },
 }

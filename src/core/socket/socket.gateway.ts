@@ -83,6 +83,7 @@ export function initSocketGateway(httpServer: HttpServer): void {
 
     if (rol === "GUIA") {
       socket.join(`guia:${userId}`)
+      socket.join("guias")
     }
 
     if (rol === "SUPERVISOR" || rol === "SUPER_ADMIN") {
