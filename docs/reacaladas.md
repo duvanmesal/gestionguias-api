@@ -1,6 +1,6 @@
 # Recaladas
 
-Última revisión contra código: 2026-05-04.
+Última revisión contra código: 2026-05-11.
 
 Fuente principal: `src/routes/recaladas.routes.ts`, `src/modules/recaladas/*`, `prisma/schema.prisma`.
 
@@ -81,6 +81,8 @@ Reglas:
 - No se permite solapar recaladas activas del mismo buque.
 - Si el actor supervisor no tiene fila `Supervisor`, el sistema la crea automáticamente.
 - `codigoRecalada` se genera como `RA-YYYY-000001` usando el id autoincremental.
+- Después de crear correctamente, encola notificaciones operativas `RECALADA_CREATED` para guías activos. Este enqueue no bloquea la respuesta.
+- Emite realtime `recalada:nueva` a la sala `guias` con `notificationId` y datos básicos de la recalada.
 
 Respuesta exitosa: `201`.
 
@@ -237,6 +239,10 @@ Eventos emitidos a supervisores:
 - `recalada:arrived`
 - `recalada:departed`
 - `recalada:canceled`
+
+Evento adicional para guías:
+
+- `recalada:nueva`: sala `guias`, emitido al crear una recalada. Payload mínimo: `notificationId`, `recaladaId`, `codigoRecalada`, `fechaLlegada`, `fechaSalida`, `terminal`, `muelle`.
 
 ## Auditoría
 

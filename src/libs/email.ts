@@ -36,6 +36,30 @@ export interface LogoutAllCodeEmailData {
   ttlMinutes: number;
 }
 
+export interface OperationalRecaladaEmailData {
+  to: string;
+  guiaName?: string;
+  codigoRecalada: string;
+  buqueNombre?: string | null;
+  paisOrigenNombre?: string | null;
+  fechaLlegada: Date | string;
+  fechaSalida?: Date | string | null;
+  terminal?: string | null;
+  muelle?: string | null;
+}
+
+export interface OperationalAtencionEmailData {
+  to: string;
+  guiaName?: string;
+  atencionId: number;
+  codigoRecalada: string;
+  buqueNombre?: string | null;
+  fechaInicio: Date | string;
+  fechaFin: Date | string;
+  turnosTotal: number;
+  descripcion?: string | null;
+}
+
 export type SendEmailInput = {
   to: string;
   subject: string;
@@ -850,6 +874,83 @@ function generateLogoutAllCodeHTML(data: LogoutAllCodeEmailData): string {
   `.trim();
 }
 
+function formatDateTime(value?: Date | string | null): string {
+  if (!value) return "No definida";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+
+  return new Intl.DateTimeFormat("es-CO", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "America/Bogota",
+  }).format(date);
+}
+
+function generateOperationalNoticeHTML(args: {
+  title: string;
+  subtitle: string;
+  greetingName?: string;
+  intro: string;
+  rows: Array<{ label: string; value: string | number | null | undefined }>;
+  note?: string;
+}): string {
+  const rowsHtml = args.rows
+    .map(
+      (row) => `
+        <div class="credential-item">
+          <span class="credential-label">${row.label}</span>
+          <span class="credential-value">${row.value ?? "No definido"}</span>
+        </div>
+      `,
+    )
+    .join("");
+
+  return `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+  <title>${args.title} - ${APP_NAME}</title>
+  <style type="text/css">
+    ${getBaseStyles()}
+  </style>
+</head>
+<body>
+  <span class="preheader">${args.subtitle}</span>
+  <div class="outer-wrapper">
+    <div class="container">
+      <div class="header">
+        <div style="width:64px;height:64px;margin:0 auto 20px auto;background:linear-gradient(135deg, ${COLORS.primaryGreen} 0%, ${COLORS.primaryGreenLight} 100%);border-radius:16px;line-height:64px;font-size:28px;">
+          ⚓
+        </div>
+        <h1>${args.title}</h1>
+        <p class="header-subtitle">${args.subtitle}</p>
+      </div>
+      <div class="content">
+        <p>Hola${args.greetingName ? `, <strong>${args.greetingName}</strong>` : ""},</p>
+        <p>${args.intro}</p>
+        <div class="credentials-panel">
+          ${rowsHtml}
+        </div>
+        ${
+          args.note
+            ? `<div class="info-box"><p>${args.note}</p></div>`
+            : ""
+        }
+      </div>
+      <div class="footer">
+        <p class="footer-brand">${APP_NAME}</p>
+        <p class="footer-tagline">Notificación operativa automática</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+  `.trim();
+}
+
 // ---- low-level sender (reutilizable) ----
 export async function sendEmail({
   to,
@@ -1035,6 +1136,91 @@ Si no solicitaste esta acción, ignora este correo y cambia tu contraseña.
     logger.error({ error, to: data.to }, "Failed to send logout-all code email");
     throw error;
   }
+}
+
+export async function sendOperationalRecaladaCreatedEmail(
+  data: OperationalRecaladaEmailData,
+): Promise<void> {
+  const subject = "Nueva recalada programada";
+  const html = generateOperationalNoticeHTML({
+    title: "Nueva recalada programada",
+    subtitle: `${data.codigoRecalada} quedó registrada en la agenda operativa`,
+    greetingName: data.guiaName,
+    intro:
+      "Se registró una nueva recalada. Revisa la aplicación móvil para confirmar disponibilidad cuando corresponda.",
+    rows: [
+      { label: "Código", value: data.codigoRecalada },
+      { label: "Buque", value: data.buqueNombre },
+      { label: "País de origen", value: data.paisOrigenNombre },
+      { label: "Llegada programada", value: formatDateTime(data.fechaLlegada) },
+      { label: "Salida programada", value: formatDateTime(data.fechaSalida) },
+      { label: "Terminal", value: data.terminal },
+      { label: "Muelle", value: data.muelle },
+    ],
+  });
+
+  await sendEmail({
+    to: data.to,
+    subject,
+    html,
+    text: `
+Nueva recalada programada
+
+Código: ${data.codigoRecalada}
+Buque: ${data.buqueNombre ?? "No definido"}
+País de origen: ${data.paisOrigenNombre ?? "No definido"}
+Llegada programada: ${formatDateTime(data.fechaLlegada)}
+Salida programada: ${formatDateTime(data.fechaSalida)}
+Terminal: ${data.terminal ?? "No definido"}
+Muelle: ${data.muelle ?? "No definido"}
+
+Revisa la aplicación móvil para confirmar disponibilidad cuando corresponda.
+    `.trim(),
+    headers: { "X-Preheader": `${data.codigoRecalada} quedó registrada.` },
+  });
+}
+
+export async function sendOperationalAtencionCreatedEmail(
+  data: OperationalAtencionEmailData,
+): Promise<void> {
+  const subject = "Nueva atención disponible";
+  const html = generateOperationalNoticeHTML({
+    title: "Nueva atención disponible",
+    subtitle: `Atención ${data.atencionId} asociada a ${data.codigoRecalada}`,
+    greetingName: data.guiaName,
+    intro:
+      "Se abrió una nueva atención operativa. Revisa la aplicación móvil para registrar tu disponibilidad.",
+    rows: [
+      { label: "Atención", value: data.atencionId },
+      { label: "Recalada", value: data.codigoRecalada },
+      { label: "Buque", value: data.buqueNombre },
+      { label: "Inicio", value: formatDateTime(data.fechaInicio) },
+      { label: "Fin", value: formatDateTime(data.fechaFin) },
+      { label: "Cupos", value: data.turnosTotal },
+      { label: "Descripción", value: data.descripcion },
+    ],
+    note: "La asignación de turnos depende de la disponibilidad registrada y las reglas operativas vigentes.",
+  });
+
+  await sendEmail({
+    to: data.to,
+    subject,
+    html,
+    text: `
+Nueva atención disponible
+
+Atención: ${data.atencionId}
+Recalada: ${data.codigoRecalada}
+Buque: ${data.buqueNombre ?? "No definido"}
+Inicio: ${formatDateTime(data.fechaInicio)}
+Fin: ${formatDateTime(data.fechaFin)}
+Cupos: ${data.turnosTotal}
+Descripción: ${data.descripcion ?? "No definida"}
+
+Revisa la aplicación móvil para registrar tu disponibilidad.
+    `.trim(),
+    headers: { "X-Preheader": `Atención ${data.atencionId} asociada a ${data.codigoRecalada}.` },
+  });
 }
 
 // ---- API: prueba de mailing ----

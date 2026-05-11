@@ -65,6 +65,12 @@ const Env = z.object({
 
   // Identidad del servicio emisor (útil si varios servicios publican logs)
   SERVICE_NAME: z.string().default("gestionguias-api"),
+
+  // Push notifications (Firebase Cloud Messaging)
+  PUSH_NOTIFICATIONS_ENABLED: z.coerce.boolean().default(false),
+  FIREBASE_PROJECT_ID: z.string().default(""),
+  FIREBASE_CLIENT_EMAIL: z.string().default(""),
+  FIREBASE_PRIVATE_KEY: z.string().default(""),
 });
 
 export const env = Env.parse(process.env);

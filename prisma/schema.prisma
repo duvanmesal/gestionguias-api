@@ -77,6 +77,28 @@ enum AtencionOperativeStatus {
   CANCELED
 }
 
+enum NotificationType {
+  RECALADA_CREATED
+  ATENCION_CREATED
+}
+
+enum NotificationChannel {
+  EMAIL
+  PUSH
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum PushPlatform {
+  ANDROID
+  IOS
+  WEB
+}
+
 model Usuario {
   id           String  @id @default(cuid())
   email        String  @unique
@@ -116,6 +138,9 @@ model Usuario {
   // Auditoría Turnos
   turnosCreados    Turno[] @relation("TurnoCreatedBy")
   turnosCancelados Turno[] @relation("TurnoCanceledBy")
+
+  notificationDeliveries NotificationDelivery[]
+  pushDeviceTokens       PushDeviceToken[]
 
   @@index([documentType, documentNumber])
   @@index([emailVerifiedAt])
@@ -260,6 +285,7 @@ model Guia {
   usuario          Usuario          @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
   turnos           Turno[]
   disponibilidades Disponibilidad[]
+  notificationDeliveries NotificationDelivery[]
 
   @@map("guias")
 }
@@ -466,4 +492,62 @@ model Disponibilidad {
   @@unique([atencionId, guiaId])
   @@index([atencionId])
   @@map("disponibilidades")
+}
+
+model NotificationDelivery {
+  id String @id @default(cuid())
+
+  type    NotificationType
+  channel NotificationChannel
+  status  NotificationStatus @default(PENDING)
+
+  userId String
+  guiaId String?
+
+  recaladaId Int
+  atencionId Int?
+
+  notificationId String
+  title          String
+  body           String
+  payload        Json?
+
+  attempts    Int       @default(0)
+  lastError   String?
+  nextRetryAt DateTime?
+  sentAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  usuario Usuario @relation(fields: [userId], references: [id], onDelete: Cascade)
+  guia    Guia?   @relation(fields: [guiaId], references: [id], onDelete: SetNull)
+
+  @@index([status, nextRetryAt])
+  @@index([type, channel])
+  @@index([userId, status])
+  @@index([recaladaId])
+  @@index([atencionId])
+  @@map("notification_deliveries")
+}
+
+model PushDeviceToken {
+  id String @id @default(cuid())
+
+  userId   String
+  token    String       @unique
+  platform PushPlatform
+  deviceId String?
+  active   Boolean      @default(true)
+
+  lastSeenAt DateTime  @default(now())
+  disabledAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  usuario Usuario @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, active])
+  @@index([deviceId])
+  @@map("push_device_tokens")
 }

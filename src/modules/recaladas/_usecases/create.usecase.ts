@@ -13,6 +13,8 @@ import {
 import type { CreateRecaladaInput } from "../_domain/recalada.types"
 import { auditFail, auditOk } from "../_shared/recalada.audit"
 import { emitRecaladaRealtime } from "../../../core/socket/domain-events"
+import { socketService } from "../../../core/socket/socket.service"
+import { enqueueRecaladaCreatedNotification } from "../../notifications/notification.service"
 
 export async function createRecaladaUsecase(
   req: Request,
@@ -190,6 +192,30 @@ export async function createRecaladaUsecase(
     recaladaId: created.id,
     status: created.status,
     operationalStatus: created.operationalStatus,
+  })
+
+  const notificationId = `recalada:${created.id}:created`
+  socketService.emitToAllGuias("recalada:nueva", {
+    notificationId,
+    recaladaId: created.id,
+    codigoRecalada: created.codigoRecalada,
+    fechaLlegada: created.fechaLlegada,
+    fechaSalida: created.fechaSalida,
+    terminal: created.terminal,
+    muelle: created.muelle,
+    buque: created.buque ?? null,
+    paisOrigen: created.paisOrigen ?? null,
+  })
+
+  enqueueRecaladaCreatedNotification(created.id).catch((err) => {
+    logger.error(
+      {
+        err,
+        recaladaId: created.id,
+        notificationId,
+      },
+      "[Recaladas] failed to enqueue created notification",
+    )
   })
 
   return created

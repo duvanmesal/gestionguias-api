@@ -3,6 +3,7 @@ import { authRoutes } from "./auth.routes";
 import { userRoutes } from "./users.routes";
 import { invitationRoutes } from "./invitations.routes";
 import { emailRoutes } from "./email.routes";
+import notificationsRoutes from "./notifications.routes";
 
 // 🔹 Nuevos catálogos
 import paisRoutes from "./pais.routes";
@@ -29,6 +30,7 @@ v1Router.use("/auth", authRoutes);
 v1Router.use("/users", userRoutes);
 v1Router.use("/invitations", invitationRoutes);
 v1Router.use("/emails", emailRoutes);
+v1Router.use("/notifications", notificationsRoutes);
 
 // 🔹 Nuevas rutas de catálogos
 v1Router.use("/paises", paisRoutes);
@@ -61,6 +63,7 @@ router.get("/", (_req, res) => {
         users: `${process.env.API_PREFIX ?? "/api"}/users`,
         invitations: `${process.env.API_PREFIX ?? "/api"}/invitations`,
         emails: `${process.env.API_PREFIX ?? "/api"}/emails`,
+        notifications: `${process.env.API_PREFIX ?? "/api"}/notifications`,
         paises: `${process.env.API_PREFIX ?? "/api"}/paises`,
         buques: `${process.env.API_PREFIX ?? "/api"}/buques`,
         recaladas: `${process.env.API_PREFIX ?? "/api"}/recaladas`,
