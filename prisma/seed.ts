@@ -176,6 +176,13 @@ async function upsertShips() {
       capacidad: 5183,
       codigoPais: "US",
     },
+    {
+      codigo: "B-004",
+      nombre: "Costa Fascinosa",
+      naviera: "Costa Cruceros",
+      capacidad: 3780,
+      codigoPais: "IT",
+    },
   ]
 
   for (const s of ships) {
@@ -394,6 +401,7 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
   const buque1 = await resolveBuqueIdOrThrow("Wonder of the Seas")
   const buque2 = await resolveBuqueIdOrThrow("MSC Meraviglia")
   const buque3 = await resolveBuqueIdOrThrow("Norwegian Epic")
+  const buque4 = await resolveBuqueIdOrThrow("Costa Fascinosa")
 
   const paisUS = await resolvePaisIdOrThrow("US")
   const paisIT = await resolvePaisIdOrThrow("IT")
@@ -709,6 +717,88 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
   })
 
   console.log("🧩 Atenciones + Turnos seed ready (OPEN/CLOSED/CANCELED + estados de turnos)")
+
+  // ==========================================================
+  // ⚡ DEMO ARRIBO: Recalada SCHEDULED + disponibilidades pre-marcadas
+  // Flujo a probar: supervisor marca arribo → auto-asignación dispara
+  // Cola esperada: guia1 (pos1), guia2 (pos2), guia3 (pos3 por penalty)
+  // ==========================================================
+  const recaladaDemoCode = `DEMO-${ymd}`
+
+  const rDemo = await prisma.recalada.upsert({
+    where: { codigoRecalada: recaladaDemoCode },
+    update: {
+      buqueId: buque4,
+      paisOrigenId: paisIT,
+      supervisorId: supervisor1Id,
+      fechaLlegada: addMinutes(now, +45),
+      fechaSalida: addMinutes(now, +360),
+      arrivedAt: null,
+      departedAt: null,
+      status: StatusType.ACTIVO,
+      operationalStatus: RecaladaOperativeStatus.SCHEDULED,
+      terminal: "Terminal de Cruceros",
+      muelle: "Muelle Demo",
+      pasajerosEstimados: 3200,
+      tripulacionEstimada: 1100,
+      observaciones: "⚡ DEMO: Marcar arribo aquí para probar asignación automática",
+      fuente: RecaladaSource.MANUAL,
+      canceledAt: null,
+      cancelReason: null,
+    },
+    create: {
+      codigoRecalada: recaladaDemoCode,
+      buqueId: buque4,
+      paisOrigenId: paisIT,
+      supervisorId: supervisor1Id,
+      fechaLlegada: addMinutes(now, +45),
+      fechaSalida: addMinutes(now, +360),
+      status: StatusType.ACTIVO,
+      operationalStatus: RecaladaOperativeStatus.SCHEDULED,
+      terminal: "Terminal de Cruceros",
+      muelle: "Muelle Demo",
+      pasajerosEstimados: 3200,
+      tripulacionEstimada: 1100,
+      observaciones: "⚡ DEMO: Marcar arribo aquí para probar asignación automática",
+      fuente: RecaladaSource.MANUAL,
+    },
+  })
+
+  const demoAtencion = await upsertAtencionWithSlots({
+    recaladaId: rDemo.id,
+    supervisorId: supervisor1Id,
+    createdById,
+    descripcion: "⚡ DEMO: Disponibilidades marcadas — marcar arribo para auto-asignar",
+    fechaInicio: addMinutes(now, +45),
+    fechaFin: addMinutes(now, +180),
+    operationalStatus: AtencionOperativeStatus.OPEN,
+    turnosTotal: 3,
+    slotPlan: [
+      { numero: 1, status: TurnoStatus.AVAILABLE, guiaId: null },
+      { numero: 2, status: TurnoStatus.AVAILABLE, guiaId: null },
+      { numero: 3, status: TurnoStatus.AVAILABLE, guiaId: null },
+    ],
+  })
+
+  // Disponibilidades: guia1 y guia2 sin penalty, guia3 con penalty → irá al final
+  const demoDisponibilidades = [
+    { guiaId: guiaIds[0], marcadoAt: addMinutes(now, -20), penalizado: false },
+    { guiaId: guiaIds[1], marcadoAt: addMinutes(now, -10), penalizado: false },
+    { guiaId: guiaIds[2], marcadoAt: addMinutes(now, -5), penalizado: true },
+  ]
+
+  for (const d of demoDisponibilidades) {
+    await prisma.disponibilidad.upsert({
+      where: { atencionId_guiaId: { atencionId: demoAtencion.id, guiaId: d.guiaId } },
+      update: { marcadoAt: d.marcadoAt, penalizado: d.penalizado },
+      create: { atencionId: demoAtencion.id, guiaId: d.guiaId, marcadoAt: d.marcadoAt, penalizado: d.penalizado },
+    })
+  }
+
+  // guia3 tiene pendingPenalty activo para futuros demos de la lógica de cola
+  await prisma.guia.update({ where: { id: guiaIds[2] }, data: { pendingPenalty: true } })
+
+  console.log(`⚡ DEMO ARRIBO ready — recalada ${recaladaDemoCode} (SCHEDULED, llega en ~45min, 3 disponibilidades)`)
 }
 
 type SlotPlanItem = {

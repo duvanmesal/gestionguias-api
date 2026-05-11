@@ -1,6 +1,6 @@
 # Turnos
 
-Última revisión contra código: 2026-05-04.
+Última revisión contra código: 2026-05-10.
 
 Fuente principal: `src/routes/turno.routes.ts`, `src/modules/turnos/*`, `src/modules/atenciones/*`, `prisma/schema.prisma`.
 
@@ -229,6 +229,16 @@ Reglas:
 - No se puede marcar antes de `fechaInicio`.
 - Agrega observación `NO_SHOW` y, si existe razón, `NO_SHOW: razón`.
 - Al aplicar, `status = NO_SHOW`.
+
+### Penalizacion y reasignacion automatica tras NO_SHOW
+
+Despues de marcar el turno como `NO_SHOW`, el sistema ejecuta en segundo plano:
+
+1. **Penaliza al guia ausente**: escribe `pendingPenalty = true` en su fila `Guia`.
+2. **Notifica al guia**: emite `disponibilidad:penalizado` con mensaje explicativo.
+3. **Reasigna automaticamente**: busca al siguiente guia en la cola de disponibilidad de la atencion que no tenga turno asignado. Si existe, le asigna el turno liberado y emite `turno:assigned`.
+
+El `pendingPenalty` se consume la proxima vez que el guia marca disponibilidad en una atencion futura, ubicandole al final de la cola en esa ocasion. Ver [disponibilidad.md](./disponibilidad.md) para el flujo completo.
 
 ## Gates operativos compartidos
 

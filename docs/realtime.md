@@ -79,8 +79,20 @@ Los jobs automaticos tambien emiten eventos de turno y agregan `source: "job"` e
 | `atencion:updated` | Igual | Igual |
 | `atencion:canceled` | Igual | Igual |
 | `atencion:closed` | Igual | Igual |
+| `atencion:nueva` | `guias` (sala broadcast de todos los guias) | `atencionId`, `recaladaId`, `fechaInicio`, `fechaFin` |
+| `atencion:asignacionCompleta` | `supervisors` | `atencionId`, `asignados` |
+
+- `atencion:nueva` se emite cuando un supervisor crea una atencion, para que todos los guias puedan reaccionar (toast, badge, actualizar lista de atenciones pendientes de disponibilidad).
+- `atencion:asignacionCompleta` se emite tras el auto-assign al arribo, informando cuantos turnos quedaron asignados en esa atencion.
 
 Cuando una atencion cancelada afecta turnos asignados, tambien se emite `turno:canceled` a los guias afectados.
+
+### Disponibilidad
+
+| Evento | Destinos | Payload | Uso cliente |
+| --- | --- | --- | --- |
+| `disponibilidad:marcada` | `supervisors`, `guia:{userId}` | `atencionId`, `guiaId`, `guiaUserId`, `penalizado`, `posicion`, `total` (+ `tuPosicion` al propio guia) | Supervisor actualiza cola en vivo; guia ve su posicion. |
+| `disponibilidad:penalizado` | `guia:{userId}` del guia ausente | `turnoId`, `atencionId`, `mensaje` | Toast de aviso al guia que hizo NO_SHOW. |
 
 ### Recaladas
 
@@ -121,6 +133,9 @@ Cuando una atencion cancelada afecta turnos asignados, tambien se emite `turno:c
 | `auth:sessionsChanged` | Sesiones del usuario. |
 | `turno:*` | Turnos, mis turnos, turno detalle, atencion detalle/turnos/resumen, recalada detalle y dashboard. |
 | `atencion:*` | Atenciones, atencion detalle/turnos/resumen, recalada detalle/atenciones y dashboard. |
+| `disponibilidad:marcada` | Cola de disponibilidad de la atencion activa (supervisor). Posicion propia del guia. |
+| `disponibilidad:penalizado` | Estado de penalizacion del guia (banner en UI). |
+| `atencion:asignacionCompleta` | Cola de disponibilidad de la atencion; refrescar turnos y summary. |
 | `recalada:*` | Recaladas, recalada detalle/atenciones, atenciones y dashboard. |
 | `user:*` | Usuarios admin, perfil propio si coincide y lookup de guias cuando aplique. |
 | `guides:lookupChanged` | Lookup de guias. |

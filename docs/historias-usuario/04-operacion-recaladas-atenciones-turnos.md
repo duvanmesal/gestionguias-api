@@ -493,7 +493,84 @@ Criterios de aceptacion:
 ## Eventos operativos esperados
 
 - `recalada:created`, `recalada:updated`, `recalada:arrived`, `recalada:departed`, `recalada:canceled`
-- `atencion:updated`, `atencion:canceled`
+- `atencion:created`, `atencion:nueva`, `atencion:updated`, `atencion:canceled`, `atencion:asignacionCompleta`
 - `turno:assigned`, `turno:claimed`, `turno:unassigned`, `turno:canceled`, `turno:checkedIn`, `turno:checkedOut`, `turno:noShow`
+- `disponibilidad:marcada`, `disponibilidad:penalizado`
 
 Estos eventos permiten que front web y mobile refresquen dashboard, turnero y detalles sin depender solo de recargas manuales.
+
+---
+
+# Disponibilidad y Asignacion Automatica
+
+## Proposito
+
+Reemplaza el modelo de "first click" por una cola ordenada y justa. El supervisor no asigna guias manualmente: el sistema lo hace al marcar el arribo del buque segun el orden en que los guias marcaron disponibilidad.
+
+## HU-DISP-01 - Guia marca disponibilidad
+
+Como guia, quiero indicar que estoy disponible para una atencion, para participar en la asignacion automatica cuando el buque arribe.
+
+Criterios de aceptacion:
+
+- El usuario debe estar registrado como guia activo.
+- La atencion debe existir, estar activa y en estado operativo `OPEN`.
+- La recalada asociada debe estar en estado `SCHEDULED`. Si ya llego (`ARRIVED`), la ventana esta cerrada.
+- El guia no puede marcar disponibilidad dos veces para la misma atencion.
+- El guia no puede marcar disponibilidad si ya tiene un turno asignado en esa atencion.
+- Si el guia tiene `pendingPenalty = true` por un NO_SHOW previo, la disponibilidad se registra con `penalizado: true` y el sistema limpia `pendingPenalty`. El guia queda al final de la cola.
+- La respuesta incluye la posicion actual en la cola.
+- Se notifica a supervisores y al propio guia via `disponibilidad:marcada`.
+
+## HU-DISP-02 - Guia desmarca disponibilidad
+
+Como guia, quiero cancelar mi disponibilidad marcada, para retirarme de la cola si no podre asistir.
+
+Criterios de aceptacion:
+
+- La disponibilidad del guia para esa atencion debe existir.
+- Si la recalada ya arribo y el guia tiene turno asignado, no puede desmarcar.
+- Si la recalada ya arribo pero el guia no tiene turno, si puede desmarcar.
+- Si la recalada aun no arribo, puede desmarcar sin restricciones.
+- La accion no restaura `pendingPenalty` ni modifica el estado de penalizacion.
+
+## HU-DISP-03 - Supervisor ve la cola de disponibilidad
+
+Como supervisor, quiero ver la lista ordenada de guias disponibles para una atencion, para anticipar como quedara la asignacion.
+
+Criterios de aceptacion:
+
+- Solo `SUPERVISOR` y `SUPER_ADMIN` pueden consultar la cola.
+- La cola se ordena: primero los guias sin penalizacion por orden de marcado, luego los penalizados por orden de marcado entre ellos.
+- Cada entrada incluye nombre del guia, momento de marcado, si esta penalizado y su posicion en la cola.
+- La cola se actualiza en tiempo real via `disponibilidad:marcada`.
+
+## HU-DISP-04 - Sistema asigna turnos automaticamente al marcar arribo
+
+Como sistema, al registrar el arribo de una recalada, quiero asignar turnos automaticamente segun la cola de disponibilidad, para eliminar la coordinacion manual del supervisor.
+
+Criterios de aceptacion:
+
+- El trigger ocurre en el mismo flujo HTTP de `PATCH /recaladas/:id/arrive`.
+- Se procesan todas las atenciones `OPEN` de la recalada en ese momento.
+- Para cada atencion, la cola determina el orden de asignacion (`penalizado ASC, marcadoAt ASC`).
+- Los turnos `AVAILABLE` se asignan en orden de numero ascendente: turno 1 al primero de la cola, turno 2 al segundo, etc.
+- Si hay mas guias que turnos, los guias del final de la cola quedan sin turno pero siguen en la lista de disponibilidad.
+- Si hay mas turnos que guias, los turnos sobrantes quedan `AVAILABLE`.
+- Se emite `turno:assigned` a cada guia asignado y `atencion:asignacionCompleta` a supervisores.
+- La asignacion de cada atencion es transaccional.
+
+## HU-DISP-05 - Sistema penaliza y reasigna tras NO_SHOW
+
+Como sistema, al registrar un NO_SHOW, quiero penalizar al guia ausente y reasignar el turno al siguiente en cola, para mantener la cobertura operativa y disuadir inasistencias.
+
+Criterios de aceptacion:
+
+- Ocurre inmediatamente despues de marcar el turno como `NO_SHOW`.
+- Se registra `pendingPenalty = true` en el guia ausente.
+- Se envia notificacion al guia ausente via `disponibilidad:penalizado` con mensaje explicativo.
+- El sistema busca al siguiente guia en la cola de disponibilidad de esa atencion que no tenga ya un turno.
+- Si existe un siguiente guia, se le asigna el turno liberado y se emite `turno:assigned`.
+- Si no hay siguiente guia, el turno queda en estado `NO_SHOW` sin reasignar.
+- La reasignacion no bloquea la respuesta HTTP del supervisor.
+- El `pendingPenalty` persiste hasta que el guia marque disponibilidad en una atencion futura.

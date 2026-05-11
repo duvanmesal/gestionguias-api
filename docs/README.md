@@ -1,6 +1,6 @@
 # Documentación funcional de gestionguias-api
 
-Última revisión contra código: 2026-05-04.
+Última revisión contra código: 2026-05-10.
 
 Esta carpeta documenta el comportamiento observable de la API principal. La fuente de verdad técnica sigue siendo el código en `src/routes`, `src/modules` y `prisma/schema.prisma`; estos documentos explican ese comportamiento para producto, frontend, mobile y pruebas manuales.
 
@@ -15,6 +15,7 @@ Esta carpeta documenta el comportamiento observable de la API principal. La fuen
 | [reacaladas.md](./reacaladas.md) | Agenda madre de recaladas y estados operativos. |
 | [atenciones.md](./atenciones.md) | Ventanas operativas dentro de una recalada y materialización de turnos. |
 | [turnos.md](./turnos.md) | Ciclo de vida de cupos, asignación, claim, check-in, check-out y no-show. |
+| [disponibilidad.md](./disponibilidad.md) | Cola de disponibilidad, asignación automática al arribo y penalización por NO_SHOW. |
 | [dashboard.md](./dashboard.md) | Overview por rol y widgets listos para clientes. |
 | [mailing.md](./mailing.md) | Invitaciones, correo de prueba y flujos de email transaccional. |
 | [docs-logs-api.md](./docs-logs-api.md) | Contrato con el microservicio de logs. |
@@ -30,6 +31,10 @@ El documento antiguo `auth-usuarios.md` mezclaba autenticación con administraci
 
 ## Cambios recientes documentados
 
+- `disponibilidad.md` (nuevo): cola de disponibilidad, asignacion automatica al arribo y logica de penalizacion por NO_SHOW.
+- `turnos.md`: nueva seccion explicando la penalizacion del guia ausente y la reasignacion automatica tras marcar NO_SHOW.
+- `realtime.md`: nuevos eventos `disponibilidad:marcada`, `disponibilidad:penalizado`, `atencion:nueva` y `atencion:asignacionCompleta`; tabla de invalidaciones actualizada.
+- `mailing.md`: documentacion actualizada para proveedor Brevo (HTTP API) en reemplazo del proveedor anterior.
 - `auth.md` detalla la separacion entre cierre de sesion actual, cierre de una sesion especifica y cierre de todas las sesiones.
 - `auth.md` documenta `isCurrent` en `GET /auth/sessions` para que los clientes identifiquen la sesion del access token actual.
 - `auth.md` aclara que refrescar una sesion revocada manualmente responde `401` sin cerrar las demas sesiones.
