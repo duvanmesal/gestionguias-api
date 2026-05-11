@@ -4,6 +4,7 @@ import { corsOrigins } from "../config/env";
 
 const nativeAppOrigins = [
   "http://localhost",
+  "https://localhost",
   "capacitor://localhost",
   "ionic://localhost",
 ];
