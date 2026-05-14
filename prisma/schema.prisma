@@ -238,6 +238,7 @@ model Session {
   deviceId  String?
   userAgent String?
   ip        String?
+  rememberMe Boolean @default(true)
 
   refreshTokenHash String?   @unique
   refreshExpiresAt DateTime?

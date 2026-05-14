@@ -1,0 +1,1 @@
+ALTER TABLE "sessions" ADD COLUMN "rememberMe" BOOLEAN NOT NULL DEFAULT true;

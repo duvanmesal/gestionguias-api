@@ -1,6 +1,6 @@
 # Autenticación, sesión y seguridad de cuenta
 
-Última revisión contra código: 2026-05-04.
+Última revisión contra código: 2026-05-14.
 
 Fuente principal: `src/routes/auth.routes.ts`, `src/modules/auth/*`, `src/middlewares/clientPlatform.ts`, `src/libs/jwt.ts`, `src/libs/crypto.ts`, `src/config/env.ts`.
 
@@ -16,7 +16,10 @@ El módulo `auth` controla identidad, sesiones, tokens, verificación de email y
 - En `WEB`, el refresh token viaja en cookie httpOnly `rt`.
 - En `MOBILE`, el refresh token viaja en el JSON de respuesta y en el body de refresh.
 - `MOBILE` debe enviar `deviceId` en login.
+- Las sesiones duran máximo 15 días desde el login. El refresh rota el token, pero no extiende `refreshExpiresAt`.
 - Los refresh tokens se guardan hasheados, se rotan en cada refresh y tienen detección de reutilización.
+- En `WEB`, `rememberMe: true` emite cookie persistente de 15 días; si se omite o es `false`, la cookie `rt` es de sesión del navegador.
+- En `MOBILE`, la sesión siempre se trata como recordada durante la ventana de 15 días y el refresh token viaja por JSON.
 - Si se detecta reutilización/race de refresh token, se revocan todas las sesiones del usuario.
 - Los flujos sensibles no deben exponer si un email existe, salvo errores ya definidos por el contrato.
 
@@ -46,11 +49,13 @@ El módulo `auth` controla identidad, sesiones, tokens, verificación de email y
 {
   "email": "guia@example.com",
   "password": "Password123!",
-  "deviceId": "device-mobile-1"
+  "deviceId": "device-mobile-1",
+  "rememberMe": true
 }
 ```
 
 `deviceId` es obligatorio solo para `MOBILE`.
+`rememberMe` solo afecta a `WEB`; si no se envía, queda en `false`. En `MOBILE` se ignora y se guarda como `true`.
 
 ### Respuesta MOBILE
 
@@ -92,6 +97,7 @@ La respuesta no incluye `tokens.refreshToken`. El refresh token se envía en coo
 - `secure: true`
 - `sameSite: none`
 - path: `${API_PREFIX}/auth/refresh`
+- `Max-Age` de 15 días solo cuando `rememberMe` fue `true`; de lo contrario es una cookie de sesión del navegador.
 
 ## Refresh
 
@@ -116,6 +122,7 @@ La respuesta no incluye `tokens.refreshToken`. El refresh token se envía en coo
 - La plataforma de la sesión debe coincidir con `X-Client-Platform`.
 - El usuario debe estar activo.
 - El token se rota atómicamente.
+- La rotación conserva el `refreshExpiresAt` original; la sesión no es rolling/sliding.
 - Si la sesión ya fue revocada manualmente, el refresh responde `401 UNAUTHORIZED` sin afectar otras sesiones.
 - Si una carrera de rotación indica reutilización del refresh token, se revocan todas las sesiones del usuario y se responde `409 CONFLICT`.
 
@@ -209,7 +216,8 @@ Cada login crea una fila independiente en `sessions`. La sesion queda asociada a
 - `userAgent`;
 - IP;
 - refresh token hasheado;
-- expiracion de refresh;
+- expiracion absoluta de refresh, calculada al login;
+- preferencia `rememberMe` usada por cookies web;
 - marca de revocacion cuando se cierra.
 
 La sesion activa que corresponde al access token usado para consultar `GET /auth/sessions` se marca con `isCurrent: true`. Las demas sesiones activas del mismo usuario se devuelven con `isCurrent: false`.

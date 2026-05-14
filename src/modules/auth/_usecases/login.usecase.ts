@@ -77,6 +77,7 @@ export async function loginUsecase(
   const refreshTokenValue = generateRefreshToken()
   const refreshTokenHash = hashRefreshToken(refreshTokenValue)
   const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_SEC * 1000)
+  const rememberMe = platform === "MOBILE" ? true : data.rememberMe === true
 
   const session = await authRepository.createSession({
     userId: user.id,
@@ -84,6 +85,7 @@ export async function loginUsecase(
     deviceId: data.deviceId || null,
     userAgent,
     ip,
+    rememberMe,
     refreshTokenHash,
     refreshExpiresAt,
   })
@@ -115,6 +117,7 @@ export async function loginUsecase(
       id: session.id,
       platform: session.platform,
       createdAt: session.createdAt,
+      rememberMe: session.rememberMe,
     },
   }
 }

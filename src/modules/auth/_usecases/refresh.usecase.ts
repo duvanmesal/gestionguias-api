@@ -88,13 +88,13 @@ export async function refreshUsecase(
   const now = new Date()
   const newRefreshTokenValue = generateRefreshToken()
   const newRefreshTokenHash = hashRefreshToken(newRefreshTokenValue)
-  const newRefreshExpiresAt = new Date(Date.now() + REFRESH_TTL_SEC * 1000)
+  const refreshExpiresAt = session.refreshExpiresAt ?? new Date(Date.now() + REFRESH_TTL_SEC * 1000)
 
   const rotated = await authRepository.rotateRefreshTokenAtomic({
     sessionId: session.id,
     oldHash: refreshTokenHash,
     newHash: newRefreshTokenHash,
-    newExpiresAt: newRefreshExpiresAt,
+    refreshExpiresAt,
     ip,
     userAgent,
     now,
@@ -132,8 +132,8 @@ export async function refreshUsecase(
       accessToken: newAccessToken,
       accessTokenExpiresIn: ACCESS_TTL_SEC,
       refreshToken: newRefreshTokenValue,
-      refreshTokenExpiresAt: newRefreshExpiresAt.toISOString(),
+      refreshTokenExpiresAt: refreshExpiresAt.toISOString(),
     },
-    session: { id: session.id },
+    session: { id: session.id, rememberMe: session.rememberMe },
   }
 }

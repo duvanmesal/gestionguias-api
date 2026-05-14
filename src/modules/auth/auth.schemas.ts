@@ -8,6 +8,7 @@ export const loginSchema = z.object({
     .min(8, "Password must be at least 8 characters")
     .max(72, "Password too long"),
   deviceId: z.string().optional(),
+  rememberMe: z.boolean().optional(),
 });
 
 export const refreshSchema = z.object({
