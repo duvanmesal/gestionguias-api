@@ -57,9 +57,12 @@ Thumbs.db
 # Logs
 *.log
 
-# Prisma
-prisma/migrations/
+# Prisma migrations are deployment artifacts and must be versioned.
 gestionguias-api.zip
 docs-api.zip
 
 AGENTS.md
+
+# Firebase service account credentials (NEVER commit)
+*firebase-adminsdk*.json
+secrets/

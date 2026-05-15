@@ -5,6 +5,7 @@ import { authService } from "./auth.service";
 import { ok, created } from "../../libs/http";
 import { logger } from "../../libs/logger";
 import { BadRequestError } from "../../libs/errors";
+import { REFRESH_TTL_SEC } from "./_shared/auth.ttl";
 
 import type {
   LoginRequest,
@@ -26,6 +27,12 @@ const REFRESH_COOKIE_BASE = {
   sameSite: "none" as const,
   path: REFRESH_COOKIE_PATH,
 };
+
+function refreshCookieOptions(rememberMe: boolean) {
+  return rememberMe
+    ? { ...REFRESH_COOKIE_BASE, maxAge: REFRESH_TTL_SEC * 1000 }
+    : REFRESH_COOKIE_BASE;
+}
 
 export class AuthController {
   async login(req: Request, res: Response, next: NextFunction) {
@@ -71,10 +78,7 @@ export class AuthController {
       );
 
       if (platform === "WEB" && result.tokens.refreshToken) {
-        res.cookie("rt", result.tokens.refreshToken, {
-          ...REFRESH_COOKIE_BASE,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
-        });
+        res.cookie("rt", result.tokens.refreshToken, refreshCookieOptions(result.session.rememberMe));
 
         const { refreshToken, ...tokensWithoutRT } = result.tokens;
         return res.json(ok({ ...result, tokens: tokensWithoutRT }));
@@ -122,10 +126,7 @@ export class AuthController {
       );
 
       if (platform === "WEB" && result.tokens.refreshToken) {
-        res.cookie("rt", result.tokens.refreshToken, {
-          ...REFRESH_COOKIE_BASE,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
-        });
+        res.cookie("rt", result.tokens.refreshToken, refreshCookieOptions(result.session.rememberMe));
 
         const { refreshToken: _, ...tokensWithoutRT } = result.tokens;
         return res.json(ok({ ...result, tokens: tokensWithoutRT }));

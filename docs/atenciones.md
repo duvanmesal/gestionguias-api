@@ -1,6 +1,6 @@
 # Atenciones
 
-Última revisión contra código: 2026-05-04.
+Última revisión contra código: 2026-05-11.
 
 Fuente principal: `src/routes/atenciones.routes.ts`, `src/modules/atenciones/*`, `src/modules/recaladas/*`, `prisma/schema.prisma`.
 
@@ -71,6 +71,8 @@ Reglas:
 - No puede solaparse con otra atención activa de la misma recalada.
 - Si el actor supervisor no tiene fila `Supervisor`, el sistema la crea automáticamente.
 - La creación materializa turnos atómicamente.
+- Después de crear correctamente, encola notificaciones operativas `ATENCION_CREATED` para guías activos. Este enqueue no bloquea la respuesta.
+- Emite realtime `atencion:nueva` a la sala `guias` con `notificationId` y datos básicos de la atención.
 
 Respuesta exitosa: `201`.
 
@@ -210,6 +212,7 @@ Eventos emitidos:
 - `atencion:updated`
 - `atencion:canceled`
 - `atencion:closed`
+- `atencion:nueva` para la sala `guias` cuando se crea una atención. Payload mínimo: `notificationId`, `atencionId`, `recaladaId`, `fechaInicio`, `fechaFin`, `turnosTotal`, `descripcion`.
 
 Algunos se emiten a supervisores y al room específico de la atención.
 

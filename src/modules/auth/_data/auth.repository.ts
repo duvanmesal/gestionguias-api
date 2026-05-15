@@ -17,6 +17,7 @@ export type SessionWithUser = {
   refreshExpiresAt: Date | null;
   lastRotatedAt: Date | null;
   revokedAt: Date | null;
+  rememberMe: boolean;
   createdAt: Date;
   user: {
     id: string;
@@ -146,6 +147,7 @@ export class AuthRepository {
     deviceId: string | null;
     userAgent?: string;
     ip?: string;
+    rememberMe: boolean;
     refreshTokenHash: string;
     refreshExpiresAt: Date;
   }) {
@@ -156,6 +158,7 @@ export class AuthRepository {
         deviceId: data.deviceId,
         userAgent: data.userAgent,
         ip: data.ip,
+        rememberMe: data.rememberMe,
         refreshTokenHash: data.refreshTokenHash,
         refreshExpiresAt: data.refreshExpiresAt,
       },
@@ -163,6 +166,7 @@ export class AuthRepository {
         id: true,
         platform: true,
         createdAt: true,
+        rememberMe: true,
       },
     });
   }
@@ -182,7 +186,7 @@ export class AuthRepository {
     sessionId: string;
     oldHash: string;
     newHash: string;
-    newExpiresAt: Date;
+    refreshExpiresAt: Date;
     ip?: string;
     userAgent?: string;
     now: Date;
@@ -191,7 +195,7 @@ export class AuthRepository {
       where: { id: args.sessionId, refreshTokenHash: args.oldHash },
       data: {
         refreshTokenHash: args.newHash,
-        refreshExpiresAt: args.newExpiresAt,
+        refreshExpiresAt: args.refreshExpiresAt,
         lastRotatedAt: args.now,
         ip: args.ip,
         userAgent: args.userAgent,

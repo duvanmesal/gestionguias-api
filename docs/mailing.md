@@ -1,8 +1,8 @@
 # Mailing e invitaciones
 
-Última revisión contra código: 2026-05-09.
+Última revisión contra código: 2026-05-11.
 
-Fuente principal: `src/routes/invitations.routes.ts`, `src/routes/email.routes.ts`, `src/modules/invitations/*`, `src/libs/email.ts`, `src/config/env.ts`.
+Fuente principal: `src/routes/invitations.routes.ts`, `src/routes/email.routes.ts`, `src/routes/notifications.routes.ts`, `src/modules/invitations/*`, `src/modules/notifications/*`, `src/libs/email.ts`, `src/libs/push.ts`, `src/config/env.ts`.
 
 ## Propósito
 
@@ -13,6 +13,7 @@ Este documento cubre:
 - consulta de invitaciones;
 - endpoints técnicos de email;
 - correos transaccionales usados por auth.
+- notificaciones operativas por email y push.
 
 La autenticación y recuperación de contraseña se explican funcionalmente en [auth.md](./auth.md).
 
@@ -31,6 +32,10 @@ La autenticación y recuperación de contraseña se explican funcionalmente en [
 | `PASSWORD_RESET_TTL_MINUTES` | `15` |
 | `EMAIL_VERIFY_TTL_MINUTES` | `60` |
 | `LOGOUT_ALL_CODE_TTL_MINUTES` | `10` |
+| `PUSH_NOTIFICATIONS_ENABLED` | `false` |
+| `FIREBASE_PROJECT_ID` | vacío |
+| `FIREBASE_CLIENT_EMAIL` | vacío |
+| `FIREBASE_PRIVATE_KEY` | vacío |
 
 ## Invitaciones
 
@@ -255,6 +260,77 @@ El servicio de email también envía:
 - código de logout-all.
 
 Los templates usan `APP_NAME` si existe; default: `Gestión de Guías Turísticos`.
+
+## Notificaciones operativas
+
+Al crear una recalada o una atención, el API encola entregas de notificación para todos los guías activos operativos:
+
+- usuario con `rol = GUIA`;
+- `usuario.activo = true`;
+- relación `Guia` existente.
+
+Tipos soportados:
+
+| Tipo | Disparador | Canales |
+| --- | --- | --- |
+| `RECALADA_CREATED` | `POST /recaladas` exitoso | `EMAIL` y, si está habilitado, `PUSH` |
+| `ATENCION_CREATED` | `POST /atenciones` exitoso | `EMAIL` y, si está habilitado, `PUSH` |
+
+Las notificaciones no bloquean la creación. Si falla el enqueue, el endpoint conserva su respuesta `201`; si falla el despacho, la entrega queda en `FAILED` con `attempts`, `lastError` y `nextRetryAt` para reintento.
+
+Persistencia:
+
+- `notification_deliveries`: tipo, canal, destinatario, `recaladaId`, `atencionId`, estado, payload, intentos y reintento.
+- `push_device_tokens`: token único FCM/APNS, plataforma, `deviceId`, estado activo y timestamps.
+
+El job `notification-delivery` procesa entregas `PENDING` o `FAILED` vencidas. Los correos se envían de forma individual, sin BCC.
+
+### Endpoints de push token
+
+Todas las rutas requieren `requireAuth`.
+
+`POST /notifications/push-token`
+
+```json
+{
+  "token": "fcm_or_apns_token",
+  "platform": "ANDROID",
+  "deviceId": "device-id-local"
+}
+```
+
+Reglas:
+
+- `platform`: `ANDROID`, `IOS` o `WEB`.
+- `token` es único y se hace upsert para el usuario autenticado.
+- Reactiva tokens previamente desactivados si el mismo dispositivo se registra de nuevo.
+
+`DELETE /notifications/push-token`
+
+```json
+{
+  "token": "fcm_or_apns_token",
+  "deviceId": "device-id-local"
+}
+```
+
+Reglas:
+
+- Desactiva tokens activos del usuario por `token`, `deviceId` o ambos.
+- Se usa en logout o cambio de dispositivo.
+
+### Firebase / FCM
+
+El proveedor push usa Firebase Admin SDK, pero permanece inactivo por defecto.
+
+Para activar push real en Render:
+
+- `PUSH_NOTIFICATIONS_ENABLED=true`
+- `FIREBASE_PROJECT_ID`
+- `FIREBASE_CLIENT_EMAIL`
+- `FIREBASE_PRIVATE_KEY`
+
+`FIREBASE_PRIVATE_KEY` puede cargarse con saltos escapados (`\n`); el API los normaliza antes de inicializar Firebase.
 
 ## Seguridad
 

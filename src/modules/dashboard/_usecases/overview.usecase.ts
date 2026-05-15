@@ -9,6 +9,7 @@ import type {
   DashboardOverviewResponse,
   DashboardWidget,
   GuiaOverview,
+  SupervisorAlert,
   SupervisorOverview,
   TurnoLite,
 } from "../dashboard.types";
@@ -109,10 +110,11 @@ async function buildSupervisorOverview(args: {
 }): Promise<SupervisorOverview> {
   const { start, end, now, upcomingLimit } = args;
 
-  const [recaladas, atenciones, turnos] = await Promise.all([
+  const [recaladas, atenciones, turnos, overdueRecaladas] = await Promise.all([
     dashboardRepository.countRecaladasInDay({ start, end }),
     dashboardRepository.countAtencionesIntersectDay({ start, end }),
     dashboardRepository.countTurnosForAtencionesIntersectDay({ start, end }),
+    dashboardRepository.countOverdueDepartures({ now }),
   ]);
 
   const turnosByStatus =
@@ -192,6 +194,18 @@ async function buildSupervisorOverview(args: {
     (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime(),
   );
 
+  const alerts: SupervisorAlert[] = [];
+  if (overdueRecaladas > 0) {
+    alerts.push({
+      code: "OVERDUE_RECALADAS",
+      label:
+        overdueRecaladas === 1
+          ? "1 recalada vencida pendiente de zarpe"
+          : `${overdueRecaladas} recaladas vencidas pendientes de zarpe`,
+      count: overdueRecaladas,
+    });
+  }
+
   return {
     counts: {
       recaladas,
@@ -202,6 +216,7 @@ async function buildSupervisorOverview(args: {
       turnosInProgress,
       turnosDone,
       turnosCanceled,
+      overdueRecaladas,
     },
     guides: {
       activos: guidesActivos,
@@ -209,6 +224,7 @@ async function buildSupervisorOverview(args: {
       libres: guidesLibres,
     },
     turnosBreakdown: breakdown,
+    alerts,
     upcoming: milestones.slice(0, upcomingLimit),
   };
 }
@@ -235,6 +251,40 @@ function buildSupervisorWidgets(
     },
     actions: [{ label: "Ver turnero", action: "navigate", to: "/turnos" }],
   });
+
+  const overdueRecaladas = supervisor.counts.overdueRecaladas ?? 0;
+  if (overdueRecaladas > 0) {
+    widgets.push({
+      id: "sup-overdue-recaladas",
+      type: "alert",
+      tone: "danger",
+      icon: "ship-off",
+      title: "Recaladas vencidas pendientes de zarpe",
+      subtitle:
+        overdueRecaladas === 1
+          ? "1 recalada arribada cuya salida programada ya venció."
+          : `${overdueRecaladas} recaladas arribadas cuya salida programada ya venció.`,
+      data: {
+        items: [
+          {
+            code: "OVERDUE_RECALADAS",
+            label:
+              overdueRecaladas === 1
+                ? "1 recalada vencida pendiente de zarpe"
+                : `${overdueRecaladas} recaladas vencidas pendientes de zarpe`,
+            count: overdueRecaladas,
+          },
+        ],
+      },
+      actions: [
+        {
+          label: "Revisar recaladas",
+          action: "navigate",
+          to: "/recaladas?overdueDeparture=true",
+        },
+      ],
+    });
+  }
 
   const available = supervisor.counts.turnosAvailable ?? 0;
   const canceled = supervisor.counts.turnosCanceled ?? 0;

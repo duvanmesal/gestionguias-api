@@ -58,6 +58,12 @@ export const createRecaladaSchema = z
     },
   );
 
+// Acepta "true"/"false"/"1"/"0" desde query string y los coacciona a boolean.
+const booleanFromQuery = z
+  .union([z.boolean(), z.enum(["true", "false", "1", "0"])])
+  .transform((v) => v === true || v === "true" || v === "1")
+  .optional();
+
 export const listRecaladasQuerySchema = z
   .object({
     from: z.coerce.date().optional(),
@@ -69,6 +75,9 @@ export const listRecaladasQuerySchema = z
     paisOrigenId: z.coerce.number().int().positive().optional(),
 
     q: z.string().trim().min(1).max(200).optional(),
+
+    // Filtro operativo: recaladas ARRIVED cuyo zarpe programado ya venció.
+    overdueDeparture: booleanFromQuery,
 
     page: z.coerce.number().int().positive().default(1),
     pageSize: z.coerce.number().int().positive().max(100).default(20),

@@ -30,6 +30,16 @@ export function buildRecaladasWhere(query: ListRecaladasQuery): Prisma.RecaladaW
   if (query.buqueId) AND.push({ buqueId: query.buqueId })
   if (query.paisOrigenId) AND.push({ paisOrigenId: query.paisOrigenId })
 
+  // Alerta operativa: recaladas vencidas pendientes de zarpe
+  // (ACTIVO + ARRIVED + fechaSalida < ahora).
+  if (query.overdueDeparture) {
+    AND.push({
+      status: "ACTIVO",
+      operationalStatus: "ARRIVED",
+      fechaSalida: { lt: new Date() },
+    })
+  }
+
   if (query.from || query.to) {
     const from = query.from
     const to = query.to

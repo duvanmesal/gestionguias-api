@@ -29,6 +29,7 @@ export interface LoginResult {
     id: string
     platform: Platform
     createdAt: Date
+    rememberMe: boolean
   }
 }
 
@@ -36,6 +37,7 @@ export interface RefreshResult {
   tokens: AuthTokens
   session: {
     id: string
+    rememberMe: boolean
   }
 }
 

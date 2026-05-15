@@ -48,6 +48,12 @@ export type DashboardOverviewResponse = {
   guia?: GuiaOverview;
 };
 
+export type SupervisorAlert = {
+  code: "OVERDUE_RECALADAS" | "UNASSIGNED_TURNOS" | "CANCELED_TURNOS" | string;
+  label: string;
+  count: number;
+};
+
 export type SupervisorOverview = {
   counts: {
     recaladas: number;
@@ -60,6 +66,9 @@ export type SupervisorOverview = {
     turnosInProgress?: number;
     turnosDone?: number;
     turnosCanceled?: number;
+
+    // Recaladas vencidas pendientes de zarpe (ACTIVO + ARRIVED + fechaSalida < now)
+    overdueRecaladas?: number;
   };
 
   guides?: {
@@ -69,6 +78,8 @@ export type SupervisorOverview = {
   };
 
   turnosBreakdown?: Record<string, number>;
+
+  alerts?: SupervisorAlert[];
 
   upcoming: DashboardMilestone[];
 };

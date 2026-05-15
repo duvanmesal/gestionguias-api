@@ -8,6 +8,7 @@ import type { CreateAtencionBody } from "../atencion.schemas"
 import { atencionRepository } from "../_data/atencion.repository"
 import { emitAtencionRealtime } from "../../../core/socket/domain-events"
 import { socketService } from "../../../core/socket/socket.service"
+import { enqueueAtencionCreatedNotification } from "../../notifications/notification.service"
 import {
   assertTurnosTotalValid,
   assertWindowDatesValid,
@@ -238,13 +239,27 @@ export async function createAtencionUsecase(
     operationalStatus: created.operationalStatus,
   })
 
+  const notificationId = `atencion:${created.id}:created`
   socketService.emitToAllGuias("atencion:nueva", {
+    notificationId,
     atencionId: created.id,
     recaladaId: created.recaladaId,
     fechaInicio: created.fechaInicio,
     fechaFin: created.fechaFin,
     turnosTotal: created.turnosTotal,
     descripcion: created.descripcion ?? null,
+  })
+
+  enqueueAtencionCreatedNotification(created.id).catch((err) => {
+    logger.error(
+      {
+        err,
+        atencionId: created.id,
+        recaladaId: created.recaladaId,
+        notificationId,
+      },
+      "[Atenciones] failed to enqueue created notification",
+    )
   })
 
   return created

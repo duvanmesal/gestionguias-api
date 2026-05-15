@@ -1,4 +1,9 @@
-import type { Prisma, RecaladaSource, StatusType } from "@prisma/client"
+import type {
+  Prisma,
+  RecaladaOperativeStatus,
+  RecaladaSource,
+  StatusType,
+} from "@prisma/client"
 
 import { prisma } from "../../../prisma/client"
 import { recaladaSelect, atencionSelectForRecalada } from "./recalada.select"
@@ -39,6 +44,11 @@ export class RecaladaRepository {
     return prisma.recalada.findUnique({ where: { id }, select: { id: true } })
   }
 
+  /**
+   * Solape por buque tratando los intervalos como semiabiertos [llegada, salida).
+   * Solo bloquean recaladas con status ACTIVO y operationalStatus SCHEDULED o ARRIVED.
+   * Una recalada que termina exactamente en `fechaLlegada` NO solapa.
+   */
   findOverlappingForBuque(args: {
     buqueId: number
     fechaLlegada: Date
@@ -49,16 +59,17 @@ export class RecaladaRepository {
       where: {
         buqueId: args.buqueId,
         id: args.excludeId ? { not: args.excludeId } : undefined,
-        operationalStatus: { notIn: ["CANCELED", "DEPARTED"] },
+        status: "ACTIVO",
+        operationalStatus: { in: ["SCHEDULED", "ARRIVED"] },
         AND: [
-          // existing ends after new starts (or is open-ended)
+          // existing ends strictly after new starts (semiabierto: fin == llegada no solapa)
           {
             OR: [
               { fechaSalida: null },
               { fechaSalida: { gt: args.fechaLlegada } },
             ],
           },
-          // new ends after existing starts (or new is open-ended)
+          // new ends strictly after existing starts (o nueva sin fin)
           args.fechaSalida
             ? { fechaLlegada: { lt: args.fechaSalida } }
             : {},
@@ -179,6 +190,8 @@ export class RecaladaRepository {
     supervisorId: string
     source: RecaladaSource
     status: StatusType
+    operationalStatus: RecaladaOperativeStatus
+    arrivedAt: Date | null
   }) {
     const created = await prisma.$transaction(async (tx) => {
       const tempCode = tempCodigoRecalada()
@@ -194,6 +207,8 @@ export class RecaladaRepository {
           fechaLlegada: args.input.fechaLlegada,
           fechaSalida: args.input.fechaSalida ?? null,
 
+          arrivedAt: args.arrivedAt,
+
           terminal: args.input.terminal ?? null,
           muelle: args.input.muelle ?? null,
 
@@ -204,6 +219,7 @@ export class RecaladaRepository {
           fuente: args.source,
 
           status: args.status,
+          operationalStatus: args.operationalStatus,
         },
         select: { id: true, fechaLlegada: true },
       })

@@ -12,7 +12,7 @@ const Env = z.object({
   JWT_ACCESS_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),
   JWT_ACCESS_TTL: z.string().default("15m"),
-  JWT_REFRESH_TTL: z.string().default("7d"),
+  JWT_REFRESH_TTL: z.string().default("15d"),
 
   LOG_LEVEL: z.string().default("info"),
 
@@ -65,6 +65,12 @@ const Env = z.object({
 
   // Identidad del servicio emisor (útil si varios servicios publican logs)
   SERVICE_NAME: z.string().default("gestionguias-api"),
+
+  // Push notifications (Firebase Cloud Messaging)
+  PUSH_NOTIFICATIONS_ENABLED: z.coerce.boolean().default(false),
+  FIREBASE_PROJECT_ID: z.string().default(""),
+  FIREBASE_CLIENT_EMAIL: z.string().default(""),
+  FIREBASE_PRIVATE_KEY: z.string().default(""),
 });
 
 export const env = Env.parse(process.env);

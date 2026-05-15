@@ -5,6 +5,7 @@ import { logger } from "./libs/logger"
 import { prisma } from "./prisma/client"
 import { initSocketGateway } from "./core/socket/socket.gateway"
 import { startTurnoAutomationsJob } from "./core/jobs/turno-automations.job"
+import { startNotificationDeliveryJob } from "./core/jobs/notification-delivery.job"
 
 async function startServer() {
   try {
@@ -15,6 +16,7 @@ async function startServer() {
     const httpServer = createServer(app)
     initSocketGateway(httpServer)
     startTurnoAutomationsJob()
+    startNotificationDeliveryJob()
 
     // Start HTTP server
     httpServer.listen(env.PORT, () => {

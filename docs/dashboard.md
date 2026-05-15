@@ -102,7 +102,8 @@ Métricas calculadas para el día:
 - turnos asociados a atenciones que intersectan el día;
 - breakdown por estado de turno;
 - guías activos, asignados y libres;
-- hitos próximos.
+- hitos próximos;
+- conteo de recaladas vencidas pendientes de zarpe (`overdueRecaladas`).
 
 Shape:
 
@@ -117,7 +118,8 @@ Shape:
       "turnosAvailable": 20,
       "turnosInProgress": 2,
       "turnosDone": 6,
-      "turnosCanceled": 2
+      "turnosCanceled": 2,
+      "overdueRecaladas": 1
     },
     "guides": {
       "activos": 15,
@@ -128,13 +130,26 @@ Shape:
       "AVAILABLE": 20,
       "ASSIGNED": 10
     },
+    "alerts": [
+      {
+        "code": "OVERDUE_RECALADAS",
+        "label": "1 recalada vencida pendiente de zarpe",
+        "count": 1
+      }
+    ],
     "upcoming": []
   }
 }
 ```
 
+`supervisor.alerts` es opcional. Cuando aplica, incluye objetos `{ code, label, count }`. El
+código `OVERDUE_RECALADAS` corresponde a recaladas con `status = ACTIVO`,
+`operationalStatus = ARRIVED` y `fechaSalida < now`.
+
 Widgets posibles:
 
+- `sup-overdue-recaladas` (solo aparece si hay vencidas pendientes; navega a
+  `/recaladas?overdueDeparture=true`)
 - `sup-operation-today`
 - `sup-alerts`
 - `sup-guides`

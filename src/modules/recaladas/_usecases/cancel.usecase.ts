@@ -6,6 +6,7 @@ import { logger } from "../../../libs/logger"
 
 import { recaladaRepository } from "../_data/recalada.repository"
 import { auditFail, auditOk } from "../_shared/recalada.audit"
+import { recaladaCache } from "../_shared/recalada.cache"
 import { emitRecaladaRealtime } from "../../../core/socket/domain-events"
 
 export async function cancelRecaladaUsecase(
@@ -129,6 +130,8 @@ export async function cancelRecaladaUsecase(
     },
     { entity: "Recalada", id: String(id) },
   )
+
+  recaladaCache.invalidate(id)
 
   emitRecaladaRealtime("recalada:canceled", {
     recaladaId: id,

@@ -41,7 +41,7 @@ describe("[HTTP] /api/v1/auth flow", () => {
     expect(res.body.error?.code).toBe("BAD_REQUEST");
   });
 
-  test("POST /auth/login con credenciales válidas → 200 + tokens", async () => {
+  test("POST /auth/login WEB sin rememberMe → 200 + cookie de sesión", async () => {
     (prisma.usuario.findUnique as jest.Mock).mockResolvedValueOnce({
       id: "u1",
       email: "a@a.com",
@@ -50,6 +50,9 @@ describe("[HTTP] /api/v1/auth flow", () => {
       rol: "GUIA",
       nombres: "John",
       apellidos: "Doe",
+      emailVerifiedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     });
     (password.verifyPassword as jest.Mock).mockResolvedValueOnce(true);
     (crypto.generateRefreshToken as jest.Mock).mockReturnValue("REFRESH_VALUE");
@@ -60,6 +63,7 @@ describe("[HTTP] /api/v1/auth flow", () => {
       platform: "WEB",
       createdAt: new Date(),
       refreshTokenHash: "REFRESH_HASH",
+      rememberMe: false,
     });
     (jwt.signAccessToken as jest.Mock).mockReturnValue("ACCESS_TOKEN");
 
@@ -74,8 +78,98 @@ describe("[HTTP] /api/v1/auth flow", () => {
     // Para WEB el refresh va a cookie (el body NO lo incluye):
     const setCookie = res.headers["set-cookie"];
     const cookies = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
-    expect(cookies.some((c: string) => typeof c === "string" && c.startsWith("rt="))).toBe(true);
+    const refreshCookie = cookies.find((c: string) => typeof c === "string" && c.startsWith("rt="));
+    expect(refreshCookie).toBeDefined();
+    expect(refreshCookie).not.toContain("Max-Age=");
     expect(res.body.data.tokens.refreshToken).toBeUndefined();
+    expect(prisma.session.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ rememberMe: false }),
+      }),
+    );
+  });
+
+  test("POST /auth/login WEB con rememberMe → 200 + cookie persistente de 15 días", async () => {
+    (prisma.usuario.findUnique as jest.Mock).mockResolvedValueOnce({
+      id: "u1",
+      email: "a@a.com",
+      activo: true,
+      passwordHash: "hash",
+      rol: "GUIA",
+      nombres: "John",
+      apellidos: "Doe",
+      emailVerifiedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    (password.verifyPassword as jest.Mock).mockResolvedValueOnce(true);
+    (crypto.generateRefreshToken as jest.Mock).mockReturnValue("REFRESH_VALUE");
+    (crypto.hashRefreshToken as jest.Mock).mockReturnValue("REFRESH_HASH");
+    (prisma.session.create as jest.Mock).mockResolvedValueOnce({
+      id: "s1",
+      userId: "u1",
+      platform: "WEB",
+      createdAt: new Date(),
+      refreshTokenHash: "REFRESH_HASH",
+      rememberMe: true,
+    });
+    (jwt.signAccessToken as jest.Mock).mockReturnValue("ACCESS_TOKEN");
+
+    const res = await agent
+      .post("/api/v1/auth/login")
+      .set("X-Client-Platform", "web")
+      .send({ email: "a@a.com", password: "Secret123@", rememberMe: true });
+
+    expect(res.status).toBe(200);
+    const setCookie = res.headers["set-cookie"];
+    const cookies = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
+    const refreshCookie = cookies.find((c: string) => typeof c === "string" && c.startsWith("rt="));
+    expect(refreshCookie).toContain("Max-Age=1296000");
+    expect(prisma.session.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ rememberMe: true }),
+      }),
+    );
+  });
+
+  test("POST /auth/login MOBILE crea sesión rememberMe y devuelve refresh token", async () => {
+    (prisma.usuario.findUnique as jest.Mock).mockResolvedValueOnce({
+      id: "u1",
+      email: "a@a.com",
+      activo: true,
+      passwordHash: "hash",
+      rol: "GUIA",
+      nombres: "John",
+      apellidos: "Doe",
+      emailVerifiedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    (password.verifyPassword as jest.Mock).mockResolvedValueOnce(true);
+    (crypto.generateRefreshToken as jest.Mock).mockReturnValue("REFRESH_VALUE");
+    (crypto.hashRefreshToken as jest.Mock).mockReturnValue("REFRESH_HASH");
+    (prisma.session.create as jest.Mock).mockResolvedValueOnce({
+      id: "s1",
+      userId: "u1",
+      platform: "MOBILE",
+      createdAt: new Date(),
+      refreshTokenHash: "REFRESH_HASH",
+      rememberMe: true,
+    });
+    (jwt.signAccessToken as jest.Mock).mockReturnValue("ACCESS_TOKEN");
+
+    const res = await agent
+      .post("/api/v1/auth/login")
+      .set("X-Client-Platform", "mobile")
+      .send({ email: "a@a.com", password: "Secret123@", deviceId: "device-1" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.tokens.refreshToken).toBe("REFRESH_VALUE");
+    expect(prisma.session.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ rememberMe: true }),
+      }),
+    );
   });
 
   test("POST /auth/login rate limited → 429 al exceder", async () => {
@@ -134,6 +228,9 @@ describe("[HTTP] /api/v1/auth flow", () => {
       rol: "GUIA",
       nombres: "John",
       apellidos: "Doe",
+      emailVerifiedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     });
 
     const res = await agent
@@ -148,14 +245,16 @@ describe("[HTTP] /api/v1/auth flow", () => {
 
   test("POST /auth/refresh (cookie rt en WEB) → 200/401 según caso", async () => {
     // Caso OK
+    const originalRefreshExpiresAt = new Date(Date.now() + 3600_000);
     (prisma.session.findUnique as jest.Mock).mockResolvedValueOnce({
       id: "s1",
       userId: "u1",
       refreshTokenHash: "RT_HASH",
       platform: "WEB",
-      user: { activo: true },
-      refreshExpiresAt: new Date(Date.now() + 3600_000),
+      user: { id: "u1", email: "a@a.com", rol: "GUIA", activo: true },
+      refreshExpiresAt: originalRefreshExpiresAt,
       revokedAt: null,
+      rememberMe: true,
     });
     (crypto.hashRefreshToken as jest.Mock).mockReturnValue("RT_HASH");
     (prisma.session.updateMany as jest.Mock).mockResolvedValueOnce({ count: 1 });
@@ -169,6 +268,13 @@ describe("[HTTP] /api/v1/auth flow", () => {
 
     expect(ok.status).toBe(200);
     expect(ok.body.data.tokens.accessToken).toBeDefined();
+    expect(prisma.session.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          refreshExpiresAt: originalRefreshExpiresAt,
+        }),
+      }),
+    );
 
     // Caso 401 (token inexistente)
     (prisma.session.findUnique as jest.Mock).mockResolvedValueOnce(null);

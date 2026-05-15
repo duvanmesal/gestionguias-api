@@ -1,7 +1,13 @@
 import cors from "cors";
 import { Application } from "express";
-import { buildCorsOptions } from "../config/cors";
 import { corsOrigins } from "../config/env";
+
+const nativeAppOrigins = [
+  "http://localhost",
+  "https://localhost",
+  "capacitor://localhost",
+  "ionic://localhost",
+];
 
 export function applyCors(app: Application) {
     const allowedHeaders = [
@@ -14,7 +20,7 @@ export function applyCors(app: Application) {
 
     const methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
     const corsOptions: cors.CorsOptions = {
-    origin: corsOrigins,
+    origin: [...new Set([...corsOrigins, ...nativeAppOrigins])],
     credentials: true,
     methods,
     allowedHeaders,
