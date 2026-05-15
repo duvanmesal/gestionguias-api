@@ -78,7 +78,15 @@ Reglas:
 - Si `fuente` es `MANUAL` o no se envía, `fechaSalida` no puede estar en el pasado.
 - Si `fuente` es `IMPORT`, se permite importar fechas pasadas.
 - `pasajerosEstimados`, si se envía, debe ser al menos `1`.
-- No se permite solapar recaladas activas del mismo buque.
+- No se permite solapar recaladas activas del mismo buque. La regla de solape trata las
+  ventanas como semiabiertas `[fechaLlegada, fechaSalida)`: una recalada que termina exactamente
+  en `fechaLlegada` no solapa. Solo bloquean recaladas con `status = ACTIVO` y
+  `operationalStatus` en `SCHEDULED` o `ARRIVED`.
+- Estado operativo inicial automático:
+  - Si `fechaLlegada <= now`, la recalada nace con `operationalStatus = ARRIVED` y
+    `arrivedAt = now`.
+  - Si `fechaLlegada > now`, queda como `SCHEDULED`.
+  - Si `fechaSalida` ya pasó y la fuente es `MANUAL`, la creación se rechaza por validación.
 - Si el actor supervisor no tiene fila `Supervisor`, el sistema la crea automáticamente.
 - `codigoRecalada` se genera como `RA-YYYY-000001` usando el id autoincremental.
 - Después de crear correctamente, encola notificaciones operativas `RECALADA_CREATED` para guías activos. Este enqueue no bloquea la respuesta.
@@ -100,6 +108,7 @@ Query:
 | `buqueId` | number | - |
 | `paisOrigenId` | number | - |
 | `q` | string | - |
+| `overdueDeparture` | boolean | `false` |
 | `page` | number | `1` |
 | `pageSize` | number | `20`, máximo `100` |
 
@@ -108,8 +117,24 @@ Reglas de filtros:
 - `to` debe ser mayor o igual a `from`.
 - El rango de fechas busca recaladas cuya ventana se cruza con `[from, to]`.
 - `q` busca por `codigoRecalada`, `observaciones` o nombre de buque.
+- `overdueDeparture=true` devuelve solo recaladas con `status = ACTIVO`,
+  `operationalStatus = ARRIVED` y `fechaSalida < now` (vencidas pendientes de zarpe).
+  Es la alerta operativa usada por el dashboard.
 
-La respuesta incluye `meta` con `hasNextPage`, `hasPrevPage`, `from`, `to`, `q` y filtros aplicados.
+La respuesta incluye `meta` con `hasNextPage`, `hasPrevPage`, `from`, `to`, `q` y filtros aplicados
+(incluye `overdueDeparture`).
+
+## Caché operativa en memoria
+
+La API mantiene una caché en memoria de recaladas vigentes (`status = ACTIVO` y
+`operationalStatus` en `SCHEDULED` o `ARRIVED`). No es fuente de verdad: la base de datos sigue
+siendo el respaldo final. Reglas:
+
+- Se actualiza en `create`, `update` y `arrive`.
+- Se invalida en `depart`, `cancel` y `delete`.
+- TTL por ítem basado en `fechaSalida` (mínimo 60 s). Sin `fechaSalida` usa TTL defensivo corto.
+- Local al proceso. No usa Redis ni infraestructura externa. Reiniciar el proceso no rompe
+  consultas: la BD sigue resolviendo todas las lecturas.
 
 ## Editar recalada
 

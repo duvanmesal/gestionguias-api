@@ -8,6 +8,7 @@ import { recaladaRepository } from "../_data/recalada.repository"
 import { buildUpdateData } from "../_domain/recalada.rules"
 import type { UpdateRecaladaInput } from "../_domain/recalada.types"
 import { auditFail, auditOk } from "../_shared/recalada.audit"
+import { recaladaCache, toCachedRecalada } from "../_shared/recalada.cache"
 import { emitRecaladaRealtime } from "../../../core/socket/domain-events"
 
 export async function updateRecaladaUsecase(
@@ -204,6 +205,8 @@ export async function updateRecaladaUsecase(
     },
     { entity: "Recalada", id: String(id) },
   )
+
+  recaladaCache.set(toCachedRecalada(updated))
 
   emitRecaladaRealtime("recalada:updated", {
     recaladaId: id,

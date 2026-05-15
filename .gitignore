@@ -62,3 +62,7 @@ gestionguias-api.zip
 docs-api.zip
 
 AGENTS.md
+
+# Firebase service account credentials (NEVER commit)
+*firebase-adminsdk*.json
+secrets/

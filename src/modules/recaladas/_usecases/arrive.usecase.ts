@@ -6,6 +6,7 @@ import { logger } from "../../../libs/logger"
 
 import { recaladaRepository } from "../_data/recalada.repository"
 import { auditFail, auditOk } from "../_shared/recalada.audit"
+import { recaladaCache, toCachedRecalada } from "../_shared/recalada.cache"
 import { emitRecaladaRealtime } from "../../../core/socket/domain-events"
 import { autoAssignTurnosForRecaladaUsecase } from "../../disponibilidad/_usecases/autoAssign.usecase"
 
@@ -134,6 +135,8 @@ export async function arriveRecaladaUsecase(
     { actorUserId, recaladaId: id, arrivedAt: when.toISOString() },
     { entity: "Recalada", id: String(id) },
   )
+
+  recaladaCache.set(toCachedRecalada(updated))
 
   emitRecaladaRealtime("recalada:arrived", {
     recaladaId: id,

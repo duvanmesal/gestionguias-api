@@ -1,5 +1,9 @@
 import type { Request } from "express"
-import type { RecaladaSource, StatusType } from "@prisma/client"
+import type {
+  RecaladaOperativeStatus,
+  RecaladaSource,
+  StatusType,
+} from "@prisma/client"
 
 import { ConflictError, NotFoundError } from "../../../libs/errors"
 import { logger } from "../../../libs/logger"
@@ -12,6 +16,7 @@ import {
 } from "../_domain/recalada.rules"
 import type { CreateRecaladaInput } from "../_domain/recalada.types"
 import { auditFail, auditOk } from "../_shared/recalada.audit"
+import { recaladaCache, toCachedRecalada } from "../_shared/recalada.cache"
 import { emitRecaladaRealtime } from "../../../core/socket/domain-events"
 import { socketService } from "../../../core/socket/socket.service"
 import { enqueueRecaladaCreatedNotification } from "../../notifications/notification.service"
@@ -153,11 +158,21 @@ export async function createRecaladaUsecase(
 
   const status: StatusType = input.status ?? "ACTIVO"
 
+  // Estado operativo inicial: si la fecha de llegada ya pasó (o es ahora), la
+  // recalada nace como ARRIVED con arrivedAt = ahora. Si es futura, queda SCHEDULED.
+  // La regla de fechaSalida vencida ya fue rechazada por las validaciones previas
+  // para fuente MANUAL.
+  const operationalStatus: RecaladaOperativeStatus =
+    input.fechaLlegada.getTime() <= now.getTime() ? "ARRIVED" : "SCHEDULED"
+  const arrivedAt = operationalStatus === "ARRIVED" ? now : null
+
   const created = await recaladaRepository.createWithCodigoAtomic({
     input,
     supervisorId: supervisor.id,
     source,
     status,
+    operationalStatus,
+    arrivedAt,
   })
 
   logger.info(
@@ -187,6 +202,8 @@ export async function createRecaladaUsecase(
     },
     { entity: "Recalada", id: String(created.id) },
   )
+
+  recaladaCache.set(toCachedRecalada(created))
 
   emitRecaladaRealtime("recalada:created", {
     recaladaId: created.id,

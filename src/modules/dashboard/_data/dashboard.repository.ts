@@ -88,6 +88,16 @@ export const dashboardRepository = {
     });
   },
 
+  countOverdueDepartures(args: { now: Date }) {
+    return prisma.recalada.count({
+      where: {
+        status: StatusType.ACTIVO,
+        operationalStatus: RecaladaOperativeStatus.ARRIVED,
+        fechaSalida: { lt: args.now },
+      },
+    });
+  },
+
   listNextArrivals(args: { now: Date; take: number }) {
     return prisma.recalada.findMany({
       where: {

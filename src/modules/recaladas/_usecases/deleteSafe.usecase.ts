@@ -5,6 +5,7 @@ import { logger } from "../../../libs/logger"
 
 import { recaladaRepository } from "../_data/recalada.repository"
 import { auditFail, auditOk } from "../_shared/recalada.audit"
+import { recaladaCache } from "../_shared/recalada.cache"
 
 export async function deleteRecaladaSafeUsecase(
   req: Request,
@@ -73,6 +74,8 @@ export async function deleteRecaladaSafeUsecase(
   }
 
   await recaladaRepository.delete(id)
+
+  recaladaCache.invalidate(id)
 
   logger.info(
     { recaladaId: id, codigoRecalada: current.codigoRecalada, actorUserId },
