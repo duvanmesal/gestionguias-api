@@ -10,6 +10,10 @@ import { emitAtencionRealtime } from "../../../core/socket/domain-events"
 import { socketService } from "../../../core/socket/socket.service"
 import { enqueueAtencionCreatedNotification } from "../../notifications/notification.service"
 import {
+  atencionCapacityCache,
+  toCachedAtencionCapacity,
+} from "../_shared/atencion-capacity.cache"
+import {
   assertTurnosTotalValid,
   assertWindowDatesValid,
   assertWindowNotPast,
@@ -231,6 +235,8 @@ export async function createAtencionUsecase(
     },
     { entity: "Atencion", id: String(created.id) },
   )
+
+  atencionCapacityCache.set(toCachedAtencionCapacity(created))
 
   emitAtencionRealtime("atencion:created", {
     atencionId: created.id,

@@ -5,6 +5,7 @@ import { ConflictError, NotFoundError } from "../../../libs/errors"
 
 import { atencionRepository } from "../_data/atencion.repository"
 import { auditFail, auditOk } from "../_shared/atencion.audit"
+import { atencionCapacityCache } from "../_shared/atencion-capacity.cache"
 import {
   emitAtencionRealtime,
   emitTurnoRealtime,
@@ -37,6 +38,8 @@ export async function cancelAtencionUsecase(
       { atencionId: id },
       { entity: "Atencion", id: String(id) },
     )
+
+    atencionCapacityCache.invalidate(id)
 
     const item = await atencionRepository.findById(id)
     if (!item) throw new NotFoundError("Atención no encontrada")
@@ -121,6 +124,8 @@ export async function cancelAtencionUsecase(
     },
     { entity: "Atencion", id: String(id) },
   )
+
+  atencionCapacityCache.invalidate(id)
 
   emitAtencionRealtime("atencion:canceled", {
     atencionId: id,

@@ -6,12 +6,25 @@ import type { AtencionTurnosSummary } from "../_domain/atencion.types"
 
 import { atencionRepository } from "../_data/atencion.repository"
 import { auditFail, auditOk } from "../_shared/atencion.audit"
+import {
+  atencionCapacityCache,
+  toCachedAtencionCapacity,
+} from "../_shared/atencion-capacity.cache"
 
 export async function getAtencionSummaryUsecase(
   req: Request,
   atencionId: number,
 ): Promise<AtencionTurnosSummary> {
-  const atencion = await atencionRepository.getSummaryAtencion(atencionId)
+  let atencion = atencionCapacityCache.get(atencionId)
+
+  if (!atencion) {
+    const loaded = await atencionRepository.findCapacityById(atencionId)
+    if (loaded) {
+      atencionCapacityCache.set(toCachedAtencionCapacity(loaded))
+      atencion = loaded
+    }
+  }
+
   if (!atencion) {
     auditFail(
       req,

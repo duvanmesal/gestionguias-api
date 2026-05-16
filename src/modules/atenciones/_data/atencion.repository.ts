@@ -99,6 +99,20 @@ export class AtencionRepository {
     })
   }
 
+  findCapacityById(id: number, tx?: Tx) {
+    return db(tx).atencion.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        recaladaId: true,
+        turnosTotal: true,
+        status: true,
+        operationalStatus: true,
+        fechaFin: true,
+      },
+    })
+  }
+
   findGateForCancel(id: number, tx?: Tx) {
     return db(tx).atencion.findUnique({
       where: { id },
@@ -191,7 +205,7 @@ export class AtencionRepository {
         ...(typeof args.excludeId === "number" ? { id: { not: args.excludeId } } : {}),
         status: "ACTIVO",
         operationalStatus: { not: "CANCELED" },
-        AND: [{ fechaInicio: { lte: args.fechaFin } }, { fechaFin: { gte: args.fechaInicio } }],
+        AND: [{ fechaInicio: { lt: args.fechaFin } }, { fechaFin: { gt: args.fechaInicio } }],
       },
       select: { id: true, fechaInicio: true, fechaFin: true },
     })

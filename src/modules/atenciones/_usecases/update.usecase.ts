@@ -9,6 +9,10 @@ import type { UpdateAtencionBody } from "../atencion.schemas"
 import { atencionRepository } from "../_data/atencion.repository"
 import { emitAtencionRealtime } from "../../../core/socket/domain-events"
 import {
+  atencionCapacityCache,
+  toCachedAtencionCapacity,
+} from "../_shared/atencion-capacity.cache"
+import {
   assertAtencionEditable,
   assertRecaladaOperable,
   assertTurnosTotalValid,
@@ -296,6 +300,8 @@ export async function updateAtencionUsecase(
     },
     { entity: "Atencion", id: String(id) },
   )
+
+  atencionCapacityCache.set(toCachedAtencionCapacity(result))
 
   emitAtencionRealtime("atencion:updated", {
     atencionId: id,
