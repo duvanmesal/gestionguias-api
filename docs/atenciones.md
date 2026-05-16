@@ -68,7 +68,7 @@ Reglas:
 - La recalada debe estar `ACTIVO`, no `CANCELED`, no `DEPARTED` y no vencida por `fechaSalida < now`.
 - La ventana de atención debe estar dentro de la ventana de recalada.
 - `fechaInicio` y `fechaFin` no pueden estar en el pasado.
-- No puede solaparse con otra atención activa de la misma recalada.
+- No puede solaparse con otra atención activa de la misma recalada. La comparación usa intervalos semiabiertos `[fechaInicio, fechaFin)`, por lo que una atención puede empezar exactamente cuando otra termina.
 - Si el actor supervisor no tiene fila `Supervisor`, el sistema la crea automáticamente.
 - La creación materializa turnos atómicamente.
 - Después de crear correctamente, encola notificaciones operativas `ATENCION_CREATED` para guías activos. Este enqueue no bloquea la respuesta.
@@ -124,7 +124,7 @@ Reglas:
 - Si cambia la ventana, la recalada debe seguir siendo operable.
 - La nueva ventana debe estar dentro de la recalada.
 - La nueva ventana no puede estar en el pasado.
-- La nueva ventana no puede solaparse con otra atención activa de la misma recalada.
+- La nueva ventana no puede solaparse con otra atención activa de la misma recalada. La comparación usa intervalos semiabiertos `[fechaInicio, fechaFin)`, por lo que una atención puede empezar exactamente cuando otra termina.
 - Si cambia la ventana, no pueden existir turnos `ASSIGNED` o `IN_PROGRESS`.
 - Al cambiar `turnosTotal`, el sistema ajusta turnos de forma atómica.
 - No se puede reducir el cupo si existen turnos asignados en números mayores al nuevo total.
@@ -187,6 +187,10 @@ Respuesta:
   "error": null
 }
 ```
+
+El límite operativo `turnosTotal` se mantiene en caché en memoria como apoyo de
+lectura. La base de datos sigue siendo la fuente final; la caché se actualiza al
+crear o editar la atención y se invalida al cancelar o cerrar.
 
 ## Claim por atención
 
