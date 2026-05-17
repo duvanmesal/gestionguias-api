@@ -83,11 +83,18 @@ export class UserRepository {
   // -------------------------
   // Guide lookup
   // -------------------------
-  listGuidesLookup(args: { whereUser: Prisma.UsuarioWhereInput; take?: number }) {
+  listGuidesLookup(args: {
+    whereUser: Prisma.UsuarioWhereInput
+    whereGuia?: Prisma.GuiaWhereInput
+    take?: number
+  }) {
     return prisma.guia.findMany({
-      where: { usuario: args.whereUser },
+      where: { ...(args.whereGuia ?? {}), usuario: args.whereUser },
       select: {
         id: true,
+        disponibleParaTurnos: true,
+        disponibilidadUpdatedAt: true,
+        pendingPenalty: true,
         usuario: {
           select: {
             email: true,
@@ -145,6 +152,48 @@ export class UserRepository {
     return prisma.session.updateMany({
       where: { userId, revokedAt: null },
       data: { revokedAt: now, lastRotatedAt: now },
+    })
+  }
+
+  findGuiaAvailabilityByUserId(userId: string) {
+    return prisma.guia.findUnique({
+      where: { usuarioId: userId },
+      select: {
+        id: true,
+        usuarioId: true,
+        disponibleParaTurnos: true,
+        disponibilidadUpdatedAt: true,
+        pendingPenalty: true,
+        usuario: {
+          select: {
+            id: true,
+            activo: true,
+          },
+        },
+      },
+    })
+  }
+
+  updateGuiaAvailabilityByUserId(userId: string, disponible: boolean, now: Date) {
+    return prisma.guia.update({
+      where: { usuarioId: userId },
+      data: {
+        disponibleParaTurnos: disponible,
+        disponibilidadUpdatedAt: now,
+      },
+      select: {
+        id: true,
+        usuarioId: true,
+        disponibleParaTurnos: true,
+        disponibilidadUpdatedAt: true,
+        pendingPenalty: true,
+        usuario: {
+          select: {
+            id: true,
+            activo: true,
+          },
+        },
+      },
     })
   }
 

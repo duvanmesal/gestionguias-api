@@ -11,6 +11,7 @@ import type {
   CompleteProfileRequest,
   UpdateMeRequest,
   ListGuidesQuery,
+  UpdateDisponibilidadGlobalRequest,
 } from "./user.schemas"
 
 import type { PaginationOptions } from "./_domain/user.types"
@@ -27,6 +28,10 @@ import { changePasswordUsecase } from "./_usecases/changePassword.usecase"
 import { deactivateUserUsecase } from "./_usecases/deactivate.usecase"
 import { activateUserUsecase } from "./_usecases/activate.usecase"
 import { completeProfileUsecase } from "./_usecases/completeProfile.usecase"
+import {
+  getMyDisponibilidadUsecase,
+  updateMyDisponibilidadUsecase,
+} from "./_usecases/disponibilidadGlobal.usecase"
 
 export class UserService {
   // -------- ME --------
@@ -36,6 +41,18 @@ export class UserService {
 
   updateMe(req: Request, userId: string, data: UpdateMeRequest) {
     return updateMeUsecase(req, userId, data)
+  }
+
+  getMyDisponibilidad(userId: string) {
+    return getMyDisponibilidadUsecase(userId)
+  }
+
+  updateMyDisponibilidad(
+    req: Request,
+    userId: string,
+    data: UpdateDisponibilidadGlobalRequest,
+  ) {
+    return updateMyDisponibilidadUsecase(req, userId, data.disponible)
   }
 
   completeProfile(req: Request, userId: string, data: CompleteProfileRequest) {

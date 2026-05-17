@@ -1,6 +1,6 @@
 # Usuarios, perfiles y guías
 
-Última revisión contra código: 2026-05-04.
+Última revisión contra código: 2026-05-16.
 
 Fuente principal: `src/routes/users.routes.ts`, `src/modules/users/*`, `src/modules/auth/auth.schemas.ts`, `prisma/schema.prisma`.
 
@@ -34,6 +34,7 @@ Tipos de documento:
 - Todas las rutas bajo `/users` requieren `requireAuth`.
 - `/users/me`, `/users/me/profile` y `/users/me` son rutas self-service.
 - `/users/guides` es un lookup operativo reducido para supervisión.
+- `/users/me/disponibilidad` permite al guía gestionar su disponibilidad global.
 - `/users` y `/users/search` son listados administrativos para `SUPER_ADMIN`.
 - Un owner puede consultar/editar su propio usuario con restricciones.
 - Solo `SUPER_ADMIN` puede desactivar usuarios.
@@ -44,6 +45,8 @@ Tipos de documento:
 | Método | Ruta | Roles | Descripción |
 | --- | --- | --- | --- |
 | `GET` | `/users/me` | Usuario autenticado | Perfil extendido del usuario autenticado. |
+| `GET` | `/users/me/disponibilidad` | `GUIA` | Consulta disponibilidad global del guía autenticado. |
+| `PATCH` | `/users/me/disponibilidad` | `GUIA` | Actualiza disponibilidad global del guía autenticado. |
 | `PATCH` | `/users/me/profile` | Usuario autenticado | Completa onboarding obligatorio. |
 | `PATCH` | `/users/me` | Usuario autenticado | Actualiza nombres, apellidos o teléfono propios. |
 | `GET` | `/users/guides` | `SUPERVISOR`, `SUPER_ADMIN` | Lookup reducido de guías. |
@@ -68,8 +71,49 @@ Devuelve datos del usuario autenticado incluyendo:
 - `documentNumber`
 - relación `guia`
 - relación `supervisor`
+- `guiaId`, `supervisorId`
+- `pendingPenalty`
+- `disponibleParaTurnos`
+- `disponibilidadUpdatedAt`
+- `turnoAssignmentMode`
 
 Usar este endpoint para bootstrap de sesión y onboarding en frontend/mobile.
+
+## Disponibilidad global del guía
+
+`GET /users/me/disponibilidad`
+
+Devuelve la disponibilidad global del guía autenticado y el modo operativo activo:
+
+```json
+{
+  "data": {
+    "guiaId": "guia_id",
+    "disponibleParaTurnos": true,
+    "disponibilidadUpdatedAt": "2026-05-16T01:52:00.000Z",
+    "pendingPenalty": false,
+    "turnoAssignmentMode": "MANUAL_RECLAMO"
+  },
+  "meta": null,
+  "error": null
+}
+```
+
+`PATCH /users/me/disponibilidad`
+
+```json
+{
+  "disponible": true
+}
+```
+
+Reglas:
+
+- Solo rol `GUIA`.
+- El usuario debe tener fila `Guia` y estar activo.
+- Si `pendingPenalty = true`, el sistema rechaza marcarse disponible.
+- Al marcarse disponible, se actualiza `disponibilidadUpdatedAt`.
+- Al marcarse no disponible, `disponibilidadUpdatedAt` queda en `null`.
 
 ## Completar perfil
 
@@ -139,6 +183,8 @@ Query:
 | Campo | Tipo | Default | Descripción |
 | --- | --- | --- | --- |
 | `activo` | boolean/string | `true` | Filtra guías activos o inactivos. |
+| `disponible` | boolean/string | - | Filtra por disponibilidad global. |
+| `penalizado` | boolean/string | - | Filtra por penalización pendiente. |
 | `search` | string | - | Busca por nombres, apellidos o email. |
 
 Respuesta reducida:
@@ -151,7 +197,10 @@ Respuesta reducida:
       "nombres": "Ana",
       "apellidos": "Pérez",
       "email": "ana@example.com",
-      "activo": true
+      "activo": true,
+      "disponibleParaTurnos": true,
+      "disponibilidadUpdatedAt": "2026-05-16T01:52:00.000Z",
+      "pendingPenalty": false
     }
   ],
   "meta": null,
@@ -163,6 +212,7 @@ Reglas:
 
 - Solo devuelve usuarios con rol `GUIA`.
 - No expone documento, teléfono ni otros datos administrativos.
+- Expone disponibilidad global y penalización pendiente para filtros operativos.
 - Límite interno de consulta: 500 registros.
 
 ## Listado administrativo
@@ -322,5 +372,6 @@ Eventos relevantes observados:
 - `user.updated`
 - `user.role.changed`
 - `user.profile.completed`
+- `users.guia.disponibilidad.updated`
 
 No se deben loggear contraseñas, hashes, tokens ni documentos completos sensibles.

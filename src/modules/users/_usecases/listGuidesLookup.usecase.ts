@@ -6,6 +6,8 @@ import { userRepository } from "../_data/user.repository"
 
 export async function listGuidesLookupUsecase(query: ListGuidesQuery): Promise<GuideLookupResult[]> {
   const activo = typeof (query as any).activo === "boolean" ? (query as any).activo : true
+  const disponible = typeof (query as any).disponible === "boolean" ? (query as any).disponible : undefined
+  const penalizado = typeof (query as any).penalizado === "boolean" ? (query as any).penalizado : undefined
   const q = (query.search ?? "").trim()
 
   const whereUser: any = {
@@ -22,7 +24,12 @@ export async function listGuidesLookupUsecase(query: ListGuidesQuery): Promise<G
       : {}),
   }
 
-  const rows = await userRepository.listGuidesLookup({ whereUser, take: 500 })
+  const whereGuia: any = {
+    ...(typeof disponible === "boolean" ? { disponibleParaTurnos: disponible } : {}),
+    ...(typeof penalizado === "boolean" ? { pendingPenalty: penalizado } : {}),
+  }
+
+  const rows = await userRepository.listGuidesLookup({ whereUser, whereGuia, take: 500 })
 
   return rows.map((g: any) => ({
     guiaId: g.id,
@@ -30,5 +37,8 @@ export async function listGuidesLookupUsecase(query: ListGuidesQuery): Promise<G
     apellidos: g.usuario.apellidos,
     email: g.usuario.email,
     activo: g.usuario.activo,
+    disponibleParaTurnos: g.disponibleParaTurnos,
+    disponibilidadUpdatedAt: g.disponibilidadUpdatedAt,
+    pendingPenalty: g.pendingPenalty,
   }))
 }

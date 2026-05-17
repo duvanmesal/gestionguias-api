@@ -21,6 +21,7 @@ import {
   assertWindowWithinRecalada,
 } from "../_domain/atencion.rules"
 import { auditFail, auditOk } from "../_shared/atencion.audit"
+import { assignForAtencion } from "../../disponibilidad/_usecases/autoAssign.usecase"
 
 export async function createAtencionUsecase(
   req: Request,
@@ -265,6 +266,13 @@ export async function createAtencionUsecase(
         notificationId,
       },
       "[Atenciones] failed to enqueue created notification",
+    )
+  })
+
+  assignForAtencion(created.id).catch((err) => {
+    logger.error(
+      { err, atencionId: created.id, recaladaId: created.recaladaId },
+      "[Atenciones] failed to auto-assign FIFO after create",
     )
   })
 

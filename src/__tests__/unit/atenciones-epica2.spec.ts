@@ -146,10 +146,12 @@ describe("atenciones epica 2 usecases", () => {
   it("updates the capacity cache after changing turnosTotal", async () => {
     const { logsService } = require("../../libs/logs/logs.service") as typeof import("../../libs/logs/logs.service")
     const { atencionRepository } = require("../../modules/atenciones/_data/atencion.repository") as typeof import("../../modules/atenciones/_data/atencion.repository")
+    const { operationalConfigService } = require("../../modules/operational-config/operational-config.service") as typeof import("../../modules/operational-config/operational-config.service")
     const { updateAtencionUsecase } = require("../../modules/atenciones/_usecases/update.usecase") as typeof import("../../modules/atenciones/_usecases/update.usecase")
     const { atencionCapacityCache: usecaseCapacityCache } = require("../../modules/atenciones/_shared/atencion-capacity.cache") as typeof import("../../modules/atenciones/_shared/atencion-capacity.cache")
 
     jest.spyOn(logsService, "audit").mockImplementation(() => undefined)
+    jest.spyOn(operationalConfigService, "getTurnoAssignmentMode").mockResolvedValue("MANUAL_RECLAMO" as any)
     jest.spyOn(atencionRepository, "findByIdForUpdate").mockResolvedValue({
       id: 20,
       recaladaId: 10,

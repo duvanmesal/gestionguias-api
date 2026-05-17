@@ -1,6 +1,6 @@
 # Dashboard
 
-Última revisión contra código: 2026-05-04.
+Última revisión contra código: 2026-05-16.
 
 Fuente principal: `src/routes/dashboard.routes.ts`, `src/modules/dashboard/*`.
 
@@ -41,6 +41,7 @@ Si llega otro rol, responde `403 FORBIDDEN`.
     "tzOffsetMinutes": -300,
     "generatedAt": "2026-05-04T15:00:00.000Z",
     "serverTime": "2026-05-04T15:00:00.000Z",
+    "turnoAssignmentMode": "MANUAL_RECLAMO",
     "dateContext": {
       "date": "2026-05-04",
       "timezoneHint": "UTC-05:00"
@@ -102,6 +103,7 @@ Métricas calculadas para el día:
 - turnos asociados a atenciones que intersectan el día;
 - breakdown por estado de turno;
 - guías activos, asignados y libres;
+- guías disponibles, no disponibles y penalizados;
 - hitos próximos;
 - conteo de recaladas vencidas pendientes de zarpe (`overdueRecaladas`).
 
@@ -124,7 +126,10 @@ Shape:
     "guides": {
       "activos": 15,
       "asignados": 8,
-      "libres": 7
+      "libres": 7,
+      "disponibles": 6,
+      "noDisponibles": 8,
+      "penalizados": 1
     },
     "turnosBreakdown": {
       "AVAILABLE": 20,
@@ -171,6 +176,12 @@ Shape:
 ```json
 {
   "guia": {
+    "assignmentMode": "MANUAL_RECLAMO",
+    "disponibilidad": {
+      "disponibleParaTurnos": true,
+      "disponibilidadUpdatedAt": "2026-05-16T01:52:00.000Z",
+      "pendingPenalty": false
+    },
     "nextTurno": null,
     "activeTurno": null,
     "atencionesDisponibles": []
@@ -182,9 +193,13 @@ Reglas:
 
 - El sistema resuelve la fila `Guia` desde el `usuarioId`.
 - Si el usuario no tiene fila `Guia`, devuelve `nextTurno: null`, `activeTurno: null` y `atencionesDisponibles: []`.
+- `assignmentMode` refleja el modo global (`MANUAL_RECLAMO` o `FIFO_GLOBAL`).
+- `disponibilidad` refleja la disponibilidad global y penalización pendiente del guía.
 - `activeTurno` representa turno en curso.
 - `nextTurno` representa el próximo turno asignado del guía.
 - `atencionesDisponibles` se limita con `availableAtencionesLimit`.
+- En modo manual, la UI solo debe mostrar acciones de reclamo si el guía está disponible y no penalizado.
+- En modo FIFO, la UI no debe mostrar acciones de reclamo; los turnos se asignan automáticamente.
 - Los widgets de semana del guía se calculan con el rango semanal según `date` y `tzOffsetMinutes`.
 
 Widgets posibles:

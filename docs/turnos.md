@@ -1,6 +1,6 @@
 # Turnos
 
-Última revisión contra código: 2026-05-10.
+Última revisión contra código: 2026-05-16.
 
 Fuente principal: `src/routes/turno.routes.ts`, `src/modules/turnos/*`, `src/modules/atenciones/*`, `prisma/schema.prisma`.
 
@@ -117,7 +117,10 @@ Reglas:
 
 - Solo rol `GUIA`.
 - El usuario debe tener fila `Guia`.
+- El modo global debe ser `MANUAL_RECLAMO`; si está `FIFO_GLOBAL`, responde `409 CONFLICT`.
 - La atención y la recalada deben estar operables.
+- El guía debe estar disponible globalmente (`disponibleParaTurnos = true`).
+- El guía no puede tener `pendingPenalty = true`.
 - El guía no puede tener otro turno `IN_PROGRESS`.
 - El turno debe estar `AVAILABLE` y sin `guiaId`.
 - El guía no puede tener otro turno en la misma atención.
@@ -139,6 +142,8 @@ Reglas:
 - Solo `SUPERVISOR` o `SUPER_ADMIN`.
 - `guiaId` es obligatorio y debe existir.
 - El usuario del guía debe estar activo.
+- El guía debe estar disponible globalmente.
+- El guía no puede tener `pendingPenalty = true`.
 - El guía no puede tener un turno `IN_PROGRESS`.
 - La atención y recalada deben estar operables.
 - El turno debe estar `AVAILABLE` y sin guía.
@@ -230,15 +235,15 @@ Reglas:
 - Agrega observación `NO_SHOW` y, si existe razón, `NO_SHOW: razón`.
 - Al aplicar, `status = NO_SHOW`.
 
-### Penalizacion y reasignacion automatica tras NO_SHOW
+### Penalizacion y reasignacion tras NO_SHOW
 
 Despues de marcar el turno como `NO_SHOW`, el sistema ejecuta en segundo plano:
 
 1. **Penaliza al guia ausente**: escribe `pendingPenalty = true` en su fila `Guia`.
 2. **Notifica al guia**: emite `disponibilidad:penalizado` con mensaje explicativo.
-3. **Reasigna automaticamente**: busca al siguiente guia en la cola de disponibilidad de la atencion que no tenga turno asignado. Si existe, le asigna el turno liberado y emite `turno:assigned`.
+3. **Reasigna automaticamente solo en `FIFO_GLOBAL`**: busca al siguiente guia elegible por disponibilidad global, sin penalizacion y sin solapes. Si existe, le asigna el turno liberado y emite `turno:assigned`.
 
-El `pendingPenalty` se consume la proxima vez que el guia marca disponibilidad en una atencion futura, ubicandole al final de la cola en esa ocasion. Ver [disponibilidad.md](./disponibilidad.md) para el flujo completo.
+En `MANUAL_RECLAMO`, el sistema penaliza y notifica, pero no reasigna automaticamente. Ver [disponibilidad.md](./disponibilidad.md) para el flujo completo.
 
 ## Gates operativos compartidos
 

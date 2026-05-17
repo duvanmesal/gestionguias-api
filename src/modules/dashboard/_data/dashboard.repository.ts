@@ -72,6 +72,31 @@ export const dashboardRepository = {
     });
   },
 
+  countGuidesDisponibles() {
+    return prisma.guia.count({
+      where: {
+        disponibleParaTurnos: true,
+        pendingPenalty: false,
+        usuario: {
+          rol: RolType.GUIA,
+          activo: true,
+        },
+      },
+    });
+  },
+
+  countGuidesPenalizados() {
+    return prisma.guia.count({
+      where: {
+        pendingPenalty: true,
+        usuario: {
+          rol: RolType.GUIA,
+          activo: true,
+        },
+      },
+    });
+  },
+
   groupGuidesAsignadosIntersectDay(args: { start: Date; end: Date }) {
     return prisma.turno.groupBy({
       by: ["guiaId"],
@@ -186,7 +211,12 @@ export const dashboardRepository = {
   findGuiaIdByUsuarioId(usuarioId: string) {
     return prisma.guia.findUnique({
       where: { usuarioId },
-      select: { id: true },
+      select: {
+        id: true,
+        disponibleParaTurnos: true,
+        disponibilidadUpdatedAt: true,
+        pendingPenalty: true,
+      },
     });
   },
 

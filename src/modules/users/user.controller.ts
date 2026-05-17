@@ -11,6 +11,7 @@ import type {
   CompleteProfileRequest,
   UpdateMeRequest,
   ListGuidesQuery,
+  UpdateDisponibilidadGlobalRequest,
 } from "./user.schemas";
 
 import type { RolType, ProfileStatus } from "@prisma/client";
@@ -67,15 +68,38 @@ export class UserController {
 
   async guides(req: Request, res: Response, next: NextFunction) {
     try {
-      const { activo, search } = req.query as any;
+      const { activo, search, disponible, penalizado } = req.query as any;
 
       const options: ListGuidesQuery = {
         activo: typeof activo === "boolean" ? activo : undefined,
+        disponible: typeof disponible === "boolean" ? disponible : undefined,
+        penalizado: typeof penalizado === "boolean" ? penalizado : undefined,
         search: typeof search === "string" ? search : undefined,
       } as any;
 
       const data = await userService.listGuidesLookup(options);
       res.json(ok(data));
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getMyDisponibilidad(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.userId;
+      const data = await userService.getMyDisponibilidad(userId);
+      res.json(ok(data));
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateMyDisponibilidad(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.userId;
+      const data = req.body as UpdateDisponibilidadGlobalRequest;
+      const result = await userService.updateMyDisponibilidad(req, userId, data);
+      res.json(ok(result));
     } catch (error) {
       next(error);
     }

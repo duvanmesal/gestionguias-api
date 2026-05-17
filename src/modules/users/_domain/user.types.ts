@@ -38,4 +38,7 @@ export type GuideLookupResult = {
   apellidos: string
   email: string
   activo: boolean
+  disponibleParaTurnos: boolean
+  disponibilidadUpdatedAt: Date | null
+  pendingPenalty: boolean
 }

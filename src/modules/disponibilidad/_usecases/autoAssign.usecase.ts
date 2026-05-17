@@ -1,111 +1,266 @@
-import { prisma } from "../../../prisma/client"
-import { disponibilidadRepository } from "../disponibilidad.repository"
-import { socketService } from "../../../core/socket/socket.service"
+import {
+  AtencionOperativeStatus,
+  RecaladaOperativeStatus,
+  StatusType,
+  TurnoAssignmentMode,
+  TurnoStatus,
+} from "@prisma/client"
+
+import { emitTurnoRealtime } from "../../../core/socket/domain-events"
 import { logger } from "../../../libs/logger"
+import { prisma } from "../../../prisma/client"
+import { operationalConfigService } from "../../operational-config/operational-config.service"
 
-export async function autoAssignTurnosForRecaladaUsecase(recaladaId: number) {
-  const atenciones = await disponibilidadRepository.findAtencionesOpenByRecalada(recaladaId)
+type AutoAssignResult = {
+  assigned: number
+}
 
-  for (const atencion of atenciones) {
-    await assignForAtencion(atencion.id)
+type EligibleGuide = {
+  id: string
+  usuarioId: string
+}
+
+async function isFifoModeActive() {
+  const mode = await operationalConfigService.getTurnoAssignmentMode()
+  return mode === TurnoAssignmentMode.FIFO_GLOBAL
+}
+
+function overlapWhere(args: { fechaInicio: Date | null; fechaFin: Date | null }) {
+  if (!args.fechaInicio || !args.fechaFin) return {}
+
+  return {
+    fechaInicio: { lt: args.fechaFin },
+    fechaFin: { gt: args.fechaInicio },
   }
 }
 
-export async function assignForAtencion(atencionId: number) {
-  const queue = await disponibilidadRepository.findQueueByAtencion(atencionId)
-  if (!queue.length) return
+async function findNextEligibleGlobalGuide(args: {
+  atencionId: number
+  fechaInicio: Date | null
+  fechaFin: Date | null
+}): Promise<EligibleGuide | null> {
+  return prisma.guia.findFirst({
+    where: {
+      disponibleParaTurnos: true,
+      disponibilidadUpdatedAt: { not: null },
+      pendingPenalty: false,
+      usuario: { activo: true },
+      turnos: {
+        none: {
+          OR: [
+            { atencionId: args.atencionId },
+            {
+              status: { in: [TurnoStatus.ASSIGNED, TurnoStatus.IN_PROGRESS] },
+              ...overlapWhere({
+                fechaInicio: args.fechaInicio,
+                fechaFin: args.fechaFin,
+              }),
+            },
+          ],
+        },
+      },
+    },
+    orderBy: [{ disponibilidadUpdatedAt: "asc" }, { id: "asc" }],
+    select: {
+      id: true,
+      usuarioId: true,
+    },
+  })
+}
+
+async function fetchTurnoForRealtime(turnoId: number) {
+  return prisma.turno.findUnique({
+    where: { id: turnoId },
+    include: {
+      atencion: { select: { recaladaId: true } },
+      guia: { select: { usuario: { select: { id: true } } } },
+    },
+  })
+}
+
+export async function autoAssignTurnosForRecaladaUsecase(
+  recaladaId: number,
+): Promise<AutoAssignResult> {
+  if (!(await isFifoModeActive())) return { assigned: 0 }
+
+  const atenciones = await prisma.atencion.findMany({
+    where: {
+      recaladaId,
+      status: StatusType.ACTIVO,
+      operationalStatus: AtencionOperativeStatus.OPEN,
+      recalada: {
+        status: StatusType.ACTIVO,
+        operationalStatus: RecaladaOperativeStatus.ARRIVED,
+      },
+      turnos: { some: { status: TurnoStatus.AVAILABLE, guiaId: null } },
+    },
+    orderBy: [{ fechaInicio: "asc" }, { id: "asc" }],
+    select: { id: true },
+  })
+
+  let assigned = 0
+  for (const atencion of atenciones) {
+    const result = await assignForAtencion(atencion.id)
+    assigned += result.assigned
+  }
+
+  return { assigned }
+}
+
+export async function autoAssignOpenTurnosGlobalUsecase(): Promise<AutoAssignResult> {
+  if (!(await isFifoModeActive())) return { assigned: 0 }
+
+  const now = new Date()
+  const atenciones = await prisma.atencion.findMany({
+    where: {
+      status: StatusType.ACTIVO,
+      operationalStatus: AtencionOperativeStatus.OPEN,
+      fechaFin: { gt: now },
+      recalada: {
+        status: StatusType.ACTIVO,
+        operationalStatus: RecaladaOperativeStatus.ARRIVED,
+      },
+      turnos: { some: { status: TurnoStatus.AVAILABLE, guiaId: null } },
+    },
+    orderBy: [{ fechaInicio: "asc" }, { id: "asc" }],
+    select: { id: true },
+  })
+
+  let assigned = 0
+  for (const atencion of atenciones) {
+    const result = await assignForAtencion(atencion.id)
+    assigned += result.assigned
+  }
+
+  return { assigned }
+}
+
+export async function assignForAtencion(atencionId: number): Promise<AutoAssignResult> {
+  if (!(await isFifoModeActive())) return { assigned: 0 }
+
+  const atencion = await prisma.atencion.findFirst({
+    where: {
+      id: atencionId,
+      status: StatusType.ACTIVO,
+      operationalStatus: AtencionOperativeStatus.OPEN,
+      recalada: {
+        status: StatusType.ACTIVO,
+        operationalStatus: RecaladaOperativeStatus.ARRIVED,
+      },
+    },
+    select: { id: true },
+  })
+
+  if (!atencion) return { assigned: 0 }
 
   const turnosDisponibles = await prisma.turno.findMany({
-    where: { atencionId, status: "AVAILABLE", guiaId: null },
+    where: { atencionId, status: TurnoStatus.AVAILABLE, guiaId: null },
     orderBy: { numero: "asc" },
-    select: { id: true, numero: true },
+    select: { id: true, numero: true, fechaInicio: true, fechaFin: true },
   })
 
-  const assignaciones: Array<{ turnoId: number; guiaId: string; guiaUserId: string }> = []
+  let assigned = 0
 
-  for (let i = 0; i < Math.min(queue.length, turnosDisponibles.length); i++) {
-    assignaciones.push({
-      turnoId: turnosDisponibles[i].id,
-      guiaId: queue[i].guiaId,
-      guiaUserId: queue[i].guia.usuarioId,
-    })
-  }
-
-  if (!assignaciones.length) return
-
-  await prisma.$transaction(
-    assignaciones.map(({ turnoId, guiaId }) =>
-      prisma.turno.update({
-        where: { id: turnoId },
-        data: { guiaId, status: "ASSIGNED" },
-      }),
-    ),
-  )
-
-  logger.info({ atencionId, count: assignaciones.length }, "[Disponibilidad] turnos auto-asignados")
-
-  const turnosActualizados = await prisma.turno.findMany({
-    where: { id: { in: assignaciones.map((a) => a.turnoId) } },
-    include: { atencion: { select: { recaladaId: true } } },
-  })
-
-  for (const turno of turnosActualizados) {
-    const asig = assignaciones.find((a) => a.turnoId === turno.id)!
-    const payload = {
-      turnoId: turno.id,
-      numero: turno.numero,
+  for (const turno of turnosDisponibles) {
+    const next = await findNextEligibleGlobalGuide({
       atencionId,
-      recaladaId: turno.atencion.recaladaId,
-      guiaId: turno.guiaId,
-      status: turno.status,
+      fechaInicio: turno.fechaInicio,
+      fechaFin: turno.fechaFin,
+    })
+
+    if (!next) break
+
+    const updated = await prisma.turno.updateMany({
+      where: { id: turno.id, status: TurnoStatus.AVAILABLE, guiaId: null },
+      data: { guiaId: next.id, status: TurnoStatus.ASSIGNED },
+    })
+
+    if (updated.count !== 1) continue
+
+    assigned += 1
+
+    const turnoActualizado = await fetchTurnoForRealtime(turno.id)
+    if (turnoActualizado) {
+      emitTurnoRealtime("turno:assigned", turnoActualizado, { guiaUserId: next.usuarioId })
     }
-    socketService.emitToAtencion(atencionId, "turno:assigned", payload)
-    socketService.emitToSupervisors("turno:assigned", payload)
-    socketService.emitToGuia(asig.guiaUserId, "turno:assigned", payload)
   }
 
-  socketService.emitToSupervisors("atencion:asignacionCompleta", {
-    atencionId,
-    asignados: assignaciones.length,
-  })
+  if (assigned > 0) {
+    logger.info({ atencionId, count: assigned }, "[Disponibilidad] turnos auto-asignados por FIFO global")
+  }
+
+  return { assigned }
 }
 
-export async function autoAssignNextInQueue(atencionId: number, turnoId: number) {
-  const assigned = await prisma.turno.findMany({
-    where: { atencionId, guiaId: { not: null } },
-    select: { guiaId: true },
-  })
-  const assignedGuiaIds = assigned.map((t) => t.guiaId as string)
+export async function autoAssignNextInQueue(
+  atencionId: number,
+  turnoId: number,
+): Promise<unknown | null> {
+  if (!(await isFifoModeActive())) return null
 
-  const next = await disponibilidadRepository.findNextUnassignedInQueue(atencionId, assignedGuiaIds)
-  if (!next) {
-    logger.info({ atencionId, turnoId }, "[Disponibilidad] no hay guía siguiente en cola para reemplazar")
+  const turno = await prisma.turno.findUnique({
+    where: { id: turnoId },
+    select: {
+      id: true,
+      atencionId: true,
+      fechaInicio: true,
+      fechaFin: true,
+      status: true,
+      atencion: {
+        select: {
+          status: true,
+          operationalStatus: true,
+          recalada: {
+            select: {
+              status: true,
+              operationalStatus: true,
+            },
+          },
+        },
+      },
+    },
+  })
+
+  if (!turno || turno.atencionId !== atencionId || turno.status !== TurnoStatus.NO_SHOW) {
     return null
   }
 
-  const turno = await prisma.turno.update({
-    where: { id: turnoId },
-    data: { guiaId: next.guiaId, status: "ASSIGNED" },
-    include: { atencion: { select: { recaladaId: true } } },
-  })
-
-  const payload = {
-    turnoId: turno.id,
-    numero: turno.numero,
-    atencionId,
-    recaladaId: turno.atencion.recaladaId,
-    guiaId: turno.guiaId,
-    status: turno.status,
+  if (
+    turno.atencion.status !== StatusType.ACTIVO ||
+    turno.atencion.operationalStatus !== AtencionOperativeStatus.OPEN ||
+    turno.atencion.recalada.status !== StatusType.ACTIVO ||
+    turno.atencion.recalada.operationalStatus !== RecaladaOperativeStatus.ARRIVED
+  ) {
+    return null
   }
 
-  socketService.emitToAtencion(atencionId, "turno:assigned", payload)
-  socketService.emitToSupervisors("turno:assigned", payload)
-  socketService.emitToGuia(next.guia.usuarioId, "turno:assigned", payload)
+  const next = await findNextEligibleGlobalGuide({
+    atencionId,
+    fechaInicio: turno.fechaInicio,
+    fechaFin: turno.fechaFin,
+  })
+
+  if (!next) {
+    logger.info({ atencionId, turnoId }, "[Disponibilidad] no hay guía FIFO elegible para reemplazar")
+    return null
+  }
+
+  const updated = await prisma.turno.updateMany({
+    where: { id: turnoId, status: TurnoStatus.NO_SHOW },
+    data: { guiaId: next.id, status: TurnoStatus.ASSIGNED },
+  })
+
+  if (updated.count !== 1) return null
+
+  const turnoActualizado = await fetchTurnoForRealtime(turnoId)
+  if (turnoActualizado) {
+    emitTurnoRealtime("turno:assigned", turnoActualizado, { guiaUserId: next.usuarioId })
+  }
 
   logger.info(
-    { atencionId, turnoId, guiaId: next.guiaId },
-    "[Disponibilidad] turno reasignado por NO_SHOW",
+    { atencionId, turnoId, guiaId: next.id },
+    "[Disponibilidad] turno reasignado por FIFO global tras NO_SHOW",
   )
 
-  return turno
+  return turnoActualizado
 }

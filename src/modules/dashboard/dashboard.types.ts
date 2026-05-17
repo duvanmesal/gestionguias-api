@@ -1,4 +1,4 @@
-import type { RolType, TurnoStatus } from "@prisma/client";
+import type { RolType, TurnoAssignmentMode, TurnoStatus } from "@prisma/client";
 
 export type DashboardWidgetTone = "neutral" | "info" | "success" | "warning" | "danger";
 export type DashboardWidgetType = "card" | "list" | "kpi" | "cta" | "alert";
@@ -29,6 +29,7 @@ export type DashboardWidget = {
 
 export type DashboardOverviewResponse = {
   role: RolType;
+  turnoAssignmentMode: TurnoAssignmentMode;
   date: string; // YYYY-MM-DD (en el "día" calculado por tzOffsetMinutes)
   tzOffsetMinutes: number;
   generatedAt: string; // ISO
@@ -75,6 +76,9 @@ export type SupervisorOverview = {
     activos: number;
     asignados: number;
     libres: number;
+    disponibles?: number;
+    noDisponibles?: number;
+    penalizados?: number;
   };
 
   turnosBreakdown?: Record<string, number>;
@@ -102,6 +106,13 @@ export type DashboardMilestone = {
 };
 
 export type GuiaOverview = {
+  assignmentMode: TurnoAssignmentMode;
+  disponibilidad: {
+    guiaId: string | null;
+    disponibleParaTurnos: boolean;
+    disponibilidadUpdatedAt: string | null;
+    pendingPenalty: boolean;
+  };
   nextTurno: TurnoLite | null;
   activeTurno: TurnoLite | null;
   atencionesDisponibles: AtencionDisponibleLite[];

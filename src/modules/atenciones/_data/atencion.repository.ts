@@ -62,7 +62,13 @@ export class AtencionRepository {
   findGuiaByUserId(userId: string, tx?: Tx) {
     return db(tx).guia.findUnique({
       where: { usuarioId: userId },
-      select: { id: true, usuario: { select: { activo: true } } },
+      select: {
+        id: true,
+        pendingPenalty: true,
+        disponibleParaTurnos: true,
+        disponibilidadUpdatedAt: true,
+        usuario: { select: { activo: true } },
+      },
     })
   }
 

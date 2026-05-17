@@ -1,9 +1,12 @@
 import type { Request } from "express"
+import { TurnoAssignmentMode } from "@prisma/client"
 
 import { ConflictError, BadRequestError } from "../../libs/errors"
 import { logsService } from "../../libs/logs/logs.service"
 import { atencionRepository } from "../../modules/atenciones/_data/atencion.repository"
+import { claimFirstAvailableTurnoUsecase } from "../../modules/atenciones/_usecases/claim.usecase"
 import { updateAtencionUsecase } from "../../modules/atenciones/_usecases/update.usecase"
+import { operationalConfigService } from "../../modules/operational-config/operational-config.service"
 import { recaladaRepository } from "../../modules/recaladas/_data/recalada.repository"
 import { arriveRecaladaUsecase } from "../../modules/recaladas/_usecases/arrive.usecase"
 import { departRecaladaUsecase } from "../../modules/recaladas/_usecases/depart.usecase"
@@ -173,5 +176,35 @@ describe("operational guards", () => {
       departRecaladaUsecase(req, 20, new Date("2026-05-04T15:00:00.000Z"), "actor-1"),
     ).rejects.toBeInstanceOf(BadRequestError)
     expect(update).not.toHaveBeenCalled()
+  })
+
+  it("blocks manual claim while FIFO assignment mode is active", async () => {
+    jest
+      .spyOn(operationalConfigService, "getTurnoAssignmentMode")
+      .mockResolvedValue(TurnoAssignmentMode.FIFO_GLOBAL)
+    const findGuia = jest.spyOn(atencionRepository, "findGuiaByUserId")
+
+    await expect(claimFirstAvailableTurnoUsecase(req, 10, "actor-1")).rejects.toBeInstanceOf(
+      ConflictError,
+    )
+    expect(findGuia).not.toHaveBeenCalled()
+  })
+
+  it("blocks manual claim when the guide is not globally available", async () => {
+    jest
+      .spyOn(operationalConfigService, "getTurnoAssignmentMode")
+      .mockResolvedValue(TurnoAssignmentMode.MANUAL_RECLAMO)
+    jest.spyOn(atencionRepository, "findGuiaByUserId").mockResolvedValue({
+      id: "guia-1",
+      disponibleParaTurnos: false,
+      pendingPenalty: false,
+      usuario: { activo: true },
+    } as any)
+    const findActive = jest.spyOn(atencionRepository, "findActiveForGuia")
+
+    await expect(claimFirstAvailableTurnoUsecase(req, 10, "actor-1")).rejects.toBeInstanceOf(
+      ConflictError,
+    )
+    expect(findActive).not.toHaveBeenCalled()
   })
 })
