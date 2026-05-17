@@ -1,4 +1,4 @@
-import { RolType, TurnoStatus } from "@prisma/client";
+import { RolType, TurnoAssignmentMode, TurnoStatus } from "@prisma/client";
 
 import { ForbiddenError } from "../../../libs/errors";
 
@@ -22,6 +22,7 @@ import {
   tzHintFromOffset,
 } from "../_domain/dashboard.rules";
 import { dashboardRepository } from "../_data/dashboard.repository";
+import { operationalConfigService } from "../../operational-config/operational-config.service";
 
 type GetOverviewInput = {
   userId: string;
@@ -50,9 +51,11 @@ export async function getDashboardOverviewUsecase(
 
   const date = input.query.date ?? toLocalDateString(now, tzOffsetMinutes);
   const { start, end } = buildUtcDayRange(date, tzOffsetMinutes);
+  const operationalConfig = await operationalConfigService.get();
 
   const base: DashboardOverviewResponse = {
     role,
+    turnoAssignmentMode: operationalConfig.turnoAssignmentMode,
     date,
     tzOffsetMinutes,
     generatedAt: now.toISOString(),
@@ -83,6 +86,7 @@ export async function getDashboardOverviewUsecase(
       usuarioId: input.userId,
       now,
       availableAtencionesLimit: input.query.availableAtencionesLimit ?? 10,
+      assignmentMode: operationalConfig.turnoAssignmentMode,
     });
 
     const widgets = await buildGuiaWidgets({
@@ -138,9 +142,14 @@ async function buildSupervisorOverview(args: {
     dashboardRepository.countGuidesActivos(),
     dashboardRepository.groupGuidesAsignadosIntersectDay({ start, end }),
   ]);
+  const [guidesDisponibles, guidesPenalizados] = await Promise.all([
+    dashboardRepository.countGuidesDisponibles(),
+    dashboardRepository.countGuidesPenalizados(),
+  ]);
 
   const guidesAsignados = guidesAsignadosRows.length;
   const guidesLibres = Math.max(0, guidesActivos - guidesAsignados);
+  const guidesNoDisponibles = Math.max(0, guidesActivos - guidesDisponibles);
 
   const takeUpcoming = Math.min(10, upcomingLimit * 2);
 
@@ -222,6 +231,9 @@ async function buildSupervisorOverview(args: {
       activos: guidesActivos,
       asignados: guidesAsignados,
       libres: guidesLibres,
+      disponibles: guidesDisponibles,
+      noDisponibles: guidesNoDisponibles,
+      penalizados: guidesPenalizados,
     },
     turnosBreakdown: breakdown,
     alerts,
@@ -369,12 +381,20 @@ async function buildGuiaOverview(args: {
   usuarioId: string;
   now: Date;
   availableAtencionesLimit: number;
+  assignmentMode: TurnoAssignmentMode;
 }): Promise<GuiaOverview> {
-  const { usuarioId, now, availableAtencionesLimit } = args;
+  const { usuarioId, now, availableAtencionesLimit, assignmentMode } = args;
 
   const guia = await dashboardRepository.findGuiaIdByUsuarioId(usuarioId);
   if (!guia) {
     return {
+      assignmentMode,
+      disponibilidad: {
+        guiaId: null,
+        disponibleParaTurnos: false,
+        disponibilidadUpdatedAt: null,
+        pendingPenalty: false,
+      },
       nextTurno: null,
       activeTurno: null,
       atencionesDisponibles: [],
@@ -412,10 +432,17 @@ async function buildGuiaOverview(args: {
   const activeTurno = activeTurnoRaw ? toTurnoLite(activeTurnoRaw) : null;
   const nextTurno = nextTurnoRaw ? toTurnoLite(nextTurnoRaw) : null;
 
-  const atenciones = await dashboardRepository.listAtencionesDisponibles({
-    now,
-    take: availableAtencionesLimit,
-  });
+  const canManualClaim =
+    assignmentMode === TurnoAssignmentMode.MANUAL_RECLAMO &&
+    guia.disponibleParaTurnos &&
+    !guia.pendingPenalty
+
+  const atenciones = canManualClaim
+    ? await dashboardRepository.listAtencionesDisponibles({
+        now,
+        take: availableAtencionesLimit,
+      })
+    : [];
 
   const atencionIds = atenciones.map((a) => a.id);
   const availableByAtencion =
@@ -445,6 +472,13 @@ async function buildGuiaOverview(args: {
   );
 
   return {
+    assignmentMode,
+    disponibilidad: {
+      guiaId,
+      disponibleParaTurnos: guia.disponibleParaTurnos,
+      disponibilidadUpdatedAt: toISO(guia.disponibilidadUpdatedAt),
+      pendingPenalty: guia.pendingPenalty,
+    },
     nextTurno,
     activeTurno,
     atencionesDisponibles,

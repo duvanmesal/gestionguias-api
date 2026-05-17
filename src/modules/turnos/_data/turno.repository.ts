@@ -35,10 +35,29 @@ export class TurnoRepository {
     return guia.id
   }
 
+  findGuiaByUserId(actorUserId: string, tx?: Tx) {
+    return db(tx).guia.findUnique({
+      where: { usuarioId: actorUserId },
+      select: {
+        id: true,
+        pendingPenalty: true,
+        disponibleParaTurnos: true,
+        disponibilidadUpdatedAt: true,
+        usuario: { select: { id: true, activo: true } },
+      },
+    })
+  }
+
   findGuiaById(guiaId: string, tx?: Tx) {
     return db(tx).guia.findUnique({
       where: { id: guiaId },
-      select: { id: true, usuario: { select: { id: true, activo: true } } },
+      select: {
+        id: true,
+        pendingPenalty: true,
+        disponibleParaTurnos: true,
+        disponibilidadUpdatedAt: true,
+        usuario: { select: { id: true, activo: true } },
+      },
     })
   }
 

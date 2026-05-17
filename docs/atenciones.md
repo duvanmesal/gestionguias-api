@@ -1,6 +1,6 @@
 # Atenciones
 
-Última revisión contra código: 2026-05-11.
+Última revisión contra código: 2026-05-16.
 
 Fuente principal: `src/routes/atenciones.routes.ts`, `src/modules/atenciones/*`, `src/modules/recaladas/*`, `prisma/schema.prisma`.
 
@@ -73,6 +73,7 @@ Reglas:
 - La creación materializa turnos atómicamente.
 - Después de crear correctamente, encola notificaciones operativas `ATENCION_CREATED` para guías activos. Este enqueue no bloquea la respuesta.
 - Emite realtime `atencion:nueva` a la sala `guias` con `notificationId` y datos básicos de la atención.
+- Si el modo global es `FIFO_GLOBAL` y la atención ya es operable, intenta asignar turnos disponibles por disponibilidad global. En `MANUAL_RECLAMO` no autoasigna.
 
 Respuesta exitosa: `201`.
 
@@ -128,6 +129,7 @@ Reglas:
 - Si cambia la ventana, no pueden existir turnos `ASSIGNED` o `IN_PROGRESS`.
 - Al cambiar `turnosTotal`, el sistema ajusta turnos de forma atómica.
 - No se puede reducir el cupo si existen turnos asignados en números mayores al nuevo total.
+- Si el modo global es `FIFO_GLOBAL` y quedan turnos disponibles, intenta asignarlos por disponibilidad global. En `MANUAL_RECLAMO` no autoasigna.
 
 ## Cancelar atención
 
@@ -199,8 +201,11 @@ crear o editar la atención y se invalida al cancelar o cerrar.
 Reglas:
 
 - Solo rol `GUIA`.
+- El modo global debe ser `MANUAL_RECLAMO`; si está `FIFO_GLOBAL`, responde `409 CONFLICT`.
 - El usuario autenticado debe tener fila `Guia`.
 - La cuenta del guía debe estar activa.
+- El guía debe estar disponible globalmente (`disponibleParaTurnos = true`).
+- El guía no puede tener `pendingPenalty = true`.
 - El guía no puede tener un turno `IN_PROGRESS`.
 - La atención y la recalada deben estar operables.
 - No puede tener ya un turno asignado en esa atención.

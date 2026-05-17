@@ -21,6 +21,9 @@ import turnosRoutes from "./turno.routes";
 // 🔹 Dashboard (overview)
 import dashboardRoutes from "./dashboard.routes";
 
+// 🔹 Configuración operativa global
+import operationalConfigRoutes from "./operational-config.routes";
+
 const router = Router();
 
 // API v1 routes
@@ -48,6 +51,9 @@ v1Router.use("/turnos", turnosRoutes);
 // ✅ Dashboard overview
 v1Router.use("/dashboard", dashboardRoutes);
 
+// ✅ Configuración operativa global
+v1Router.use("/operational-config", operationalConfigRoutes);
+
 // Mount versioned routes
 router.use("/", v1Router);
 
@@ -70,6 +76,7 @@ router.get("/", (_req, res) => {
         atenciones: `${process.env.API_PREFIX ?? "/api"}/atenciones`,
         turnos: `${process.env.API_PREFIX ?? "/api"}/turnos`,
         dashboard: `${process.env.API_PREFIX ?? "/api"}/dashboard`,
+        operationalConfig: `${process.env.API_PREFIX ?? "/api"}/operational-config`,
         health: "/health",
       },
     },

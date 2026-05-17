@@ -1,6 +1,17 @@
 import "dotenv/config";
 import { z } from "zod";
 
+const envBoolean = (defaultValue: boolean) =>
+  z.preprocess((value) => {
+    if (typeof value !== "string") return value
+
+    const normalized = value.trim().toLowerCase()
+    if (["true", "1", "yes", "on"].includes(normalized)) return true
+    if (["false", "0", "no", "off", ""].includes(normalized)) return false
+
+    return value
+  }, z.boolean().default(defaultValue))
+
 const Env = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
@@ -55,19 +66,19 @@ const Env = z.object({
     .default(
       "http://localhost:3001,http://localhost:5173,http://localhost:8081",
     ),
-  CORS_ALLOW_CREDENTIALS: z.coerce.boolean().default(true),
+  CORS_ALLOW_CREDENTIALS: envBoolean(true),
 
   // Logs microservice (global)
   LOGS_SERVICE_URL: z.string().url().default("http://localhost:4010"),
   LOGS_INGEST_API_KEY: z.string().default(""),
-  LOGS_ENABLED: z.coerce.boolean().default(true),
+  LOGS_ENABLED: envBoolean(true),
   LOGS_TIMEOUT_MS: z.coerce.number().int().min(100).max(30_000).default(1500),
 
   // Identidad del servicio emisor (útil si varios servicios publican logs)
   SERVICE_NAME: z.string().default("gestionguias-api"),
 
   // Push notifications (Firebase Cloud Messaging)
-  PUSH_NOTIFICATIONS_ENABLED: z.coerce.boolean().default(false),
+  PUSH_NOTIFICATIONS_ENABLED: envBoolean(false),
   FIREBASE_PROJECT_ID: z.string().default(""),
   FIREBASE_CLIENT_EMAIL: z.string().default(""),
   FIREBASE_PRIVATE_KEY: z.string().default(""),

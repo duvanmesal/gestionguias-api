@@ -80,10 +80,8 @@ Los jobs automaticos tambien emiten eventos de turno y agregan `source: "job"` e
 | `atencion:canceled` | Igual | Igual |
 | `atencion:closed` | Igual | Igual |
 | `atencion:nueva` | `guias` (sala broadcast de todos los guias) | `notificationId`, `atencionId`, `recaladaId`, `fechaInicio`, `fechaFin`, `turnosTotal`, `descripcion` |
-| `atencion:asignacionCompleta` | `supervisors` | `atencionId`, `asignados` |
 
 - `atencion:nueva` se emite cuando un supervisor crea una atencion, para que todos los guias puedan reaccionar (toast, badge, actualizar lista de atenciones pendientes de disponibilidad).
-- `atencion:asignacionCompleta` se emite tras el auto-assign al arribo, informando cuantos turnos quedaron asignados en esa atencion.
 
 Cuando una atencion cancelada afecta turnos asignados, tambien se emite `turno:canceled` a los guias afectados.
 
@@ -92,6 +90,7 @@ Cuando una atencion cancelada afecta turnos asignados, tambien se emite `turno:c
 | Evento | Destinos | Payload | Uso cliente |
 | --- | --- | --- | --- |
 | `disponibilidad:marcada` | `supervisors`, `guia:{userId}` | `atencionId`, `guiaId`, `guiaUserId`, `penalizado`, `posicion`, `total` (+ `tuPosicion` al propio guia) | Supervisor actualiza cola en vivo; guia ve su posicion. |
+| `disponibilidad:globalChanged` | `supervisors`, `admins`, `guia:{userId}` | `userId`, `guiaId`, `disponibleParaTurnos`, `disponibilidadUpdatedAt`, `pendingPenalty`, `turnoAssignmentMode` | Refrescar disponibilidad global, lookup de guias, dashboard y perfil propio. |
 | `disponibilidad:penalizado` | `guia:{userId}` del guia ausente | `turnoId`, `atencionId`, `mensaje` | Toast de aviso al guia que hizo NO_SHOW. |
 
 ### Recaladas
@@ -113,6 +112,7 @@ Cuando una atencion cancelada afecta turnos asignados, tambien se emite `turno:c
 | `user:updated` | `admins`, `user:{userId}` | Refrescar usuarios y perfil propio si coincide. |
 | `user:deactivated` | `admins` | Refrescar usuarios y cerrar sesiones afectadas por `auth:sessionRevoked`. |
 | `guides:lookupChanged` | `admins`, `supervisors` | Refrescar lookup de guias para asignacion. |
+| `operational-config:changed` | `admins`, `supervisors`, `guias` | Refrescar modo global de asignacion y dashboard. |
 | `invitation:created` | `admins` | Refrescar invitaciones. |
 | `invitation:resent` | `admins` | Refrescar invitaciones. |
 | `invitation:used` | `admins` | Refrescar invitaciones. |
@@ -135,9 +135,10 @@ Cuando una atencion cancelada afecta turnos asignados, tambien se emite `turno:c
 | `turno:*` | Turnos, mis turnos, turno detalle, atencion detalle/turnos/resumen, recalada detalle y dashboard. |
 | `atencion:*` | Atenciones, atencion detalle/turnos/resumen, recalada detalle/atenciones y dashboard. |
 | `atencion:nueva` | Atenciones, recalada detalle/atenciones si aplica y dashboard. |
-| `disponibilidad:marcada` | Cola de disponibilidad de la atencion activa (supervisor). Posicion propia del guia. |
+| `disponibilidad:marcada` | Cola legacy de disponibilidad de la atencion activa (supervisor). Posicion propia del guia. |
+| `disponibilidad:globalChanged` | Disponibilidad global propia, lookup de guias, usuarios/me y dashboard. |
 | `disponibilidad:penalizado` | Estado de penalizacion del guia (banner en UI). |
-| `atencion:asignacionCompleta` | Cola de disponibilidad de la atencion; refrescar turnos y summary. |
+| `operational-config:changed` | Configuracion operativa, dashboard, usuarios/me y lookup de guias. |
 | `recalada:*` | Recaladas, recalada detalle/atenciones, atenciones y dashboard. |
 | `recalada:nueva` | Recaladas, atenciones y dashboard; además puede mostrar toast a guías. |
 | `user:*` | Usuarios admin, perfil propio si coincide y lookup de guias cuando aplique. |

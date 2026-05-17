@@ -1,4 +1,5 @@
 import type { Request } from "express"
+import { TurnoAssignmentMode } from "@prisma/client"
 
 import { logger } from "../../../libs/logger"
 import {
@@ -11,12 +12,25 @@ import { atencionRepository } from "../_data/atencion.repository"
 import { assertOperacionPermitida } from "../_domain/atencion.rules"
 import { auditFail, auditOk } from "../_shared/atencion.audit"
 import { emitTurnoRealtime } from "../../../core/socket/domain-events"
+import { operationalConfigService } from "../../operational-config/operational-config.service"
 
 export async function claimFirstAvailableTurnoUsecase(
   req: Request,
   atencionId: number,
   actorUserId: string,
 ) {
+  const assignmentMode = await operationalConfigService.getTurnoAssignmentMode()
+  if (assignmentMode === TurnoAssignmentMode.FIFO_GLOBAL) {
+    auditFail(
+      req,
+      "atenciones.claim.failed",
+      "Claim turno failed",
+      { reason: "fifo_mode_active", atencionId, actorUserId, assignmentMode },
+      { entity: "Atencion", id: String(atencionId) },
+    )
+    throw new ConflictError("El modo FIFO está activo. Los turnos se asignan automáticamente.")
+  }
+
   const guia = await atencionRepository.findGuiaByUserId(actorUserId)
 
   if (!guia) {
@@ -39,6 +53,28 @@ export async function claimFirstAvailableTurnoUsecase(
       { entity: "Guia" },
     )
     throw new ConflictError("Tu cuenta de guía está inactiva")
+  }
+
+  if (!guia.disponibleParaTurnos) {
+    auditFail(
+      req,
+      "atenciones.claim.failed",
+      "Claim turno failed",
+      { reason: "guia_not_available_global", atencionId, actorUserId, guiaId: guia.id },
+      { entity: "Guia", id: guia.id },
+    )
+    throw new ConflictError("Debes marcarte disponible para tomar un turno")
+  }
+
+  if (guia.pendingPenalty) {
+    auditFail(
+      req,
+      "atenciones.claim.failed",
+      "Claim turno failed",
+      { reason: "guia_pending_penalty", atencionId, actorUserId, guiaId: guia.id },
+      { entity: "Guia", id: guia.id },
+    )
+    throw new ConflictError("No puedes tomar turno porque tienes una penalización pendiente")
   }
 
   const inProgress = await atencionRepository.findActiveForGuia(guia.id)

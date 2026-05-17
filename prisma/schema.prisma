@@ -99,6 +99,11 @@ enum PushPlatform {
   WEB
 }
 
+enum TurnoAssignmentMode {
+  MANUAL_RECLAMO
+  FIFO_GLOBAL
+}
+
 model Usuario {
   id           String  @id @default(cuid())
   email        String  @unique
@@ -275,20 +280,34 @@ model RefreshToken {
 }
 
 model Guia {
-  id             String   @id @default(cuid())
-  usuarioId      String   @unique
-  telefono       String?
-  direccion      String?
-  pendingPenalty Boolean  @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                       String    @id @default(cuid())
+  usuarioId                String    @unique
+  telefono                 String?
+  direccion                String?
+  pendingPenalty           Boolean   @default(false)
+  disponibleParaTurnos     Boolean   @default(false)
+  disponibilidadUpdatedAt  DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   usuario          Usuario          @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
   turnos           Turno[]
   disponibilidades Disponibilidad[]
   notificationDeliveries NotificationDelivery[]
 
+  @@index([disponibleParaTurnos, disponibilidadUpdatedAt])
+  @@index([pendingPenalty])
   @@map("guias")
+}
+
+model OperationalConfig {
+  id                  String              @id @default("global")
+  turnoAssignmentMode TurnoAssignmentMode @default(MANUAL_RECLAMO)
+  updatedById         String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  @@map("operational_config")
 }
 
 model Supervisor {

@@ -21,6 +21,7 @@ import {
   assertWindowWithinRecalada,
 } from "../_domain/atencion.rules"
 import { auditFail, auditOk } from "../_shared/atencion.audit"
+import { assignForAtencion } from "../../disponibilidad/_usecases/autoAssign.usecase"
 
 export async function updateAtencionUsecase(
   req: Request,
@@ -308,6 +309,13 @@ export async function updateAtencionUsecase(
     recaladaId: current.recaladaId,
     status: result.status,
     operationalStatus: result.operationalStatus,
+  })
+
+  assignForAtencion(id).catch((err) => {
+    logger.error(
+      { err, atencionId: id, recaladaId: current.recaladaId },
+      "[Atenciones] failed to auto-assign FIFO after update",
+    )
   })
 
   return result

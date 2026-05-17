@@ -105,6 +105,14 @@ export const listGuidesQuerySchema = z.object({
     .union([z.literal("true"), z.literal("false"), z.boolean()])
     .transform((v) => (v === true || v === "true" ? true : false))
     .default(true),
+  disponible: z
+    .union([z.literal("true"), z.literal("false"), z.boolean()])
+    .transform((v) => (v === true || v === "true" ? true : false))
+    .optional(),
+  penalizado: z
+    .union([z.literal("true"), z.literal("false"), z.boolean()])
+    .transform((v) => (v === true || v === "true" ? true : false))
+    .optional(),
   search: z
     .string()
     .trim()
@@ -113,7 +121,12 @@ export const listGuidesQuerySchema = z.object({
     .optional(),
 });
 
+export const updateDisponibilidadGlobalSchema = z.object({
+  disponible: z.boolean(),
+});
+
 export type UpdateMeRequest = z.infer<typeof updateMeSchema>;
 export type CompleteProfileRequest = z.infer<typeof completeProfileSchema>;
 
 export type ListGuidesQuery = z.infer<typeof listGuidesQuerySchema>;
+export type UpdateDisponibilidadGlobalRequest = z.infer<typeof updateDisponibilidadGlobalSchema>;

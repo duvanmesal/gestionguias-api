@@ -1,4 +1,5 @@
 import type { Request } from "express"
+import { TurnoAssignmentMode } from "@prisma/client"
 
 import { logger } from "../../../libs/logger"
 import {
@@ -14,6 +15,7 @@ import { emitTurnoRealtime } from "../../../core/socket/domain-events"
 import { disponibilidadRepository } from "../../disponibilidad/disponibilidad.repository"
 import { autoAssignNextInQueue } from "../../disponibilidad/_usecases/autoAssign.usecase"
 import { socketService } from "../../../core/socket/socket.service"
+import { operationalConfigService } from "../../operational-config/operational-config.service"
 
 export async function noShowTurnoUsecase(
   req: Request,
@@ -128,10 +130,12 @@ export async function noShowTurnoUsecase(
       })
     }
 
-    // Reasignar al siguiente en cola
-    autoAssignNextInQueue(updated.atencionId, turnoId).catch((err) =>
-      logger.error({ err, turnoId, atencionId: updated.atencionId }, "[Turnos] error reasignando tras NO_SHOW"),
-    )
+    const assignmentMode = await operationalConfigService.getTurnoAssignmentMode()
+    if (assignmentMode === TurnoAssignmentMode.FIFO_GLOBAL) {
+      autoAssignNextInQueue(updated.atencionId, turnoId).catch((err) =>
+        logger.error({ err, turnoId, atencionId: updated.atencionId }, "[Turnos] error reasignando tras NO_SHOW"),
+      )
+    }
   }
 
   return updated

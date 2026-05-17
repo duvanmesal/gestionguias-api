@@ -24,6 +24,9 @@ export const userMeSelect = {
       id: true,
       telefono: true,
       direccion: true,
+      pendingPenalty: true,
+      disponibleParaTurnos: true,
+      disponibilidadUpdatedAt: true,
     },
   },
   supervisor: {

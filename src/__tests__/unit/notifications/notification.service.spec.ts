@@ -1,7 +1,7 @@
 const ORIGINAL_ENV = process.env
 
 function applyBaseEnv(overrides: NodeJS.ProcessEnv = {}) {
-  process.env = {
+  const nextEnv: NodeJS.ProcessEnv = {
     ...ORIGINAL_ENV,
     NODE_ENV: "test",
     DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/gestion_guias",
@@ -13,8 +13,11 @@ function applyBaseEnv(overrides: NodeJS.ProcessEnv = {}) {
     PASSWORD_PEPPER: "d".repeat(16),
     TOKEN_PEPPER: "e".repeat(16),
     LOG_LEVEL: "silent",
+    PUSH_NOTIFICATIONS_ENABLED: "false",
     ...overrides,
   }
+
+  process.env = nextEnv
 }
 
 function makePrismaMock() {

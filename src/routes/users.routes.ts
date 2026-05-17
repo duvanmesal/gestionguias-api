@@ -3,6 +3,7 @@ import { validate } from "../libs/zod-mw";
 import { requireAuth, requireOwnershipOrRole } from "../libs/auth";
 import { requireSuperAdmin } from "../libs/rbac";
 import { requireSupervisor } from "../libs/rbac";
+import { requireGuia } from "../libs/rbac";
 import { userController } from "../modules/users/user.controller";
 import {
   createUserSchema,
@@ -14,6 +15,7 @@ import {
   completeProfileSchema,
   updateMeSchema,
   listGuidesQuerySchema,
+  updateDisponibilidadGlobalSchema,
 } from "../modules/users/user.schemas";
 import { RolType } from "@prisma/client";
 
@@ -26,6 +28,19 @@ router.use(requireAuth);
 // ME endpoints (SELF)
 // ─────────────────────────────────────────────────────────────
 router.get("/me", userController.me.bind(userController));
+
+router.get(
+  "/me/disponibilidad",
+  requireGuia,
+  userController.getMyDisponibilidad.bind(userController),
+);
+
+router.patch(
+  "/me/disponibilidad",
+  requireGuia,
+  validate({ body: updateDisponibilidadGlobalSchema }),
+  userController.updateMyDisponibilidad.bind(userController),
+);
 
 router.patch(
   "/me/profile",

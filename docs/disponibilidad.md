@@ -1,163 +1,162 @@
-# Disponibilidad y Asignacion Automatica
+# Disponibilidad global y modo de asignacion
 
-Ultima revision contra codigo: 2026-05-10.
+Ultima revision contra codigo: 2026-05-16.
 
-Fuente principal: `src/routes/atenciones.routes.ts`, `src/modules/disponibilidad/*`, `src/modules/turnos/_usecases/noShow.usecase.ts`, `src/modules/recaladas/_usecases/arrive.usecase.ts`, `prisma/schema.prisma`.
+Fuente principal: `src/routes/users.routes.ts`, `src/routes/operational-config.routes.ts`, `src/modules/users/*`, `src/modules/operational-config/*`, `src/modules/disponibilidad/_usecases/autoAssign.usecase.ts`, `src/modules/turnos/*`, `prisma/schema.prisma`.
 
 ## Proposito
 
-La disponibilidad reemplaza el modelo de "first click" (claim directo) por una cola ordenada y justa. El flujo es:
+La disponibilidad principal del sistema es global por guia. Un guia se marca disponible o no disponible para participar en turnos operativos; esa marca gobierna el reclamo manual y alimenta la asignacion FIFO cuando el modo automatico este activo.
 
-1. El supervisor crea una atencion y todos los guias son notificados por socket.
-2. Los guias marcan disponibilidad antes de que el buque arribe.
-3. Al marcar el arribo de la recalada, el sistema asigna turnos automaticamente en orden de cola.
-4. Si un guia hace NO_SHOW, el siguiente en cola recibe el turno y el ausente queda penalizado para la siguiente atencion.
+El modo de asignacion es global para toda la operacion:
+
+- `MANUAL_RECLAMO`: default. El guia disponible y no penalizado reclama turnos desde la UI.
+- `FIFO_GLOBAL`: apagado por defecto. El sistema asigna automaticamente por disponibilidad global; los endpoints de reclamo quedan bloqueados con `409 CONFLICT`.
+
+La disponibilidad por atencion (`/atenciones/:id/disponibilidad`) queda como flujo legacy y no gobierna la UI principal.
 
 ## Modelo de datos
 
-### Disponibilidad
-
-```prisma
-model Disponibilidad {
-  id         String   @id @default(cuid())
-  atencionId Int
-  guiaId     String
-  marcadoAt  DateTime @default(now())
-  penalizado Boolean  @default(false)
-
-  atencion Atencion @relation(fields: [atencionId], references: [id])
-  guia     Guia     @relation(fields: [guiaId], references: [id])
-
-  @@unique([atencionId, guiaId])
-  @@index([atencionId])
-}
-```
-
-Un guia solo puede tener una fila por atencion. Si intenta marcar dos veces, el sistema responde `409 CONFLICT`.
-
-### Campo pendingPenalty en Guia
+### Guia
 
 ```prisma
 model Guia {
-  pendingPenalty Boolean @default(false)
-  ...
+  disponibleParaTurnos    Boolean   @default(false)
+  disponibilidadUpdatedAt DateTime?
+  pendingPenalty          Boolean   @default(false)
 }
 ```
 
-Se activa cuando el guia hace NO_SHOW. Se consume (y se vuelve `false`) la proxima vez que el guia marca disponibilidad. Mientras esta activo, su fila de disponibilidad se crea con `penalizado: true`, lo que lo ubica al final de la cola.
+`disponibilidadUpdatedAt` define el orden FIFO global. Si el guia esta penalizado (`pendingPenalty = true`), no puede reclamar manualmente ni entrar a la asignacion FIFO.
 
-## Rutas
+### OperationalConfig
+
+```prisma
+enum TurnoAssignmentMode {
+  MANUAL_RECLAMO
+  FIFO_GLOBAL
+}
+
+model OperationalConfig {
+  id                  String              @id @default("global")
+  turnoAssignmentMode TurnoAssignmentMode @default(MANUAL_RECLAMO)
+  updatedById         String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+}
+```
+
+El registro singleton `global` se crea por migracion con `MANUAL_RECLAMO`.
+
+## Rutas de configuracion operativa
 
 Todas requieren autenticacion.
 
 | Metodo | Ruta | Rol | Descripcion |
 | --- | --- | --- | --- |
-| `POST` | `/atenciones/:id/disponibilidad` | `GUIA` | Marcar disponibilidad para la atencion. |
-| `DELETE` | `/atenciones/:id/disponibilidad` | `GUIA` | Desmarcar (solo antes del arribo). |
-| `GET` | `/atenciones/:id/disponibilidad` | `SUPERVISOR`, `SUPER_ADMIN` | Ver cola ordenada de guias disponibles. |
-| `GET` | `/atenciones/:id/disponibilidad/me` | `GUIA` | Consultar el propio estado de disponibilidad. |
+| `GET` | `/operational-config` | `SUPERVISOR`, `SUPER_ADMIN` | Consulta el modo global activo. |
+| `PATCH` | `/operational-config/turnos-assignment-mode` | `SUPERVISOR`, `SUPER_ADMIN` | Cambia el modo global. |
 
-## Marcar disponibilidad
+Body:
 
-`POST /atenciones/:id/disponibilidad`
+```json
+{
+  "turnoAssignmentMode": "FIFO_GLOBAL"
+}
+```
 
-No requiere body.
-
-Reglas:
-
-- El usuario debe tener fila `Guia` activa.
-- La atencion debe existir, estar `ACTIVO` y en estado operativo `OPEN`.
-- La recalada asociada debe estar `SCHEDULED`. Si ya esta `ARRIVED`, `DEPARTED` o `CANCELED`, el sistema rechaza con `409 CONFLICT`.
-- El guia no puede tener ya una disponibilidad para esa atencion.
-- El guia no puede tener ya un turno asignado en esa atencion.
-- Si `guia.pendingPenalty === true`: la disponibilidad se crea con `penalizado: true` y se limpia `pendingPenalty` en la misma transaccion. El guia quedara al final de la cola.
-- Si `pendingPenalty === false`: se crea con `penalizado: false` y se ordena por `marcadoAt`.
-
-Respuesta exitosa `201`:
+Respuesta:
 
 ```json
 {
   "data": {
-    "id": "disp_id",
-    "atencionId": 5,
-    "guiaId": "guia_id",
-    "marcadoAt": "2026-05-10T14:30:00.000Z",
-    "penalizado": false,
-    "posicion": 2
+    "id": "global",
+    "turnoAssignmentMode": "FIFO_GLOBAL",
+    "updatedById": "user_id",
+    "createdAt": "2026-05-16T00:00:00.000Z",
+    "updatedAt": "2026-05-16T00:05:00.000Z"
   },
   "meta": null,
   "error": null
 }
 ```
 
-Eventos emitidos:
+Eventos:
 
-- `disponibilidad:marcada` a `supervisors` con `{ atencionId, guiaId, guiaUserId, penalizado, posicion, total }`.
-- `disponibilidad:marcada` al guia autenticado con el mismo payload mas `tuPosicion`.
+- `operational-config:changed` a supervisores, administradores y guias.
 
-## Desmarcar disponibilidad
+## Rutas de disponibilidad global
 
-`DELETE /atenciones/:id/disponibilidad`
+| Metodo | Ruta | Rol | Descripcion |
+| --- | --- | --- | --- |
+| `GET` | `/users/me/disponibilidad` | `GUIA` | Consulta la disponibilidad global propia. |
+| `PATCH` | `/users/me/disponibilidad` | `GUIA` | Cambia la disponibilidad global propia. |
+
+Body:
+
+```json
+{
+  "disponible": true
+}
+```
+
+Respuesta:
+
+```json
+{
+  "data": {
+    "guiaId": "guia_id",
+    "disponibleParaTurnos": true,
+    "disponibilidadUpdatedAt": "2026-05-16T01:52:00.000Z",
+    "pendingPenalty": false,
+    "turnoAssignmentMode": "MANUAL_RECLAMO"
+  },
+  "meta": null,
+  "error": null
+}
+```
 
 Reglas:
 
-- El usuario debe tener fila `Guia`.
-- La disponibilidad debe existir para esa atencion.
-- Si la recalada ya arribo (`ARRIVED`) y el guia tiene un turno asignado en esa atencion, no puede desmarcar.
-- Si la recalada esta `ARRIVED` pero el guia no tiene turno asignado, si puede desmarcar.
+- Solo aplica para usuarios con fila `Guia`.
+- El usuario del guia debe estar activo.
+- Un guia con `pendingPenalty = true` no puede marcarse disponible.
+- Al marcarse no disponible, `disponibilidadUpdatedAt` se limpia.
+- Al marcarse disponible en modo `FIFO_GLOBAL`, se intenta asignar cupos abiertos de forma asincrona.
 
-Respuesta exitosa `204 No Content`.
+Eventos:
 
-## Ver cola de disponibilidad
+- `disponibilidad:globalChanged` al guia y a supervisores/administradores.
 
-`GET /atenciones/:id/disponibilidad`
+## Modo manual
 
-Solo para `SUPERVISOR` y `SUPER_ADMIN`.
+En `MANUAL_RECLAMO`:
 
-Respuesta: lista ordenada de disponibilidades con datos del guia, posicion, `penalizado` y `marcadoAt`. La cola se ordena `penalizado ASC, marcadoAt ASC`.
+- `POST /atenciones/:id/claim` y `POST /turnos/:id/claim` siguen siendo la via principal para guias.
+- El backend bloquea el reclamo si el guia no esta disponible globalmente.
+- El backend bloquea el reclamo si el guia tiene `pendingPenalty = true`.
+- No se asignan turnos automaticamente al marcar arribo, crear atencion o aumentar cupos.
 
-## Consultar mi disponibilidad
+## Modo FIFO global
 
-`GET /atenciones/:id/disponibilidad/me`
+En `FIFO_GLOBAL`:
 
-Solo para `GUIA`. Devuelve el estado propio: si el guia esta en la cola, su posicion y si tiene penalizacion activa. Si no ha marcado, `data: null`.
+- Los endpoints de claim responden `409 CONFLICT` con mensaje de modo FIFO activo.
+- El sistema asigna automaticamente turnos `AVAILABLE` a guias elegibles.
+- Un guia elegible debe estar activo, disponible, sin penalizacion pendiente y con `disponibilidadUpdatedAt` no nulo.
+- El orden es `disponibilidadUpdatedAt ASC`, luego `id ASC`.
+- Se excluyen guias con turno en la misma atencion o con turno `ASSIGNED`/`IN_PROGRESS` solapado.
+- La asignacion corre al marcar arribo de recalada, al crear o actualizar cupos de una atencion operable, al marcar disponibilidad y despues de `NO_SHOW`.
 
-## Orden de la cola
+## Disponibilidad por atencion legacy
 
-La cola usa el criterio `ORDER BY penalizado ASC, marcadoAt ASC`:
+Las rutas antiguas siguen existiendo para compatibilidad:
 
-1. Primero los guias sin penalizacion, ordenados por el momento en que marcaron.
-2. Al final los guias penalizados, tambien ordenados por `marcadoAt` entre ellos.
+| Metodo | Ruta | Rol |
+| --- | --- | --- |
+| `POST` | `/atenciones/:id/disponibilidad` | `GUIA` |
+| `DELETE` | `/atenciones/:id/disponibilidad` | `GUIA` |
+| `GET` | `/atenciones/:id/disponibilidad` | `SUPERVISOR`, `SUPER_ADMIN` |
+| `GET` | `/atenciones/:id/disponibilidad/me` | `GUIA` |
 
-El guia que marca primero queda en posicion 1 y recibe el turno de menor numero al asignarse.
-
-## Asignacion automatica al marcar arribo
-
-Cuando el supervisor marca el arribo de una recalada (`PATCH /recaladas/:id/arrive`), el sistema dispara `autoAssignTurnosForRecaladaUsecase`:
-
-1. Obtiene todas las atenciones `OPEN` de la recalada.
-2. Para cada atencion, obtiene la cola de disponibilidad y los turnos `AVAILABLE` en orden `numero ASC`.
-3. Asigna en paralelo: cola[0] → turno[1], cola[1] → turno[2], etc.
-4. Si hay mas guias que turnos, los del final de la cola quedan sin turno.
-5. Si hay mas turnos que guias, los turnos sobrantes quedan `AVAILABLE`.
-6. Emite `turno:assigned` por cada asignacion a `atencion:{id}`, `supervisors` y `guia:{userId}`.
-7. Emite `atencion:asignacionCompleta` a `supervisors` con el total de asignados.
-
-La asignacion es transaccional dentro de cada atencion.
-
-## Penalizacion y reasignacion en NO_SHOW
-
-Cuando el supervisor marca `PATCH /turnos/:id/no-show`:
-
-1. El turno pasa a estado `NO_SHOW`.
-2. Se registra `pendingPenalty = true` en el guia ausente.
-3. Se emite `disponibilidad:penalizado` al guia ausente con mensaje explicativo.
-4. El sistema busca al siguiente guia en la cola de disponibilidad que aun no tenga turno en la atencion.
-5. Si existe, se le asigna el turno liberado y se emite `turno:assigned`.
-6. La reasignacion es asincrona (no bloquea la respuesta HTTP del supervisor).
-
-## Notas de mantenimiento
-
-- Un guia con `pendingPenalty = true` que no haya marcado disponibilidad en ninguna atencion conservara la penalizacion indefinidamente hasta que lo haga.
-- El campo `penalizado` en `Disponibilidad` es historico: refleja si el guia tenia penalty cuando marco, independientemente de lo que ocurra despues.
-- Si se cancela una atencion, las filas de `Disponibilidad` quedan huerfanas (no se borran). Esto es intencional para no perder trazabilidad del intento de participacion.
+Estas rutas ya no gobiernan el flujo principal de reclamo ni el selector Manual/FIFO. La fuente operativa principal es `Guia.disponibleParaTurnos`.

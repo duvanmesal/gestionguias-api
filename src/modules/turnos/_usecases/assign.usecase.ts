@@ -52,6 +52,28 @@ export async function assignTurnoUsecase(
     throw new BadRequestError("No se puede asignar: el guía está inactivo")
   }
 
+  if (!guia.disponibleParaTurnos) {
+    auditFail(
+      req,
+      "turnos.assign.failed",
+      "Assign turno failed",
+      { reason: "guia_not_available_global", guiaId, turnoId },
+      { entity: "Guia", id: guiaId },
+    )
+    throw new ConflictError("No se puede asignar: el guía no está disponible para turnos")
+  }
+
+  if (guia.pendingPenalty) {
+    auditFail(
+      req,
+      "turnos.assign.failed",
+      "Assign turno failed",
+      { reason: "guia_pending_penalty", guiaId, turnoId },
+      { entity: "Guia", id: guiaId },
+    )
+    throw new ConflictError("No se puede asignar: el guía tiene una penalización pendiente")
+  }
+
   const inProgress = await turnoRepository.findActiveForGuia(guiaId)
   if (inProgress) {
     auditFail(
