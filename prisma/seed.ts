@@ -11,6 +11,7 @@ import {
   TurnoStatus,
   AtencionOperativeStatus,
   StatusType,
+  TurnoAssignmentMode,
 } from "@prisma/client"
 import { hash as argonHash, argon2id } from "argon2"
 
@@ -365,8 +366,21 @@ async function upsertSeedUsers(input: { nowBogota: Date }) {
     if (u.rol === RolType.GUIA) {
       const guia = await prisma.guia.upsert({
         where: { usuarioId: user.id },
-        update: { telefono: "+57 300 555 0000", direccion: "Cartagena, Colombia" },
-        create: { usuarioId: user.id, telefono: "+57 300 555 0000", direccion: "Cartagena, Colombia" },
+        update: {
+          telefono: "+57 300 555 0000",
+          direccion: "Cartagena, Colombia",
+          disponibleParaTurnos: false,
+          disponibilidadUpdatedAt: null,
+          pendingPenalty: false,
+        },
+        create: {
+          usuarioId: user.id,
+          telefono: "+57 300 555 0000",
+          direccion: "Cartagena, Colombia",
+          disponibleParaTurnos: false,
+          disponibilidadUpdatedAt: null,
+          pendingPenalty: false,
+        },
       })
       created[u.email] = { userId: user.id, guiaId: guia.id }
     }
@@ -374,6 +388,75 @@ async function upsertSeedUsers(input: { nowBogota: Date }) {
 
   console.log("🧪 Seed users ready (emailVerifiedAt + profile COMPLETE)")
   return created
+}
+
+async function upsertOperationalConfig(actorUserId: string) {
+  const config = await prisma.operationalConfig.upsert({
+    where: { id: "global" },
+    update: {
+      turnoAssignmentMode: TurnoAssignmentMode.MANUAL_RECLAMO,
+      updatedById: actorUserId,
+    },
+    create: {
+      id: "global",
+      turnoAssignmentMode: TurnoAssignmentMode.MANUAL_RECLAMO,
+      updatedById: actorUserId,
+    },
+  })
+
+  console.log(`⚙️ Operational config ready: ${config.turnoAssignmentMode}`)
+  return config
+}
+
+async function seedGuideAvailabilityStates(args: {
+  now: Date
+  guiaIds: string[]
+}) {
+  const states = [
+    {
+      guiaId: args.guiaIds[0],
+      disponibleParaTurnos: true,
+      disponibilidadUpdatedAt: addMinutes(args.now, -30),
+      pendingPenalty: false,
+      label: "disponible manual/FIFO #1",
+    },
+    {
+      guiaId: args.guiaIds[1],
+      disponibleParaTurnos: true,
+      disponibilidadUpdatedAt: addMinutes(args.now, -20),
+      pendingPenalty: false,
+      label: "disponible manual/FIFO #2",
+    },
+    {
+      guiaId: args.guiaIds[2],
+      disponibleParaTurnos: false,
+      disponibilidadUpdatedAt: null,
+      pendingPenalty: true,
+      label: "penalizado",
+    },
+    {
+      guiaId: args.guiaIds[3],
+      disponibleParaTurnos: false,
+      disponibilidadUpdatedAt: null,
+      pendingPenalty: false,
+      label: "no disponible",
+    },
+  ]
+
+  for (const s of states) {
+    await prisma.guia.update({
+      where: { id: s.guiaId },
+      data: {
+        disponibleParaTurnos: s.disponibleParaTurnos,
+        disponibilidadUpdatedAt: s.disponibilidadUpdatedAt,
+        pendingPenalty: s.pendingPenalty,
+      },
+    })
+  }
+
+  console.log(
+    `🧭 Disponibilidad global seed ready (${states.map((s) => s.label).join(", ")})`,
+  )
 }
 
 async function upsertDevWorkflows(input: DevWorkflowInput) {
@@ -396,6 +479,8 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
   if (guiaIds.length < 4) throw new Error("No se pudieron resolver guías del seed")
 
   const createdById = await resolveUserIdOrThrow(input.superAdminEmail)
+  await upsertOperationalConfig(createdById)
+  await seedGuideAvailabilityStates({ now, guiaIds })
 
   // --- catálogos base ---
   const buque1 = await resolveBuqueIdOrThrow("Wonder of the Seas")
@@ -719,11 +804,16 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
   console.log("🧩 Atenciones + Turnos seed ready (OPEN/CLOSED/CANCELED + estados de turnos)")
 
   // ==========================================================
-  // ⚡ DEMO ARRIBO: Recalada SCHEDULED + disponibilidades pre-marcadas
-  // Flujo a probar: supervisor marca arribo → auto-asignación dispara
-  // Cola esperada: guia1 (pos1), guia2 (pos2), guia3 (pos3 por penalty)
+  // ⚡ DEMO FIFO GLOBAL:
+  // - El seed deja el sistema en MANUAL_RECLAMO para probar reclamo manual.
+  // - Para probar FIFO: cambiar en Configuración operativa a FIFO_GLOBAL y marcar
+  //   arribo de esta recalada demo. La asignación esperada usa disponibilidad
+  //   global: guia1 -> turno 1, guia2 -> turno 2. Guia3 está penalizado y guia4
+  //   no disponible, por lo que quedan fuera.
   // ==========================================================
-  const recaladaDemoCode = `DEMO-${ymd}`
+  const recaladaDemoCode = `FIFO-${ymd}`
+  const fifoLlegada = addMinutes(now, +360)
+  const fifoSalida = addMinutes(now, +600)
 
   const rDemo = await prisma.recalada.upsert({
     where: { codigoRecalada: recaladaDemoCode },
@@ -731,17 +821,18 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       buqueId: buque4,
       paisOrigenId: paisIT,
       supervisorId: supervisor1Id,
-      fechaLlegada: addMinutes(now, +45),
-      fechaSalida: addMinutes(now, +360),
+      fechaLlegada: fifoLlegada,
+      fechaSalida: fifoSalida,
       arrivedAt: null,
       departedAt: null,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.SCHEDULED,
       terminal: "Terminal de Cruceros",
-      muelle: "Muelle Demo",
+      muelle: "Muelle FIFO",
       pasajerosEstimados: 3200,
       tripulacionEstimada: 1100,
-      observaciones: "⚡ DEMO: Marcar arribo aquí para probar asignación automática",
+      observaciones:
+        "[SEED] FIFO: cambiar modo a FIFO_GLOBAL y marcar arribo para probar asignación por disponibilidad global.",
       fuente: RecaladaSource.MANUAL,
       canceledAt: null,
       cancelReason: null,
@@ -751,26 +842,27 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       buqueId: buque4,
       paisOrigenId: paisIT,
       supervisorId: supervisor1Id,
-      fechaLlegada: addMinutes(now, +45),
-      fechaSalida: addMinutes(now, +360),
+      fechaLlegada: fifoLlegada,
+      fechaSalida: fifoSalida,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.SCHEDULED,
       terminal: "Terminal de Cruceros",
-      muelle: "Muelle Demo",
+      muelle: "Muelle FIFO",
       pasajerosEstimados: 3200,
       tripulacionEstimada: 1100,
-      observaciones: "⚡ DEMO: Marcar arribo aquí para probar asignación automática",
+      observaciones:
+        "[SEED] FIFO: cambiar modo a FIFO_GLOBAL y marcar arribo para probar asignación por disponibilidad global.",
       fuente: RecaladaSource.MANUAL,
     },
   })
 
-  const demoAtencion = await upsertAtencionWithSlots({
+  await upsertAtencionWithSlots({
     recaladaId: rDemo.id,
     supervisorId: supervisor1Id,
     createdById,
-    descripcion: "⚡ DEMO: Disponibilidades marcadas — marcar arribo para auto-asignar",
-    fechaInicio: addMinutes(now, +45),
-    fechaFin: addMinutes(now, +180),
+    descripcion: "[SEED] FIFO: 3 cupos disponibles para asignación global",
+    fechaInicio: addMinutes(now, +360),
+    fechaFin: addMinutes(now, +480),
     operationalStatus: AtencionOperativeStatus.OPEN,
     turnosTotal: 3,
     slotPlan: [
@@ -780,25 +872,9 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
     ],
   })
 
-  // Disponibilidades: guia1 y guia2 sin penalty, guia3 con penalty → irá al final
-  const demoDisponibilidades = [
-    { guiaId: guiaIds[0], marcadoAt: addMinutes(now, -20), penalizado: false },
-    { guiaId: guiaIds[1], marcadoAt: addMinutes(now, -10), penalizado: false },
-    { guiaId: guiaIds[2], marcadoAt: addMinutes(now, -5), penalizado: true },
-  ]
-
-  for (const d of demoDisponibilidades) {
-    await prisma.disponibilidad.upsert({
-      where: { atencionId_guiaId: { atencionId: demoAtencion.id, guiaId: d.guiaId } },
-      update: { marcadoAt: d.marcadoAt, penalizado: d.penalizado },
-      create: { atencionId: demoAtencion.id, guiaId: d.guiaId, marcadoAt: d.marcadoAt, penalizado: d.penalizado },
-    })
-  }
-
-  // guia3 tiene pendingPenalty activo para futuros demos de la lógica de cola
-  await prisma.guia.update({ where: { id: guiaIds[2] }, data: { pendingPenalty: true } })
-
-  console.log(`⚡ DEMO ARRIBO ready — recalada ${recaladaDemoCode} (SCHEDULED, llega en ~45min, 3 disponibilidades)`)
+  console.log(
+    `⚡ FIFO demo ready — recalada ${recaladaDemoCode} (SCHEDULED, 3 cupos, 2 guías elegibles por disponibilidad global)`,
+  )
 }
 
 type SlotPlanItem = {
