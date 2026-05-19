@@ -123,9 +123,15 @@ Reglas:
 - El guía no puede tener `pendingPenalty = true`.
 - El guía no puede tener otro turno `IN_PROGRESS`.
 - El turno debe estar `AVAILABLE` y sin `guiaId`.
+- **El turno debe ser el primer turno disponible de su atención (menor `numero` con `status = AVAILABLE` y sin `guiaId`).** Si existe otro turno disponible con `numero` menor, responde `409 CONFLICT` con el mensaje
+  `"Debes tomar primero el turno disponible más antiguo de esta atención"`.
 - El guía no puede tener otro turno en la misma atención.
 - El turno no puede solaparse con otro turno `ASSIGNED` o `IN_PROGRESS` del guía.
-- La asignación se hace de forma atómica.
+- La asignación se hace de forma atómica; la verificación de "primer disponible"
+  se repite dentro de la transacción para resolver concurrencia.
+- Para tomar el primer turno disponible sin tener que conocer su id se prefiere
+  `POST /atenciones/:id/claim`, que aplica las mismas reglas y siempre asigna el
+  turno con `numero` ascendente más bajo.
 
 ## Asignación manual
 

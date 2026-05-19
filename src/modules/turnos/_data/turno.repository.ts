@@ -159,6 +159,14 @@ export class TurnoRepository {
     })
   }
 
+  findFirstAvailableTurnoForAtencion(atencionId: number, tx?: Tx) {
+    return db(tx).turno.findFirst({
+      where: { atencionId, status: "AVAILABLE", guiaId: null },
+      orderBy: { numero: "asc" },
+      select: { id: true, numero: true },
+    })
+  }
+
   findOverlappingTurnoForGuia(
     args: { guiaId: string; fechaInicio: Date; fechaFin: Date; excludeTurnoId?: number },
     tx?: Tx,

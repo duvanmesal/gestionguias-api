@@ -106,6 +106,29 @@ export async function claimTurnoUsecase(req: Request, turnoId: number, actorUser
     throw new ConflictError("El turno no está disponible para tomar")
   }
 
+  const firstAvailable = await turnoRepository.findFirstAvailableTurnoForAtencion(
+    current.atencionId,
+  )
+  if (!firstAvailable || firstAvailable.id !== turnoId) {
+    auditFail(
+      req,
+      "turnos.claim.failed",
+      "Claim turno failed",
+      {
+        reason: "not_first_available",
+        turnoId,
+        atencionId: current.atencionId,
+        firstAvailableTurnoId: firstAvailable?.id ?? null,
+        firstAvailableNumero: firstAvailable?.numero ?? null,
+        requestedNumero: current.numero,
+      },
+      { entity: "Turno", id: String(turnoId) },
+    )
+    throw new ConflictError(
+      "Debes tomar primero el turno disponible más antiguo de esta atención",
+    )
+  }
+
   const existing = await turnoRepository.findExistingTurnoForGuia({
     atencionId: current.atencionId,
     guiaId: actorGuiaId,
@@ -157,6 +180,16 @@ export async function claimTurnoUsecase(req: Request, turnoId: number, actorUser
 
   try {
     const updated = await turnoRepository.transaction(async (tx) => {
+      const firstAvailableInTx = await turnoRepository.findFirstAvailableTurnoForAtencion(
+        current.atencionId,
+        tx,
+      )
+      if (!firstAvailableInTx || firstAvailableInTx.id !== turnoId) {
+        throw new ConflictError(
+          "Debes tomar primero el turno disponible más antiguo de esta atención",
+        )
+      }
+
       const result = await turnoRepository.claimIfStillAvailable({ turnoId, guiaId: actorGuiaId }, tx)
 
       if (result.count !== 1) {
