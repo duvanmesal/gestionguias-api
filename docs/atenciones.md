@@ -198,6 +198,9 @@ crear o editar la atención y se invalida al cancelar o cerrar.
 
 `POST /atenciones/:id/claim`
 
+Este es el flujo principal del reclamo en modo `MANUAL_RECLAMO`. Asigna el
+primer turno disponible de la atención sin que el guía deba conocer su id.
+
 Reglas:
 
 - Solo rol `GUIA`.
@@ -212,6 +215,24 @@ Reglas:
 - Toma el primer turno `AVAILABLE` por `numero ASC`.
 - Valida que el turno candidato no se solape con otros turnos `ASSIGNED` o `IN_PROGRESS` del guía.
 - Usa transacción y reintentos limitados para manejar concurrencia.
+
+Mensajes de negocio observables (texto en español, devueltos como `error.message`):
+
+- `"El modo FIFO está activo. Los turnos se asignan automáticamente."`
+- `"El usuario autenticado no está registrado como guía"`
+- `"Tu cuenta de guía está inactiva"`
+- `"Debes marcarte disponible para tomar un turno"`
+- `"No puedes tomar turno porque tienes una penalización pendiente"`
+- `"Ya tienes un turno en curso. Finalízalo antes de tomar otro."`
+- `"Ya tienes un turno asignado en esta atención"`
+- `"Ya tienes un turno asignado en ese horario en otra atención"`
+- `"No hay cupos disponibles para esta atención"`
+- `"No fue posible tomar cupo: alta concurrencia, intenta de nuevo"`
+
+> `POST /turnos/:id/claim` queda como variante para reclamar un turno
+> específico, pero solo permite hacerlo cuando el turno indicado es el primer
+> disponible de su atención. Web y mobile usan este endpoint únicamente cuando
+> el guía abre el detalle de un turno específico. Ver `docs/turnos.md`.
 
 ## Eventos en tiempo real
 

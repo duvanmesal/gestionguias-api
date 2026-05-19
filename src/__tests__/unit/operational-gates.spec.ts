@@ -14,6 +14,7 @@ import { updateRecaladaUsecase } from "../../modules/recaladas/_usecases/update.
 import { turnoRepository } from "../../modules/turnos/_data/turno.repository"
 import { cancelTurnoUsecase } from "../../modules/turnos/_usecases/cancel.usecase"
 import { checkOutTurnoUsecase } from "../../modules/turnos/_usecases/checkOut.usecase"
+import { claimTurnoUsecase } from "../../modules/turnos/_usecases/claim.usecase"
 
 const req = { headers: {}, method: "PATCH", originalUrl: "/test" } as Request
 
@@ -206,5 +207,77 @@ describe("operational guards", () => {
       ConflictError,
     )
     expect(findActive).not.toHaveBeenCalled()
+  })
+
+  it("rejects POST /turnos/:id/claim when the turno is not the first available of its atencion", async () => {
+    jest
+      .spyOn(operationalConfigService, "getTurnoAssignmentMode")
+      .mockResolvedValue(TurnoAssignmentMode.MANUAL_RECLAMO)
+    jest.spyOn(turnoRepository, "findGuiaByUserId").mockResolvedValue({
+      id: "guia-1",
+      disponibleParaTurnos: true,
+      pendingPenalty: false,
+      disponibilidadUpdatedAt: new Date(),
+      usuario: { id: "user-1", activo: true },
+    } as any)
+    jest.spyOn(turnoRepository, "findGateForOperacion").mockResolvedValue({
+      ...activeGate("AVAILABLE"),
+      id: 2,
+      numero: 2,
+    } as any)
+    jest.spyOn(turnoRepository, "findActiveForGuia").mockResolvedValue(null as any)
+    jest
+      .spyOn(turnoRepository, "findFirstAvailableTurnoForAtencion")
+      .mockResolvedValue({ id: 1, numero: 1 } as any)
+    const claim = jest.spyOn(turnoRepository, "claimIfStillAvailable")
+    const transaction = jest.spyOn(turnoRepository, "transaction")
+
+    await expect(claimTurnoUsecase(req, 2, "actor-1")).rejects.toBeInstanceOf(
+      ConflictError,
+    )
+    expect(claim).not.toHaveBeenCalled()
+    expect(transaction).not.toHaveBeenCalled()
+  })
+
+  it("allows POST /turnos/:id/claim when the turno is the first available of its atencion", async () => {
+    jest
+      .spyOn(operationalConfigService, "getTurnoAssignmentMode")
+      .mockResolvedValue(TurnoAssignmentMode.MANUAL_RECLAMO)
+    jest.spyOn(turnoRepository, "findGuiaByUserId").mockResolvedValue({
+      id: "guia-1",
+      disponibleParaTurnos: true,
+      pendingPenalty: false,
+      disponibilidadUpdatedAt: new Date(),
+      usuario: { id: "user-1", activo: true },
+    } as any)
+    jest.spyOn(turnoRepository, "findGateForOperacion").mockResolvedValue({
+      ...activeGate("AVAILABLE"),
+      id: 1,
+      numero: 1,
+    } as any)
+    jest.spyOn(turnoRepository, "findActiveForGuia").mockResolvedValue(null as any)
+    jest
+      .spyOn(turnoRepository, "findFirstAvailableTurnoForAtencion")
+      .mockResolvedValue({ id: 1, numero: 1 } as any)
+    jest.spyOn(turnoRepository, "findExistingTurnoForGuia").mockResolvedValue(null as any)
+    jest.spyOn(turnoRepository, "findOverlappingTurnoForGuia").mockResolvedValue(null as any)
+    jest
+      .spyOn(turnoRepository, "transaction")
+      .mockImplementation(async (fn: any) => fn({} as any))
+    jest
+      .spyOn(turnoRepository, "claimIfStillAvailable")
+      .mockResolvedValue({ count: 1 } as any)
+    jest.spyOn(turnoRepository, "findById").mockResolvedValue({
+      id: 1,
+      atencionId: 10,
+      status: "ASSIGNED",
+      atencion: {
+        recaladaId: 20,
+        recalada: { id: 20, codigoRecalada: "RA-2026-000020" },
+      },
+    } as any)
+
+    const result = await claimTurnoUsecase(req, 1, "actor-1")
+    expect(result).toMatchObject({ id: 1, status: "ASSIGNED" })
   })
 })
