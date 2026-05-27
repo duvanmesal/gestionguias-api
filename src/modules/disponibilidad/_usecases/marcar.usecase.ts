@@ -3,6 +3,7 @@ import { ConflictError, NotFoundError } from "../../../libs/errors"
 import { prisma } from "../../../prisma/client"
 import { disponibilidadRepository } from "../disponibilidad.repository"
 import { socketService } from "../../../core/socket/socket.service"
+import { penaltyService } from "../../penalties/penalty.service"
 
 export async function marcarDisponibilidadUsecase(req: Request, atencionId: number) {
   const actorUserId = req.user!.userId
@@ -50,19 +51,25 @@ export async function marcarDisponibilidadUsecase(req: Request, atencionId: numb
   })
   if (turnoAsignado) throw new ConflictError("Ya tienes un turno asignado en esta atención")
 
-  const penalizado = guia.pendingPenalty
-
-  const disp = await prisma.$transaction(async () => {
-    const created = await disponibilidadRepository.create({
-      atencionId,
-      guiaId: guia.id,
-      penalizado,
-    })
-    if (penalizado) {
-      await disponibilidadRepository.consumePenalty(guia.id)
-    }
-    return created
+  // Epica 6: bloquear si tiene penalización vigente; lazy-sync si está obsoleta.
+  const penaltyStatus = await penaltyService.isCurrentlyPenalized({
+    guiaId: guia.id,
+    pendingPenalty: guia.pendingPenalty,
   })
+  if (penaltyStatus.penalized) {
+    throw new ConflictError(
+      penaltyStatus.activePenalty
+        ? `No puedes marcar disponibilidad: tienes una penalización vigente hasta ${penaltyStatus.activePenalty.expiresAt.toISOString()}`
+        : "No puedes marcar disponibilidad porque tienes una penalización pendiente",
+    )
+  }
+
+  const disp = await disponibilidadRepository.create({
+    atencionId,
+    guiaId: guia.id,
+    penalizado: false,
+  })
+  const penalizado = false
 
   const queue = await disponibilidadRepository.findQueueByAtencion(atencionId)
   const position = queue.findIndex((d) => d.guiaId === guia.id) + 1

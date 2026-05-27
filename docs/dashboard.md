@@ -195,6 +195,11 @@ Reglas:
 - Si el usuario no tiene fila `Guia`, devuelve `nextTurno: null`, `activeTurno: null` y `atencionesDisponibles: []`.
 - `assignmentMode` refleja el modo global (`MANUAL_RECLAMO` o `FIFO_GLOBAL`).
 - `disponibilidad` refleja la disponibilidad global y penalización pendiente del guía.
+- Epica 6: `pendingPenalty` es un reflejo derivado de la entidad `GuiaPenalty`.
+  Los caminos del dashboard que evalúan elegibilidad aplican lazy sync: si el
+  flag está obsoleto (sin penalización vigente) lo bajan a `false`. La duración
+  de la penalización se configura globalmente en
+  `OperationalConfig.noShowPenaltyDurationHours` (default 48 h).
 - `activeTurno` representa turno en curso.
 - `nextTurno` representa el próximo turno asignado del guía.
 - `atencionesDisponibles` se limita con `availableAtencionesLimit`.

@@ -13,6 +13,7 @@ import { assertOperacionPermitida } from "../_domain/atencion.rules"
 import { auditFail, auditOk } from "../_shared/atencion.audit"
 import { emitTurnoRealtime } from "../../../core/socket/domain-events"
 import { operationalConfigService } from "../../operational-config/operational-config.service"
+import { penaltyService } from "../../penalties/penalty.service"
 
 export async function claimFirstAvailableTurnoUsecase(
   req: Request,
@@ -66,15 +67,30 @@ export async function claimFirstAvailableTurnoUsecase(
     throw new ConflictError("Debes marcarte disponible para tomar un turno")
   }
 
-  if (guia.pendingPenalty) {
+  // Epica 6: re-evaluar vigencia con la entidad GuiaPenalty (lazy sync).
+  const penaltyStatus = await penaltyService.isCurrentlyPenalized({
+    guiaId: guia.id,
+    pendingPenalty: guia.pendingPenalty,
+  })
+  if (penaltyStatus.penalized) {
     auditFail(
       req,
       "atenciones.claim.failed",
       "Claim turno failed",
-      { reason: "guia_pending_penalty", atencionId, actorUserId, guiaId: guia.id },
+      {
+        reason: "guia_pending_penalty",
+        atencionId,
+        actorUserId,
+        guiaId: guia.id,
+        penaltyExpiresAt: penaltyStatus.activePenalty?.expiresAt?.toISOString() ?? null,
+      },
       { entity: "Guia", id: guia.id },
     )
-    throw new ConflictError("No puedes tomar turno porque tienes una penalización pendiente")
+    throw new ConflictError(
+      penaltyStatus.activePenalty
+        ? `No puedes tomar turno: tienes una penalización vigente hasta ${penaltyStatus.activePenalty.expiresAt.toISOString()}`
+        : "No puedes tomar turno porque tienes una penalización pendiente",
+    )
   }
 
   const inProgress = await atencionRepository.findActiveForGuia(guia.id)

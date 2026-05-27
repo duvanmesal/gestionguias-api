@@ -41,4 +41,8 @@ export type GuideLookupResult = {
   disponibleParaTurnos: boolean
   disponibilidadUpdatedAt: Date | null
   pendingPenalty: boolean
+  /** Epica 6: expiración de la penalización vigente (null si no hay). */
+  penaltyExpiresAt: Date | null
+  /** Epica 6: motivo de la penalización vigente (null si no hay). */
+  penaltyReason: string | null
 }

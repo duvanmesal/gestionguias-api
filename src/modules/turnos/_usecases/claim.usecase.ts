@@ -13,6 +13,7 @@ import { assertOperacionPermitida } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
 import { emitTurnoRealtime } from "../../../core/socket/domain-events"
 import { operationalConfigService } from "../../operational-config/operational-config.service"
+import { penaltyService } from "../../penalties/penalty.service"
 
 export async function claimTurnoUsecase(req: Request, turnoId: number, actorUserId: string) {
   const assignmentMode = await operationalConfigService.getTurnoAssignmentMode()
@@ -44,15 +45,30 @@ export async function claimTurnoUsecase(req: Request, turnoId: number, actorUser
     )
     throw new ConflictError("Debes marcarte disponible para tomar un turno")
   }
-  if (guia.pendingPenalty) {
+  // Epica 6: re-evaluar vigencia (lazy sync).
+  const claimPenaltyStatus = await penaltyService.isCurrentlyPenalized({
+    guiaId: guia.id,
+    pendingPenalty: guia.pendingPenalty,
+  })
+  if (claimPenaltyStatus.penalized) {
     auditFail(
       req,
       "turnos.claim.failed",
       "Claim turno failed",
-      { reason: "guia_pending_penalty", turnoId, actorUserId, actorGuiaId: guia.id },
+      {
+        reason: "guia_pending_penalty",
+        turnoId,
+        actorUserId,
+        actorGuiaId: guia.id,
+        penaltyExpiresAt: claimPenaltyStatus.activePenalty?.expiresAt?.toISOString() ?? null,
+      },
       { entity: "Guia", id: guia.id },
     )
-    throw new ConflictError("No puedes tomar turno porque tienes una penalización pendiente")
+    throw new ConflictError(
+      claimPenaltyStatus.activePenalty
+        ? `No puedes tomar turno: tienes una penalización vigente hasta ${claimPenaltyStatus.activePenalty.expiresAt.toISOString()}`
+        : "No puedes tomar turno porque tienes una penalización pendiente",
+    )
   }
 
   const actorGuiaId = guia.id

@@ -1,5 +1,6 @@
 import { turnoRepository } from "../../modules/turnos/_data/turno.repository"
 import { NO_SHOW_GRACE_MS, AUTO_COMPLETE_MARGIN_MS } from "../../modules/turnos/_domain/turno.rules"
+import { penaltyService } from "../../modules/penalties/penalty.service"
 import { emitTurnoRealtime } from "../socket/domain-events"
 import { logger } from "../../libs/logger"
 
@@ -25,6 +26,26 @@ async function applyAutoNoShow() {
 
   const ids = expired.map((t) => t.id)
   await turnoRepository.bulkNoShow(ids, new Date())
+
+  // Epica 6 — aplicar la misma penalización persistente que el NO_SHOW manual.
+  // Sin actor humano: `createdById = null`.
+  for (const t of expired) {
+    if (!t.guiaId) continue
+    try {
+      await penaltyService.applyNoShowPenalty(undefined, {
+        guiaId: t.guiaId,
+        turnoId: t.id,
+        reason: "NO_SHOW automático por inasistencia tras ventana de gracia",
+        atencionId: t.atencionId,
+        actorUserId: null,
+      })
+    } catch (err) {
+      logger.error(
+        { err, turnoId: t.id, guiaId: t.guiaId },
+        "[Job] error aplicando penalización NO_SHOW automático",
+      )
+    }
+  }
 
   for (const t of expired) {
     emitTurnoRealtime("turno:noShow", { ...t, status: "NO_SHOW" }, { meta: { source: "job" } })
