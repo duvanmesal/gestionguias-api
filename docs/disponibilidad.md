@@ -120,7 +120,11 @@ Reglas:
 
 - Solo aplica para usuarios con fila `Guia`.
 - El usuario del guia debe estar activo.
-- Un guia con `pendingPenalty = true` no puede marcarse disponible.
+- Un guia con penalizacion vigente (`GuiaPenalty.expiresAt > now`) no puede
+  marcarse disponible ni marcar disponibilidad en una atencion. El indicador
+  derivado `pendingPenalty` refleja esta vigencia. Si el flag esta en `true`
+  pero ya no hay penalizacion vigente, los reads criticos lo bajan a `false`
+  (lazy sync) y la operacion procede. Ver [turnos.md](./turnos.md#penalizacion-persistente-y-reasignacion-tras-no_show-epica-6).
 - Al marcarse no disponible, `disponibilidadUpdatedAt` se limpia.
 - Al marcarse disponible en modo `FIFO_GLOBAL`, se intenta asignar cupos abiertos de forma asincrona.
 
@@ -134,7 +138,9 @@ En `MANUAL_RECLAMO`:
 
 - `POST /atenciones/:id/claim` y `POST /turnos/:id/claim` siguen siendo la via principal para guias.
 - El backend bloquea el reclamo si el guia no esta disponible globalmente.
-- El backend bloquea el reclamo si el guia tiene `pendingPenalty = true`.
+- El backend bloquea el reclamo si el guia tiene una penalización vigente
+  (`GuiaPenalty.expiresAt > now`). El error incluye la hora de expiración para
+  que la UI pueda mostrar cuándo podrá volver a reclamar.
 - No se asignan turnos automaticamente al marcar arribo, crear atencion o aumentar cupos.
 
 ## Modo FIFO global

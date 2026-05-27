@@ -200,7 +200,9 @@ Respuesta reducida:
       "activo": true,
       "disponibleParaTurnos": true,
       "disponibilidadUpdatedAt": "2026-05-16T01:52:00.000Z",
-      "pendingPenalty": false
+      "pendingPenalty": true,
+      "penaltyExpiresAt": "2026-05-18T03:25:00.000Z",
+      "penaltyReason": "No se presentó en el punto acordado"
     }
   ],
   "meta": null,
@@ -213,6 +215,11 @@ Reglas:
 - Solo devuelve usuarios con rol `GUIA`.
 - No expone documento, teléfono ni otros datos administrativos.
 - Expone disponibilidad global y penalización pendiente para filtros operativos.
+- Epica 6: `pendingPenalty` es un indicador **derivado** de `GuiaPenalty`. Si
+  un registro tiene `pendingPenalty = true` pero ya no hay penalización
+  vigente, el listado devuelve `false` y oculta `penaltyExpiresAt` /
+  `penaltyReason`. Cuando hay penalización vigente, ambos campos vienen
+  poblados y la UI los muestra (ej. "Hasta 18 may 22:25").
 - Límite interno de consulta: 500 registros.
 
 ## Listado administrativo

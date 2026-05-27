@@ -11,6 +11,7 @@ import { turnoRepository } from "../_data/turno.repository"
 import { assertOperacionPermitida } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
 import { emitTurnoRealtime } from "../../../core/socket/domain-events"
+import { penaltyService } from "../../penalties/penalty.service"
 
 export async function assignTurnoUsecase(
   req: Request,
@@ -63,15 +64,29 @@ export async function assignTurnoUsecase(
     throw new ConflictError("No se puede asignar: el guía no está disponible para turnos")
   }
 
-  if (guia.pendingPenalty) {
+  // Epica 6: re-evaluar vigencia con la entidad GuiaPenalty (lazy sync).
+  const assignPenaltyStatus = await penaltyService.isCurrentlyPenalized({
+    guiaId: guia.id,
+    pendingPenalty: guia.pendingPenalty,
+  })
+  if (assignPenaltyStatus.penalized) {
     auditFail(
       req,
       "turnos.assign.failed",
       "Assign turno failed",
-      { reason: "guia_pending_penalty", guiaId, turnoId },
+      {
+        reason: "guia_pending_penalty",
+        guiaId,
+        turnoId,
+        penaltyExpiresAt: assignPenaltyStatus.activePenalty?.expiresAt?.toISOString() ?? null,
+      },
       { entity: "Guia", id: guiaId },
     )
-    throw new ConflictError("No se puede asignar: el guía tiene una penalización pendiente")
+    throw new ConflictError(
+      assignPenaltyStatus.activePenalty
+        ? `No se puede asignar: el guía tiene una penalización vigente hasta ${assignPenaltyStatus.activePenalty.expiresAt.toISOString()}`
+        : "No se puede asignar: el guía tiene una penalización pendiente",
+    )
   }
 
   const inProgress = await turnoRepository.findActiveForGuia(guiaId)

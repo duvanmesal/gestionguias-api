@@ -7,6 +7,7 @@ export const OPERATIONAL_CONFIG_ID = "global"
 const operationalConfigSelect = {
   id: true,
   turnoAssignmentMode: true,
+  noShowPenaltyDurationHours: true,
   updatedById: true,
   createdAt: true,
   updatedAt: true,
@@ -27,6 +28,11 @@ export const operationalConfigRepository = {
     return config.turnoAssignmentMode
   },
 
+  async getNoShowPenaltyDurationHours() {
+    const config = await this.get()
+    return config.noShowPenaltyDurationHours
+  },
+
   updateTurnoAssignmentMode(mode: TurnoAssignmentMode, updatedById: string) {
     return prisma.operationalConfig.upsert({
       where: { id: OPERATIONAL_CONFIG_ID },
@@ -37,6 +43,22 @@ export const operationalConfigRepository = {
       },
       update: {
         turnoAssignmentMode: mode,
+        updatedById,
+      },
+      select: operationalConfigSelect,
+    })
+  },
+
+  updateNoShowPenaltyDurationHours(durationHours: number, updatedById: string) {
+    return prisma.operationalConfig.upsert({
+      where: { id: OPERATIONAL_CONFIG_ID },
+      create: {
+        id: OPERATIONAL_CONFIG_ID,
+        noShowPenaltyDurationHours: durationHours,
+        updatedById,
+      },
+      update: {
+        noShowPenaltyDurationHours: durationHours,
         updatedById,
       },
       select: operationalConfigSelect,

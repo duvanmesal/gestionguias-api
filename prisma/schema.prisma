@@ -144,6 +144,9 @@ model Usuario {
   turnosCreados    Turno[] @relation("TurnoCreatedBy")
   turnosCancelados Turno[] @relation("TurnoCanceledBy")
 
+  // Auditoría Penalizaciones
+  penalizacionesCreadas GuiaPenalty[] @relation("GuiaPenaltyCreatedBy")
+
   notificationDeliveries NotificationDelivery[]
   pushDeviceTokens       PushDeviceToken[]
 
@@ -294,6 +297,7 @@ model Guia {
   turnos           Turno[]
   disponibilidades Disponibilidad[]
   notificationDeliveries NotificationDelivery[]
+  penalizaciones   GuiaPenalty[]
 
   @@index([disponibleParaTurnos, disponibilidadUpdatedAt])
   @@index([pendingPenalty])
@@ -301,13 +305,45 @@ model Guia {
 }
 
 model OperationalConfig {
-  id                  String              @id @default("global")
-  turnoAssignmentMode TurnoAssignmentMode @default(MANUAL_RECLAMO)
-  updatedById         String?
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
+  id                          String              @id @default("global")
+  turnoAssignmentMode         TurnoAssignmentMode @default(MANUAL_RECLAMO)
+  // Duración (en horas) de la penalización aplicada al guía por NO_SHOW.
+  // Configurable por SUPERVISOR / SUPER_ADMIN. Default 48 horas.
+  noShowPenaltyDurationHours  Int                 @default(48)
+  updatedById                 String?
+  createdAt                   DateTime            @default(now())
+  updatedAt                   DateTime            @updatedAt
 
   @@map("operational_config")
+}
+
+/// Penalización persistente aplicada a un guía como consecuencia de un
+/// evento operativo (por ahora únicamente NO_SHOW). Tiene vigencia limitada
+/// definida por `expiresAt`. El campo `Guia.pendingPenalty` se sincroniza
+/// como indicador derivado: true mientras exista al menos una penalización
+/// con `expiresAt > now()`.
+model GuiaPenalty {
+  id        String   @id @default(cuid())
+  guiaId    String
+  turnoId   Int?
+  reason    String
+  motivo    String   @default("NO_SHOW")
+  startsAt  DateTime @default(now())
+  expiresAt DateTime
+  // Null cuando la penalización proviene del job automático (sin actor humano).
+  createdById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  guia      Guia     @relation(fields: [guiaId], references: [id], onDelete: Cascade)
+  turno     Turno?   @relation(fields: [turnoId], references: [id], onDelete: SetNull)
+  createdBy Usuario? @relation("GuiaPenaltyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([guiaId, expiresAt])
+  @@index([expiresAt])
+  @@index([turnoId])
+  @@map("guia_penalties")
 }
 
 model Supervisor {
@@ -497,6 +533,8 @@ model Turno {
 
   createdBy  Usuario  @relation("TurnoCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   canceledBy Usuario? @relation("TurnoCanceledBy", fields: [canceledById], references: [id], onDelete: SetNull)
+
+  penalizaciones GuiaPenalty[]
 
   // Reglas de integridad
   @@unique([atencionId, numero])

@@ -310,24 +310,46 @@ Reglas:
 }
 ```
 
-Reglas:
+Reglas (Epica 6):
 
 - Solo `SUPERVISOR` o `SUPER_ADMIN`.
 - La atención y recalada deben estar operables.
 - Solo se puede marcar desde `ASSIGNED`.
 - No se puede marcar antes de `fechaInicio`.
-- Agrega observación `NO_SHOW` y, si existe razón, `NO_SHOW: razón`.
+- **`reason` es obligatorio** (mínimo 3 caracteres, máximo 500). Antes de Epica 6
+  era opcional; ahora cualquier llamada sin motivo responde `400 BAD_REQUEST`.
+- Agrega observación `NO_SHOW: razón`.
 - Al aplicar, `status = NO_SHOW`.
 
-### Penalizacion y reasignacion tras NO_SHOW
+### Penalizacion persistente y reasignacion tras NO_SHOW (Epica 6)
 
 Despues de marcar el turno como `NO_SHOW`, el sistema ejecuta en segundo plano:
 
-1. **Penaliza al guia ausente**: escribe `pendingPenalty = true` en su fila `Guia`.
-2. **Notifica al guia**: emite `disponibilidad:penalizado` con mensaje explicativo.
-3. **Reasigna automaticamente solo en `FIFO_GLOBAL`**: busca al siguiente guia elegible por disponibilidad global, sin penalizacion y sin solapes. Si existe, le asigna el turno liberado y emite `turno:assigned`.
+1. **Crea una penalización persistente `GuiaPenalty`** con:
+   - `motivo = "NO_SHOW"`,
+   - `reason` = el motivo provisto,
+   - `startsAt = now`,
+   - `expiresAt = now + OperationalConfig.noShowPenaltyDurationHours * 1h`,
+   - `createdById` = supervisor que marcó el NO_SHOW (o `null` cuando lo aplica
+     el job automático).
+2. **Sincroniza `Guia.pendingPenalty = true`** (indicador derivado). Mientras la
+   penalización esté vigente, el guía no puede marcar disponibilidad, reclamar
+   turnos ni recibir asignación manual ni entrada en FIFO. Cuando la
+   penalización expire, los caminos calientes (`claim`, `assign`, `marcar
+   disponibilidad`, `dashboard`, listado de guías) ejecutan **lazy sync**:
+   bajan `pendingPenalty` a `false` cuando ya no hay penalización vigente.
+3. **Notifica al guía**: emite `disponibilidad:penalizado` con `expiresAt` y
+   `reason`.
+4. **Reasigna automáticamente solo en `FIFO_GLOBAL`**: busca al siguiente guía
+   elegible por disponibilidad global (sin penalización vigente y sin solapes).
+   Si existe, le asigna el turno liberado y emite `turno:assigned`.
 
-En `MANUAL_RECLAMO`, el sistema penaliza y notifica, pero no reasigna automaticamente. Ver [disponibilidad.md](./disponibilidad.md) para el flujo completo.
+En `MANUAL_RECLAMO`, el sistema penaliza y notifica, pero no reasigna
+automáticamente. Ver [disponibilidad.md](./disponibilidad.md) para el flujo completo.
+
+El **job automático** (`turno-automations`) usa el mismo servicio: cuando un
+turno `ASSIGNED` supera la ventana de gracia (`NO_SHOW_GRACE_MS`), pasa a
+`NO_SHOW` y crea la misma `GuiaPenalty` (con `createdById = null`).
 
 ## Gates operativos compartidos
 

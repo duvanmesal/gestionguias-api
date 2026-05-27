@@ -12,17 +12,38 @@ import { turnoRepository } from "../_data/turno.repository"
 import { assertOperacionPermitida, buildNoShowObservacion } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
 import { emitTurnoRealtime } from "../../../core/socket/domain-events"
-import { disponibilidadRepository } from "../../disponibilidad/disponibilidad.repository"
 import { autoAssignNextInQueue } from "../../disponibilidad/_usecases/autoAssign.usecase"
-import { socketService } from "../../../core/socket/socket.service"
 import { operationalConfigService } from "../../operational-config/operational-config.service"
+import { penaltyService } from "../../penalties/penalty.service"
 
+/**
+ * Epica 6 — Marcado NO_SHOW.
+ * - `reason` es obligatorio (mín. 3 caracteres). Se persiste en la
+ *   penalización y en la observación del turno.
+ * - Se crea una `GuiaPenalty` con vigencia calculada según
+ *   `OperationalConfig.noShowPenaltyDurationHours`.
+ * - `pendingPenalty` queda como indicador derivado sincronizado.
+ */
 export async function noShowTurnoUsecase(
   req: Request,
   turnoId: number,
   reason: string | undefined,
   actorUserId: string,
 ) {
+  const trimmedReason = reason?.trim() ?? ""
+  if (trimmedReason.length < 3) {
+    auditFail(
+      req,
+      "turnos.noShow.failed",
+      "NO_SHOW failed",
+      { reason: "missing_or_short_reason", turnoId },
+      { entity: "Turno", id: String(turnoId) },
+    )
+    throw new BadRequestError(
+      "Debes indicar un motivo de al menos 3 caracteres para marcar NO_SHOW",
+    )
+  }
+
   const current = await turnoRepository.findGateForOperacion(turnoId)
 
   if (!current) {
@@ -77,7 +98,7 @@ export async function noShowTurnoUsecase(
     )
   }
 
-  const extra = buildNoShowObservacion(reason)
+  const extra = buildNoShowObservacion(trimmedReason)
   const mergedObs = current.observaciones?.trim()
     ? `${current.observaciones.trim()} | ${extra}`
     : extra
@@ -89,13 +110,28 @@ export async function noShowTurnoUsecase(
       throw new ConflictError("No fue posible marcar NO_SHOW: el turno ya no cumple condiciones")
     }
 
+    // Penalización persistente con vigencia (Epica 6).
+    if (current.guiaId) {
+      await penaltyService.applyNoShowPenalty(
+        req,
+        {
+          guiaId: current.guiaId,
+          turnoId,
+          reason: trimmedReason,
+          atencionId: current.atencionId,
+          actorUserId,
+        },
+        tx,
+      )
+    }
+
     return turnoRepository.findById(turnoId, tx)
   })
 
   if (!updated) throw new BadRequestError("No fue posible marcar NO_SHOW")
 
   logger.info(
-    { turnoId, atencionId: updated.atencionId, guiaId: current.guiaId, actorUserId, reason },
+    { turnoId, atencionId: updated.atencionId, guiaId: current.guiaId, actorUserId, reason: trimmedReason },
     "[Turnos] no-show",
   )
 
@@ -107,7 +143,7 @@ export async function noShowTurnoUsecase(
       turnoId,
       atencionId: updated.atencionId,
       actorUserId,
-      reason: reason?.trim() ? reason.trim() : null,
+      reason: trimmedReason,
       status: updated.status,
       recaladaId: updated.atencion.recaladaId,
       codigoRecalada: updated.atencion.recalada.codigoRecalada,
@@ -117,16 +153,17 @@ export async function noShowTurnoUsecase(
 
   emitTurnoRealtime("turno:noShow", updated)
 
-  // Penalizar al guía ausente y notificarle
   if (current.guiaId) {
-    await disponibilidadRepository.setPenalty(current.guiaId)
-
+    // Notificación realtime al guía con la vigencia de la penalización.
     const guiaAusente = await turnoRepository.findGuiaById(current.guiaId)
-    if (guiaAusente?.usuario?.id) {
-      socketService.emitToGuia(guiaAusente.usuario.id, "disponibilidad:penalizado", {
+    const active = await penaltyService.findActiveForGuia(current.guiaId)
+    if (guiaAusente?.usuario?.id && active) {
+      penaltyService.notifyPenalized({
+        guiaUserId: guiaAusente.usuario.id,
         turnoId,
         atencionId: updated.atencionId,
-        mensaje: "Fuiste marcado como NO_SHOW. En la próxima atención irás al final de la cola.",
+        expiresAt: active.expiresAt,
+        reason: trimmedReason,
       })
     }
 

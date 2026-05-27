@@ -4,7 +4,10 @@ import { requireAuth } from "../libs/auth"
 import { requireSupervisor } from "../libs/rbac"
 import { validate } from "../libs/zod-mw"
 import { operationalConfigController } from "../modules/operational-config/operational-config.controller"
-import { updateTurnoAssignmentModeSchema } from "../modules/operational-config/operational-config.schemas"
+import {
+  updateTurnoAssignmentModeSchema,
+  updateNoShowPenaltyDurationSchema,
+} from "../modules/operational-config/operational-config.schemas"
 
 const router = Router()
 
@@ -17,6 +20,14 @@ router.patch(
   requireSupervisor,
   validate({ body: updateTurnoAssignmentModeSchema }),
   operationalConfigController.updateTurnoAssignmentMode.bind(operationalConfigController),
+)
+
+// Epica 6: duración de la penalización NO_SHOW (1–720 horas).
+router.patch(
+  "/no-show-penalty-duration",
+  requireSupervisor,
+  validate({ body: updateNoShowPenaltyDurationSchema }),
+  operationalConfigController.updateNoShowPenaltyDuration.bind(operationalConfigController),
 )
 
 export default router

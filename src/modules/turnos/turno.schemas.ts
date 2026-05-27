@@ -175,13 +175,13 @@ export const noShowTurnoParamsSchema = z.object({
   id: z.coerce.number().int().positive(),
 });
 
+// Epica 6: reason ahora es obligatorio para marcar NO_SHOW.
 export const noShowTurnoBodySchema = z.object({
   reason: z
     .string()
-    .min(1, "reason must not be empty")
-    .max(500, "reason too long")
-    .trim()
-    .optional(),
+    .min(3, "Debes indicar un motivo de al menos 3 caracteres")
+    .max(500, "El motivo no puede superar 500 caracteres")
+    .trim(),
 });
 export const cancelTurnoParamsSchema = z.object({
   id: z.coerce.number().int().positive(),
