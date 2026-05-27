@@ -12,6 +12,12 @@ import { assertOperacionPermitida, ENFORCE_FIFO_CHECKIN, CHECKIN_EARLY_WINDOW_MS
 import { auditFail, auditOk } from "../_shared/turno.audit"
 import { emitTurnoRealtime } from "../../../core/socket/domain-events"
 
+/**
+ * Epica 5 — Doble check-in.
+ * Esta operacion ya NO inicia el turno. Solo registra la solicitud del guia.
+ * El turno permanece en ASSIGNED y queda con `checkInRequestedAt`. Recien
+ * cuando el supervisor confirma, pasa a IN_PROGRESS.
+ */
 export async function checkInTurnoUsecase(req: Request, turnoId: number, actorUserId: string) {
   const actorGuiaId = await turnoRepository.getActorGuiaIdOrThrow(actorUserId)
 
@@ -21,7 +27,7 @@ export async function checkInTurnoUsecase(req: Request, turnoId: number, actorUs
     auditFail(
       req,
       "turnos.checkin.failed",
-      "Check-in failed",
+      "Check-in request failed",
       { reason: "not_found", turnoId },
       { entity: "Turno", id: String(turnoId) },
     )
@@ -43,18 +49,18 @@ export async function checkInTurnoUsecase(req: Request, turnoId: number, actorUs
     auditFail(
       req,
       "turnos.checkin.failed",
-      "Check-in failed",
+      "Check-in request failed",
       { reason: "invalid_status", turnoId, status: current.status },
       { entity: "Turno", id: String(turnoId) },
     )
-    throw new ConflictError("Solo se puede hacer check-in si el turno está ASSIGNED")
+    throw new ConflictError("Solo se puede solicitar check-in si el turno está ASSIGNED")
   }
 
   if (!current.guiaId) {
     auditFail(
       req,
       "turnos.checkin.failed",
-      "Check-in failed",
+      "Check-in request failed",
       { reason: "no_guia", turnoId },
       { entity: "Turno", id: String(turnoId) },
     )
@@ -65,11 +71,35 @@ export async function checkInTurnoUsecase(req: Request, turnoId: number, actorUs
     auditFail(
       req,
       "turnos.checkin.failed",
-      "Check-in failed",
+      "Check-in request failed",
       { reason: "guia_mismatch", turnoId, actorGuiaId, turnoGuiaId: current.guiaId },
       { entity: "Turno", id: String(turnoId) },
     )
-    throw new ConflictError("No puedes hacer check-in en un turno asignado a otro guía")
+    throw new ConflictError("No puedes solicitar check-in en un turno asignado a otro guía")
+  }
+
+  if (current.checkInRequestedAt && !current.checkInRejectedAt) {
+    auditFail(
+      req,
+      "turnos.checkin.failed",
+      "Check-in request failed",
+      { reason: "already_pending", turnoId },
+      { entity: "Turno", id: String(turnoId) },
+    )
+    throw new ConflictError("Ya existe una solicitud de check-in pendiente para este turno")
+  }
+
+  if (current.checkInRejectedAt) {
+    auditFail(
+      req,
+      "turnos.checkin.failed",
+      "Check-in request failed",
+      { reason: "already_rejected", turnoId },
+      { entity: "Turno", id: String(turnoId) },
+    )
+    throw new ConflictError(
+      "La solicitud anterior fue rechazada por el supervisor. Contacta a operaciones.",
+    )
   }
 
   const now = new Date()
@@ -78,12 +108,12 @@ export async function checkInTurnoUsecase(req: Request, turnoId: number, actorUs
     auditFail(
       req,
       "turnos.checkin.failed",
-      "Check-in failed",
+      "Check-in request failed",
       { reason: "too_early", turnoId, fechaInicio: current.fechaInicio },
       { entity: "Turno", id: String(turnoId) },
     )
     throw new BadRequestError(
-      "Demasiado temprano para hacer check-in (más de 30 minutos antes del inicio del turno)",
+      "Demasiado temprano para solicitar check-in (más de 30 minutos antes del inicio del turno)",
     )
   }
 
@@ -91,7 +121,7 @@ export async function checkInTurnoUsecase(req: Request, turnoId: number, actorUs
     auditFail(
       req,
       "turnos.checkin.failed",
-      "Check-in failed",
+      "Check-in request failed",
       { reason: "past_fin", turnoId, fechaFin: current.fechaFin },
       { entity: "Turno", id: String(turnoId) },
     )
@@ -110,49 +140,56 @@ export async function checkInTurnoUsecase(req: Request, turnoId: number, actorUs
       auditFail(
         req,
         "turnos.checkin.failed",
-        "Check-in failed",
+        "Check-in request failed",
         { reason: "fifo_blocked", turnoId, prevPendingNumero: prevPending.numero },
         { entity: "Turno", id: String(turnoId) },
       )
       throw new ConflictError(
-        "No puedes hacer check-in aún: hay un turno anterior pendiente (FIFO)",
+        "No puedes solicitar check-in aún: hay un turno anterior pendiente (FIFO)",
       )
     }
   }
 
   const updated = await turnoRepository.transaction(async (tx) => {
-    const result = await turnoRepository.checkInIfStillAssigned({ turnoId, guiaId: actorGuiaId, now }, tx)
+    const result = await turnoRepository.requestCheckInIfStillAssigned(
+      { turnoId, guiaId: actorGuiaId, now },
+      tx,
+    )
 
     if (result.count !== 1) {
-      throw new ConflictError("No fue posible hacer check-in: el turno ya no cumple condiciones")
+      throw new ConflictError(
+        "No fue posible registrar la solicitud de check-in: el turno ya no cumple condiciones",
+      )
     }
 
     return turnoRepository.findById(turnoId, tx)
   })
 
-  if (!updated) throw new BadRequestError("No fue posible hacer check-in")
+  if (!updated) throw new BadRequestError("No fue posible registrar la solicitud de check-in")
 
   logger.info(
     { turnoId, atencionId: updated.atencionId, guiaId: actorGuiaId, actorUserId },
-    "[Turnos] check-in",
+    "[Turnos] check-in requested",
   )
 
   auditOk(
     req,
-    "turnos.checkin.success",
-    "Turno check-in",
+    "turnos.checkin.requested",
+    "Turno check-in solicitado",
     {
       turnoId,
       atencionId: updated.atencionId,
       guiaId: actorGuiaId,
       actorUserId,
-      checkInAt: now.toISOString(),
+      checkInRequestedAt: now.toISOString(),
       status: updated.status,
     },
     { entity: "Turno", id: String(turnoId) },
   )
 
-  emitTurnoRealtime("turno:checkedIn", updated)
+  emitTurnoRealtime("turno:checkInRequested", updated, {
+    meta: { checkInRequestedAt: now.toISOString() },
+  })
 
   return updated
 }

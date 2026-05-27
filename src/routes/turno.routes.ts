@@ -20,6 +20,10 @@ import {
   noShowTurnoBodySchema,
   cancelTurnoParamsSchema,
   cancelTurnoBodySchema,
+  confirmCheckInParamsSchema,
+  rejectCheckInParamsSchema,
+  rejectCheckInBodySchema,
+  listPendingCheckInsQuerySchema,
 } from "../modules/turnos/turno.schemas";
 
 const router = Router();
@@ -63,6 +67,18 @@ router.get("/me/next", requireGuia, TurnoController.getNextMe);
  * Auth: GUIA
  */
 router.get("/me/active", requireGuia, TurnoController.getActiveMe);
+
+/**
+ * GET /turnos/check-ins/pending
+ * Listado de check-ins pendientes de confirmacion (Epica 5)
+ * Auth: SUPERVISOR / SUPER_ADMIN
+ */
+router.get(
+  "/check-ins/pending",
+  requireSupervisor,
+  validate({ query: listPendingCheckInsQuerySchema }),
+  TurnoController.listPendingCheckIns,
+);
 
 /**
  * GET /turnos/:id
@@ -116,7 +132,9 @@ router.patch(
 
 /**
  * PATCH /turnos/:id/check-in
- * Marca inicio oficial del turno (check-in)
+ * Solicita el check-in del guia (Epica 5).
+ * Ya no inicia oficialmente el turno; registra `checkInRequestedAt` y deja
+ * el turno en ASSIGNED pendiente de confirmacion por supervisor.
  * Auth: GUIA
  */
 router.patch(
@@ -124,6 +142,31 @@ router.patch(
   requireGuia,
   validate({ params: checkInTurnoParamsSchema }),
   TurnoController.checkIn,
+);
+
+/**
+ * PATCH /turnos/:id/check-in/confirm
+ * Confirma la solicitud de check-in del guia. El turno pasa a IN_PROGRESS
+ * y se materializa `checkInAt`.
+ * Auth: SUPERVISOR / SUPER_ADMIN
+ */
+router.patch(
+  "/:id/check-in/confirm",
+  requireSupervisor,
+  validate({ params: confirmCheckInParamsSchema }),
+  TurnoController.confirmCheckIn,
+);
+
+/**
+ * PATCH /turnos/:id/check-in/reject
+ * Rechaza la solicitud de check-in del guia. El turno queda en ASSIGNED.
+ * Auth: SUPERVISOR / SUPER_ADMIN
+ */
+router.patch(
+  "/:id/check-in/reject",
+  requireSupervisor,
+  validate({ params: rejectCheckInParamsSchema, body: rejectCheckInBodySchema }),
+  TurnoController.rejectCheckIn,
 );
 
 /**
