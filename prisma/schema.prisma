@@ -80,6 +80,16 @@ enum AtencionOperativeStatus {
 enum NotificationType {
   RECALADA_CREATED
   ATENCION_CREATED
+  ATENCION_AVAILABLE_FOR_GUIDE
+  TURNO_CLAIMED
+  TURNO_ASSIGNED
+  TURNO_CANCELED
+  TURNO_CHANGED
+  CHECKIN_REMINDER
+  GUIDE_PENALIZED
+  SUPERVISOR_CHECKIN_PENDING
+  RECALADA_OVERDUE_NO_DEPART
+  ATENCION_NEAR_WITH_FREE_TURNOS
 }
 
 enum NotificationChannel {
@@ -571,8 +581,9 @@ model NotificationDelivery {
   userId String
   guiaId String?
 
-  recaladaId Int
+  recaladaId Int?
   atencionId Int?
+  turnoId    Int?
 
   notificationId String
   title          String
@@ -590,11 +601,13 @@ model NotificationDelivery {
   usuario Usuario @relation(fields: [userId], references: [id], onDelete: Cascade)
   guia    Guia?   @relation(fields: [guiaId], references: [id], onDelete: SetNull)
 
+  @@unique([userId, channel, notificationId], name: "uniq_user_channel_notification")
   @@index([status, nextRetryAt])
   @@index([type, channel])
   @@index([userId, status])
   @@index([recaladaId])
   @@index([atencionId])
+  @@index([turnoId])
   @@map("notification_deliveries")
 }
 

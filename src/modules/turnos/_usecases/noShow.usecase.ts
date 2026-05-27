@@ -159,7 +159,9 @@ export async function noShowTurnoUsecase(
     const active = await penaltyService.findActiveForGuia(current.guiaId)
     if (guiaAusente?.usuario?.id && active) {
       penaltyService.notifyPenalized({
+        guiaId: current.guiaId,
         guiaUserId: guiaAusente.usuario.id,
+        penaltyId: active.id,
         turnoId,
         atencionId: updated.atencionId,
         expiresAt: active.expiresAt,

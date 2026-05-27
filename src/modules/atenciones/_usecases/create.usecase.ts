@@ -9,6 +9,7 @@ import { atencionRepository } from "../_data/atencion.repository"
 import { emitAtencionRealtime } from "../../../core/socket/domain-events"
 import { socketService } from "../../../core/socket/socket.service"
 import { enqueueAtencionCreatedNotification } from "../../notifications/notification.service"
+import { notifyAtencionAvailableToGuides } from "../../notifications/operational-notifications"
 import {
   atencionCapacityCache,
   toCachedAtencionCapacity,
@@ -266,6 +267,22 @@ export async function createAtencionUsecase(
         notificationId,
       },
       "[Atenciones] failed to enqueue created notification",
+    )
+  })
+
+  // Epica 7 — Notificar atención disponible a guías elegibles (push + socket).
+  notifyAtencionAvailableToGuides({
+    atencionId: created.id,
+    recaladaId: created.recaladaId,
+    codigoRecalada: created.recalada?.codigoRecalada ?? recalada.codigoRecalada,
+    fechaInicio: created.fechaInicio ?? null,
+    fechaFin: created.fechaFin ?? null,
+    turnosTotal: created.turnosTotal,
+    turnosDisponibles: created.turnosTotal,
+  }).catch((err) => {
+    logger.error(
+      { err, atencionId: created.id, recaladaId: created.recaladaId },
+      "[Atenciones] failed to notify available-for-guides",
     )
   })
 
