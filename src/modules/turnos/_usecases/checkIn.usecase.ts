@@ -11,6 +11,8 @@ import { turnoRepository } from "../_data/turno.repository"
 import { assertOperacionPermitida, ENFORCE_FIFO_CHECKIN, CHECKIN_EARLY_WINDOW_MS } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
 import { emitTurnoRealtime } from "../../../core/socket/domain-events"
+import { notifySupervisorCheckInPending } from "../../notifications/operational-notifications"
+import { prisma } from "../../../prisma/client"
 
 /**
  * Epica 5 — Doble check-in.
@@ -190,6 +192,26 @@ export async function checkInTurnoUsecase(req: Request, turnoId: number, actorUs
   emitTurnoRealtime("turno:checkInRequested", updated, {
     meta: { checkInRequestedAt: now.toISOString() },
   })
+
+  // Epica 7 — Notificar a supervisores (fire & forget, no bloquea respuesta).
+  void (async () => {
+    try {
+      const actorUser = await prisma.usuario.findUnique({
+        where: { id: actorUserId },
+        select: { nombres: true, apellidos: true },
+      })
+      const guiaName = actorUser ? `${actorUser.nombres} ${actorUser.apellidos}`.trim() : null
+      await notifySupervisorCheckInPending({
+        turnoId: updated.id,
+        atencionId: updated.atencionId,
+        recaladaId: updated.atencion?.recaladaId ?? null,
+        codigoRecalada: updated.atencion?.recalada?.codigoRecalada ?? null,
+        guiaName,
+      })
+    } catch (err) {
+      logger.error({ err, turnoId: updated.id }, "[Turnos] notify supervisor check-in pending failed")
+    }
+  })()
 
   return updated
 }

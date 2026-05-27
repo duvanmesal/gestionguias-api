@@ -10,6 +10,7 @@ import { emitTurnoRealtime } from "../../../core/socket/domain-events"
 import { logger } from "../../../libs/logger"
 import { prisma } from "../../../prisma/client"
 import { operationalConfigService } from "../../operational-config/operational-config.service"
+import { notifyTurnoAssignedToGuide } from "../../notifications/operational-notifications"
 
 type AutoAssignResult = {
   assigned: number
@@ -182,6 +183,18 @@ export async function assignForAtencion(atencionId: number): Promise<AutoAssignR
     const turnoActualizado = await fetchTurnoForRealtime(turno.id)
     if (turnoActualizado) {
       emitTurnoRealtime("turno:assigned", turnoActualizado, { guiaUserId: next.usuarioId })
+      notifyTurnoAssignedToGuide({
+        turnoId: turnoActualizado.id,
+        atencionId: turnoActualizado.atencionId,
+        recaladaId: turnoActualizado.atencion?.recaladaId ?? null,
+        codigoRecalada: null,
+        guiaUserId: next.usuarioId,
+        guiaId: next.id,
+        fechaInicio: turnoActualizado.fechaInicio ?? null,
+        fechaFin: turnoActualizado.fechaFin ?? null,
+      }).catch((err) =>
+        logger.error({ err, turnoId: turnoActualizado.id }, "[Disponibilidad] notify FIFO assign failed"),
+      )
     }
   }
 
@@ -255,6 +268,18 @@ export async function autoAssignNextInQueue(
   const turnoActualizado = await fetchTurnoForRealtime(turnoId)
   if (turnoActualizado) {
     emitTurnoRealtime("turno:assigned", turnoActualizado, { guiaUserId: next.usuarioId })
+    notifyTurnoAssignedToGuide({
+      turnoId: turnoActualizado.id,
+      atencionId: turnoActualizado.atencionId,
+      recaladaId: turnoActualizado.atencion?.recaladaId ?? null,
+      codigoRecalada: null,
+      guiaUserId: next.usuarioId,
+      guiaId: next.id,
+      fechaInicio: turnoActualizado.fechaInicio ?? null,
+      fechaFin: turnoActualizado.fechaFin ?? null,
+    }).catch((err) =>
+      logger.error({ err, turnoId }, "[Disponibilidad] notify FIFO reassign failed"),
+    )
   }
 
   logger.info(

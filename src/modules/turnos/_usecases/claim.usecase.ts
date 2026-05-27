@@ -14,6 +14,7 @@ import { auditFail, auditOk } from "../_shared/turno.audit"
 import { emitTurnoRealtime } from "../../../core/socket/domain-events"
 import { operationalConfigService } from "../../operational-config/operational-config.service"
 import { penaltyService } from "../../penalties/penalty.service"
+import { notifyTurnoClaimedToGuide } from "../../notifications/operational-notifications"
 
 export async function claimTurnoUsecase(req: Request, turnoId: number, actorUserId: string) {
   const assignmentMode = await operationalConfigService.getTurnoAssignmentMode()
@@ -239,6 +240,20 @@ export async function claimTurnoUsecase(req: Request, turnoId: number, actorUser
     )
 
     emitTurnoRealtime("turno:claimed", updated)
+
+    // Epica 7 — Notificar al guía que tomó el turno.
+    notifyTurnoClaimedToGuide({
+      turnoId: updated.id,
+      atencionId: updated.atencionId,
+      recaladaId: updated.atencion?.recaladaId ?? null,
+      codigoRecalada: updated.atencion?.recalada?.codigoRecalada ?? null,
+      guiaUserId: actorUserId,
+      guiaId: actorGuiaId,
+      fechaInicio: updated.fechaInicio ?? null,
+      fechaFin: updated.fechaFin ?? null,
+    }).catch((err) =>
+      logger.error({ err, turnoId: updated.id }, "[Turnos] notify claim push failed"),
+    )
 
     return updated
   } catch (err: any) {

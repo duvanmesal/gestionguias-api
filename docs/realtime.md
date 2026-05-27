@@ -126,6 +126,40 @@ Cuando una atencion cancelada afecta turnos asignados, tambien se emite `turno:c
 | `catalog:buque:removed` | `admins`, `supervisors` | Refrescar buques. |
 | `catalog:buque:bulkChanged` | `admins`, `supervisors` | Refrescar buques. |
 
+### Notificaciones operativas (Epica 7)
+
+Estos eventos viajan **en paralelo** a los eventos de dominio (`turno:*`,
+`atencion:*`, etc.). Los eventos de dominio sirven para invalidar cache y
+sincronizar listas; los `notif:*` están pensados para mostrar **toasts**
+accionables al usuario y se respaldan con un push mobile equivalente (mismo
+`notificationId` para deduplicar).
+
+| Evento | Destinos | Tipo enum | Payload base |
+| --- | --- | --- | --- |
+| `notif:atencion:available` | `guia:{userId}` de guías activos + disponibles + sin penalización vigente | `ATENCION_AVAILABLE_FOR_GUIDE` | `notificationId`, `route`, `title`, `body`, `atencionId`, `recaladaId`, `codigoRecalada`, `fechaInicio`, `fechaFin`, `turnosTotal`, `turnosDisponibles` |
+| `notif:turno:claimed` | `guia:{userId}` del guía que reclamó | `TURNO_CLAIMED` | `notificationId`, `route`, `title`, `body`, `turnoId`, `atencionId`, `recaladaId` |
+| `notif:turno:assigned` | `guia:{userId}` del guía asignado (manual y FIFO) | `TURNO_ASSIGNED` | Igual |
+| `notif:turno:canceled` | `guia:{userId}` del guía afectado | `TURNO_CANCELED` | Igual + `reason` |
+| `notif:turno:changed` | `guia:{userId}` del guía afectado | `TURNO_CHANGED` | Igual + `reason` (kind del cambio) |
+| `notif:turno:checkInReminder` | `guia:{userId}` | `CHECKIN_REMINDER` | Igual |
+| `notif:guide:penalized` | `guia:{userId}` del guía penalizado | `GUIDE_PENALIZED` | `notificationId`, `route`, `title`, `body`, `turnoId`, `atencionId`, `penaltyId`, `expiresAt`, `reason` |
+| `notif:supervisor:checkInPending` | `supervisors` | `SUPERVISOR_CHECKIN_PENDING` | `notificationId`, `route`, `title`, `body`, `turnoId`, `atencionId`, `recaladaId` |
+| `notif:recalada:overdue` | `supervisors` | `RECALADA_OVERDUE_NO_DEPART` | `notificationId`, `route`, `title`, `body`, `recaladaId`, `codigoRecalada`, `fechaSalida` |
+| `notif:atencion:nearWithFreeTurnos` | `supervisors` | `ATENCION_NEAR_WITH_FREE_TURNOS` | `notificationId`, `route`, `title`, `body`, `atencionId`, `recaladaId`, `fechaInicio`, `turnosDisponibles` |
+
+**Reglas:**
+
+- `notificationId` es la clave de deduplicación. Junto con `(userId, channel)`
+  forma índice único en `notification_deliveries`, por lo que el servidor usa
+  `skipDuplicates: true` al encolar push.
+- Atención disponible se filtra **server-side**: solo guías activos +
+  `disponibleParaTurnos = true` + sin `GuiaPenalty` vigente reciben el aviso.
+- Las alertas de supervisor (`recalada:overdue`, `atencion:nearWithFreeTurnos`,
+  `supervisor:checkInPending`) usan `notificationId` estable por entidad para
+  evitar tormentas si el job corre múltiples veces.
+- Cada payload incluye `route` (e.g. `/turnos/123`) para navegación profunda
+  desde el push mobile.
+
 ## Matriz cliente a queries
 
 | Familia evento | Web/mobile debe invalidar |
@@ -146,6 +180,12 @@ Cuando una atencion cancelada afecta turnos asignados, tambien se emite `turno:c
 | `invitation:*` | Invitaciones admin. |
 | `catalog:pais:*` | Listas, lookup y detalle de paises. |
 | `catalog:buque:*` | Listas, lookup y detalle de buques. |
+| `notif:atencion:available` | Toast success al guía. Refresca `atenciones` y dashboard. |
+| `notif:turno:*` | Toast info al guía. Refresca `turnos`, mis turnos y turno detalle. |
+| `notif:guide:penalized` | Toast warning. Refresca `me` y lookup de guías. |
+| `notif:supervisor:checkInPending` | Toast warning a supervisores. Refresca check-ins pendientes y dashboard. |
+| `notif:recalada:overdue` | Toast warning. Refresca recaladas y dashboard. |
+| `notif:atencion:nearWithFreeTurnos` | Toast warning. Refresca atenciones y dashboard. |
 
 ## Reglas UX
 

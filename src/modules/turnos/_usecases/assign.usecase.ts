@@ -12,6 +12,7 @@ import { assertOperacionPermitida } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
 import { emitTurnoRealtime } from "../../../core/socket/domain-events"
 import { penaltyService } from "../../penalties/penalty.service"
+import { notifyTurnoAssignedToGuide } from "../../notifications/operational-notifications"
 
 export async function assignTurnoUsecase(
   req: Request,
@@ -222,6 +223,22 @@ export async function assignTurnoUsecase(
     )
 
     emitTurnoRealtime("turno:assigned", updated)
+
+    // Epica 7 — Notificar al guía asignado.
+    if (guia.usuario?.id) {
+      notifyTurnoAssignedToGuide({
+        turnoId: updated.id,
+        atencionId: updated.atencionId,
+        recaladaId: updated.atencion?.recaladaId ?? null,
+        codigoRecalada: updated.atencion?.recalada?.codigoRecalada ?? null,
+        guiaUserId: guia.usuario.id,
+        guiaId,
+        fechaInicio: updated.fechaInicio ?? null,
+        fechaFin: updated.fechaFin ?? null,
+      }).catch((err) =>
+        logger.error({ err, turnoId: updated.id }, "[Turnos] notify assign push failed"),
+      )
+    }
 
     return updated
   } catch (err: any) {

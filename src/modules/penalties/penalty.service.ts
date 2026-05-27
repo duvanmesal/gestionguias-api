@@ -3,6 +3,7 @@ import type { Request } from "express"
 import { logsService } from "../../libs/logs/logs.service"
 import { logger } from "../../libs/logger"
 import { socketService } from "../../core/socket/socket.service"
+import { notifyGuidePenalized } from "../notifications/operational-notifications"
 
 import { operationalConfigService } from "../operational-config/operational-config.service"
 
@@ -160,10 +161,13 @@ export class PenaltyService {
   }
 
   /**
-   * Emite el evento realtime para informar al guía que fue penalizado.
+   * Emite el evento realtime y encola push para informar al guía que
+   * fue penalizado.
    */
   notifyPenalized(args: {
+    guiaId: string
     guiaUserId: string
+    penaltyId: string
     turnoId?: number | null
     atencionId?: number | null
     expiresAt: Date
@@ -176,6 +180,19 @@ export class PenaltyService {
       reason: args.reason,
       mensaje: "Fuiste penalizado por NO_SHOW. No podrás reclamar turnos hasta que la penalización expire.",
     })
+
+    // Epica 7 — Push notification dedupada por penaltyId.
+    notifyGuidePenalized({
+      guiaId: args.guiaId,
+      guiaUserId: args.guiaUserId,
+      turnoId: args.turnoId ?? null,
+      atencionId: args.atencionId ?? null,
+      penaltyId: args.penaltyId,
+      expiresAt: args.expiresAt,
+      reason: args.reason,
+    }).catch((err) =>
+      logger.error({ err, guiaUserId: args.guiaUserId, penaltyId: args.penaltyId }, "[Penalties] notify push failed"),
+    )
   }
 
   listHistoryForGuia(args: { guiaId: string; page?: number; pageSize?: number }, tx?: Tx) {

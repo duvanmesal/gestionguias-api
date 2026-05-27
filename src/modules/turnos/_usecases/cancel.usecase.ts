@@ -7,6 +7,7 @@ import { turnoRepository } from "../_data/turno.repository"
 import { assertOperacionPermitida } from "../_domain/turno.rules"
 import { auditFail, auditOk } from "../_shared/turno.audit"
 import { emitTurnoRealtime } from "../../../core/socket/domain-events"
+import { notifyTurnoCanceledToGuide } from "../../notifications/operational-notifications"
 
 export async function cancelTurnoUsecase(
   req: Request,
@@ -74,6 +75,23 @@ export async function cancelTurnoUsecase(
   )
 
   emitTurnoRealtime("turno:canceled", updated)
+
+  // Epica 7 — Notificar al guía afectado (si había uno asignado).
+  const previousGuiaUserId = current.guia?.usuario?.id ?? null
+  const previousGuiaId = current.guiaId ?? null
+  if (previousGuiaUserId && previousGuiaId) {
+    notifyTurnoCanceledToGuide({
+      turnoId: updated.id,
+      atencionId: updated.atencionId,
+      recaladaId: updated.atencion?.recaladaId ?? null,
+      codigoRecalada: updated.atencion?.recalada?.codigoRecalada ?? null,
+      guiaUserId: previousGuiaUserId,
+      guiaId: previousGuiaId,
+      reason: cancelReason?.trim() ? cancelReason.trim() : null,
+    }).catch((err) =>
+      logger.error({ err, turnoId: updated.id }, "[Turnos] notify cancel push failed"),
+    )
+  }
 
   return updated
 }
