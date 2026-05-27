@@ -15,6 +15,10 @@ import { cancelTurnoUsecase } from "./_usecases/cancel.usecase";
 import { checkInTurnoUsecase } from "./_usecases/checkIn.usecase";
 import { checkOutTurnoUsecase } from "./_usecases/checkOut.usecase";
 import { noShowTurnoUsecase } from "./_usecases/noShow.usecase";
+import { confirmCheckInUsecase } from "./_usecases/confirmCheckIn.usecase";
+import { rejectCheckInUsecase } from "./_usecases/rejectCheckIn.usecase";
+import { listPendingCheckInsUsecase } from "./_usecases/listPendingCheckIns.usecase";
+import type { ListPendingCheckInsQuery } from "./turno.schemas";
 
 import type { RolType } from "@prisma/client";
 
@@ -99,5 +103,22 @@ export class TurnoService {
     actorUserId: string,
   ) {
     return noShowTurnoUsecase(req, turnoId, reason, actorUserId);
+  }
+
+  static confirmCheckIn(req: Request, turnoId: number, actorUserId: string) {
+    return confirmCheckInUsecase(req, turnoId, actorUserId);
+  }
+
+  static rejectCheckIn(
+    req: Request,
+    turnoId: number,
+    reason: string,
+    actorUserId: string,
+  ) {
+    return rejectCheckInUsecase(req, turnoId, reason, actorUserId);
+  }
+
+  static listPendingCheckIns(req: Request, query: ListPendingCheckInsQuery) {
+    return listPendingCheckInsUsecase(req, query);
   }
 }

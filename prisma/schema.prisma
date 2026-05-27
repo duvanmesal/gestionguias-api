@@ -475,6 +475,14 @@ model Turno {
   checkInAt  DateTime?
   checkOutAt DateTime?
 
+  // Doble check-in (Epica 5): solicitud del guía + confirmación o rechazo del supervisor
+  checkInRequestedAt  DateTime?
+  checkInConfirmedAt  DateTime?
+  checkInConfirmedById String?
+  checkInRejectedAt   DateTime?
+  checkInRejectedById String?
+  checkInRejectReason String?
+
   // Auditoría
   createdById  String
   canceledAt   DateTime?
@@ -496,6 +504,7 @@ model Turno {
   @@index([atencionId])
   @@index([guiaId])
   @@index([status])
+  @@index([status, checkInRequestedAt])
   @@map("turnos")
 }
 

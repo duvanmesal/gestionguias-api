@@ -18,6 +18,10 @@ import type {
   ClaimTurnoParams,
   CancelTurnoBody,
   CancelTurnoParams,
+  ConfirmCheckInParams,
+  RejectCheckInParams,
+  RejectCheckInBody,
+  ListPendingCheckInsQuery,
 } from "./turno.schemas";
 
 export class TurnoController {
@@ -323,9 +327,9 @@ export class TurnoController {
         meta: {
           atencionId: item.atencionId,
           status: item.status,
-          checkInAt: item.checkInAt,
+          checkInRequestedAt: item.checkInRequestedAt,
         },
-        message: "Check-in turno response sent",
+        message: "Check-in request response sent",
       });
 
       res.status(200).json({ data: item, meta: null, error: null });
@@ -357,6 +361,110 @@ export class TurnoController {
           checkOutAt: item.checkOutAt,
         },
         message: "Check-out turno response sent",
+      });
+
+      res.status(200).json({ data: item, meta: null, error: null });
+      return;
+    } catch (err) {
+      next(err);
+      return;
+    }
+  }
+
+  static async listPendingCheckIns(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      if (!req.user?.userId)
+        throw new UnauthorizedError("Authentication required");
+
+      const query = req.query as unknown as ListPendingCheckInsQuery;
+      const result = await TurnoService.listPendingCheckIns(req, query);
+
+      logsService.audit(req, {
+        event: "turnos.checkin.pending.list.http_ok",
+        target: { entity: "Turno" },
+        meta: { returned: result.items.length, ...result.meta },
+        message: "List pending check-ins response sent",
+      });
+
+      res
+        .status(200)
+        .json({ data: result.items, meta: result.meta, error: null });
+      return;
+    } catch (err) {
+      next(err);
+      return;
+    }
+  }
+
+  static async confirmCheckIn(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      if (!req.user?.userId)
+        throw new UnauthorizedError("Authentication required");
+
+      const params = req.params as unknown as ConfirmCheckInParams;
+      const item = await TurnoService.confirmCheckIn(
+        req,
+        params.id,
+        req.user.userId,
+      );
+
+      logsService.audit(req, {
+        event: "turnos.checkin.confirm.http_ok",
+        target: { entity: "Turno", id: String(item.id) },
+        meta: {
+          atencionId: item.atencionId,
+          status: item.status,
+          checkInConfirmedAt: item.checkInConfirmedAt,
+          checkInAt: item.checkInAt,
+        },
+        message: "Confirm check-in response sent",
+      });
+
+      res.status(200).json({ data: item, meta: null, error: null });
+      return;
+    } catch (err) {
+      next(err);
+      return;
+    }
+  }
+
+  static async rejectCheckIn(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      if (!req.user?.userId)
+        throw new UnauthorizedError("Authentication required");
+
+      const params = req.params as unknown as RejectCheckInParams;
+      const body = req.body as RejectCheckInBody;
+
+      const item = await TurnoService.rejectCheckIn(
+        req,
+        params.id,
+        body.reason,
+        req.user.userId,
+      );
+
+      logsService.audit(req, {
+        event: "turnos.checkin.reject.http_ok",
+        target: { entity: "Turno", id: String(item.id) },
+        meta: {
+          atencionId: item.atencionId,
+          status: item.status,
+          checkInRejectedAt: item.checkInRejectedAt,
+          reason: body.reason,
+        },
+        message: "Reject check-in response sent",
       });
 
       res.status(200).json({ data: item, meta: null, error: null });

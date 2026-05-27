@@ -125,6 +125,41 @@ export const checkInTurnoParamsSchema = z.object({
 });
 
 /**
+ * PATCH /turnos/:id/check-in/confirm
+ * Body: none. Solo supervisor.
+ */
+export const confirmCheckInParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+/**
+ * PATCH /turnos/:id/check-in/reject
+ * Body: { reason: string } (obligatorio). Solo supervisor.
+ */
+export const rejectCheckInParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export const rejectCheckInBodySchema = z.object({
+  reason: z
+    .string()
+    .min(1, "reason is required")
+    .max(500, "reason too long")
+    .trim(),
+});
+
+/**
+ * GET /turnos/check-ins/pending
+ * Query: { atencionId?, recaladaId?, page?, pageSize? }
+ */
+export const listPendingCheckInsQuerySchema = z.object({
+  atencionId: z.coerce.number().int().positive().optional(),
+  recaladaId: z.coerce.number().int().positive().optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(20),
+});
+
+/**
  * PATCH /turnos/:id/check-out
  * Body: none
  */
@@ -176,6 +211,11 @@ export type UnassignTurnoBody = z.infer<typeof unassignTurnoBodySchema>;
 
 export type CheckInTurnoParams = z.infer<typeof checkInTurnoParamsSchema>;
 export type CheckOutTurnoParams = z.infer<typeof checkOutTurnoParamsSchema>;
+
+export type ConfirmCheckInParams = z.infer<typeof confirmCheckInParamsSchema>;
+export type RejectCheckInParams = z.infer<typeof rejectCheckInParamsSchema>;
+export type RejectCheckInBody = z.infer<typeof rejectCheckInBodySchema>;
+export type ListPendingCheckInsQuery = z.infer<typeof listPendingCheckInsQuerySchema>;
 
 export type NoShowTurnoParams = z.infer<typeof noShowTurnoParamsSchema>;
 export type NoShowTurnoBody = z.infer<typeof noShowTurnoBodySchema>;

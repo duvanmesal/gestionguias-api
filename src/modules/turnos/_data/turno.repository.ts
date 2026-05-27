@@ -104,6 +104,10 @@ export class TurnoRepository {
         fechaFin: true,
         checkInAt: true,
         checkOutAt: true,
+        checkInRequestedAt: true,
+        checkInConfirmedAt: true,
+        checkInRejectedAt: true,
+        checkInRejectReason: true,
         observaciones: true,
         guia: {
           select: {
@@ -243,11 +247,114 @@ export class TurnoRepository {
     })
   }
 
-  checkInIfStillAssigned(args: { turnoId: number; guiaId: string; now: Date }, tx: Tx) {
+  /**
+   * Doble check-in: el guía registra la solicitud (no inicia oficialmente).
+   * Solo aplica si el turno aún está ASSIGNED, sin solicitud previa pendiente.
+   */
+  requestCheckInIfStillAssigned(
+    args: { turnoId: number; guiaId: string; now: Date },
+    tx: Tx,
+  ) {
     return tx.turno.updateMany({
-      where: { id: args.turnoId, status: "ASSIGNED", guiaId: args.guiaId },
-      data: { checkInAt: args.now, status: "IN_PROGRESS" },
+      where: {
+        id: args.turnoId,
+        status: "ASSIGNED",
+        guiaId: args.guiaId,
+        checkInRequestedAt: null,
+        checkInConfirmedAt: null,
+      },
+      data: {
+        checkInRequestedAt: args.now,
+        checkInRejectedAt: null,
+        checkInRejectedById: null,
+        checkInRejectReason: null,
+      },
     })
+  }
+
+  /**
+   * Doble check-in: el supervisor confirma una solicitud pendiente.
+   * Solo aplica si hay solicitud y aún no fue confirmada/rechazada.
+   * Al confirmar se materializa el `checkInAt` con el momento de la solicitud
+   * y el turno pasa a IN_PROGRESS.
+   */
+  confirmCheckInIfStillPending(
+    args: { turnoId: number; supervisorUserId: string; now: Date },
+    tx: Tx,
+  ) {
+    return tx.turno.updateMany({
+      where: {
+        id: args.turnoId,
+        status: "ASSIGNED",
+        checkInRequestedAt: { not: null },
+        checkInConfirmedAt: null,
+        checkInRejectedAt: null,
+      },
+      data: {
+        status: "IN_PROGRESS",
+        checkInConfirmedAt: args.now,
+        checkInConfirmedById: args.supervisorUserId,
+        checkInAt: args.now,
+      },
+    })
+  }
+
+  /**
+   * Doble check-in: el supervisor rechaza una solicitud pendiente.
+   * El turno queda en ASSIGNED, listo para revisión, NO_SHOW o reasignación.
+   */
+  rejectCheckInIfStillPending(
+    args: {
+      turnoId: number
+      supervisorUserId: string
+      now: Date
+      reason: string
+    },
+    tx: Tx,
+  ) {
+    return tx.turno.updateMany({
+      where: {
+        id: args.turnoId,
+        status: "ASSIGNED",
+        checkInRequestedAt: { not: null },
+        checkInConfirmedAt: null,
+        checkInRejectedAt: null,
+      },
+      data: {
+        checkInRejectedAt: args.now,
+        checkInRejectedById: args.supervisorUserId,
+        checkInRejectReason: args.reason,
+      },
+    })
+  }
+
+  listPendingCheckIns(args: {
+    atencionId?: number
+    recaladaId?: number
+    skip: number
+    take: number
+  }): Promise<[number, TurnoDetail[]]> {
+    const where: Prisma.TurnoWhereInput = {
+      status: "ASSIGNED",
+      checkInRequestedAt: { not: null },
+      checkInConfirmedAt: null,
+      checkInRejectedAt: null,
+      ...(args.atencionId ? { atencionId: args.atencionId } : {}),
+      ...(args.recaladaId
+        ? { atencion: { recaladaId: args.recaladaId } }
+        : {}),
+    }
+
+    return prisma.$transaction([
+      prisma.turno.count({ where }),
+      prisma.turno.findMany({
+        where,
+        select: turnoSelect,
+        orderBy: [{ checkInRequestedAt: "asc" }, { atencionId: "asc" }, { numero: "asc" }],
+        skip: args.skip,
+        take: args.take,
+      }),
+    ])
   }
 
   checkOutIfStillInProgress(args: { turnoId: number; guiaId: string; now: Date }, tx: Tx) {

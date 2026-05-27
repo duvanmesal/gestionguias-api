@@ -13,11 +13,32 @@ Un turno es un cupo materializado dentro de una atención. Tiene número, ventan
 `TurnoStatus`:
 
 - `AVAILABLE`: cupo libre.
-- `ASSIGNED`: cupo asignado a un guía.
-- `IN_PROGRESS`: guía hizo check-in.
+- `ASSIGNED`: cupo asignado a un guía. Incluye también la sub-fase de **check-in pendiente**: cuando `checkInRequestedAt` está presente y ni `checkInConfirmedAt` ni `checkInRejectedAt` están registrados, el turno permanece en `ASSIGNED` esperando confirmación o rechazo del supervisor.
+- `IN_PROGRESS`: el supervisor confirmó el check-in del guía. `checkInAt` se materializa al momento de la confirmación.
 - `COMPLETED`: guía hizo check-out.
 - `CANCELED`: cupo cancelado.
 - `NO_SHOW`: guía no se presentó.
+
+## Doble check-in (Epica 5)
+
+El check-in se realiza dentro de la aplicación en dos pasos, sin dispositivos
+externos:
+
+1. El guía asignado solicita el check-in con `PATCH /turnos/:id/check-in`. El
+   turno permanece en `ASSIGNED` y se registra `checkInRequestedAt`.
+2. El supervisor consulta los pendientes con `GET /turnos/check-ins/pending` y:
+   - confirma con `PATCH /turnos/:id/check-in/confirm`: el turno pasa a
+     `IN_PROGRESS`, se materializa `checkInAt` con la hora de la confirmación
+     y se registran `checkInConfirmedAt` + `checkInConfirmedById`.
+   - rechaza con `PATCH /turnos/:id/check-in/reject` enviando `{ reason }`
+     (obligatorio): el turno permanece en `ASSIGNED` y se registran
+     `checkInRejectedAt`, `checkInRejectedById` y `checkInRejectReason`. En esta
+     épica el rechazo no genera `NO_SHOW` automáticamente ni habilita reintento
+     desde el guía; el supervisor puede liberar, marcar `NO_SHOW` (Épica 6) o
+     gestionar manualmente.
+3. El check-out solo es viable cuando el turno está en `IN_PROGRESS`. Mientras
+   el check-in esté pendiente, el endpoint de check-out rechaza la operación
+   con conflicto controlado.
 
 ## Reglas de acceso
 
@@ -26,8 +47,9 @@ Todas las rutas requieren autenticación.
 | Acción | Roles |
 | --- | --- |
 | Listado global | `SUPERVISOR`, `SUPER_ADMIN` |
-| Mis turnos, próximo, activo, claim, check-in, check-out | `GUIA` |
+| Mis turnos, próximo, activo, claim, check-in (solicitar), check-out | `GUIA` |
 | Detalle | `SUPERVISOR`, `SUPER_ADMIN`; `GUIA` solo si es su turno |
+| Confirmar/rechazar check-in, listar pendientes | `SUPERVISOR`, `SUPER_ADMIN` |
 | Assign, no-show, cancel | `SUPERVISOR`, `SUPER_ADMIN` |
 | Unassign | Ruta exige `GUIA`, pero el caso de uso soporta supervisor/super admin si el guard lo permite |
 
@@ -45,8 +67,11 @@ Nota: la ruta activa de `PATCH /turnos/:id/unassign` usa `requireGuia`; por eso,
 | `POST` | `/turnos/:id/claim` | El guía toma un turno específico. |
 | `PATCH` | `/turnos/:id/assign` | Supervisor asigna un turno a un guía. |
 | `PATCH` | `/turnos/:id/unassign` | Libera un turno asignado. |
-| `PATCH` | `/turnos/:id/check-in` | Inicia turno. |
-| `PATCH` | `/turnos/:id/check-out` | Completa turno. |
+| `PATCH` | `/turnos/:id/check-in` | Guía solicita check-in (Epica 5). No inicia el turno. |
+| `PATCH` | `/turnos/:id/check-in/confirm` | Supervisor confirma el check-in. El turno pasa a `IN_PROGRESS`. |
+| `PATCH` | `/turnos/:id/check-in/reject` | Supervisor rechaza el check-in. Requiere `reason`. |
+| `GET` | `/turnos/check-ins/pending` | Listado de check-ins pendientes (supervisor). |
+| `PATCH` | `/turnos/:id/check-out` | Completa turno. Requiere `IN_PROGRESS`. |
 | `PATCH` | `/turnos/:id/no-show` | Marca inasistencia. |
 | `PATCH` | `/turnos/:id/cancel` | Cancela turno disponible o asignado. |
 
@@ -193,7 +218,7 @@ Reglas:
 - No se puede cancelar `IN_PROGRESS`, `COMPLETED`, `CANCELED` ni `NO_SHOW`.
 - Esta regla preserva métricas de inasistencia y finalización.
 
-## Check-in
+## Check-in (solicitud del guía)
 
 `PATCH /turnos/:id/check-in`
 
@@ -204,10 +229,63 @@ Reglas:
 - Debe estar `ASSIGNED`.
 - Debe tener guía asignado.
 - El guía autenticado debe ser el guía del turno.
-- Se permite check-in hasta 30 minutos antes de `fechaInicio`.
-- No se permite check-in después de `fechaFin`.
+- Se permite la solicitud hasta 30 minutos antes de `fechaInicio`.
+- No se permite la solicitud después de `fechaFin`.
 - FIFO de check-in está desactivado actualmente (`ENFORCE_FIFO_CHECKIN = false`).
-- Al aplicar, `status = IN_PROGRESS` y se escribe `checkInAt`.
+- No debe existir solicitud pendiente previa ni una solicitud rechazada.
+- Al aplicar, el turno **permanece `ASSIGNED`** y se escribe `checkInRequestedAt`.
+  El turno solo pasa a `IN_PROGRESS` cuando el supervisor confirma el check-in.
+
+## Confirmar check-in (supervisor)
+
+`PATCH /turnos/:id/check-in/confirm`
+
+Reglas:
+
+- Solo `SUPERVISOR` o `SUPER_ADMIN`.
+- El turno debe existir y estar operable.
+- Debe estar `ASSIGNED` con `checkInRequestedAt` presente y sin
+  `checkInConfirmedAt` ni `checkInRejectedAt`.
+- Al aplicar, `status = IN_PROGRESS`, se escriben `checkInConfirmedAt`,
+  `checkInConfirmedById` y se materializa `checkInAt` con la hora de la
+  confirmación.
+
+## Rechazar check-in (supervisor)
+
+`PATCH /turnos/:id/check-in/reject`
+
+```json
+{
+  "reason": "El guía no estaba en el punto de encuentro"
+}
+```
+
+Reglas:
+
+- Solo `SUPERVISOR` o `SUPER_ADMIN`.
+- El turno debe existir y estar operable.
+- Debe estar `ASSIGNED` con `checkInRequestedAt` presente y sin
+  `checkInConfirmedAt` ni `checkInRejectedAt`.
+- `reason` es obligatorio (mínimo 1 carácter, máximo 500).
+- Al aplicar, el turno permanece `ASSIGNED` y se escriben
+  `checkInRejectedAt`, `checkInRejectedById` y `checkInRejectReason`.
+- El rechazo **no** genera `NO_SHOW` automáticamente; eso queda para Epica 6.
+- En esta épica no se permite reintento desde el guía después de un rechazo;
+  el supervisor decide la siguiente acción manual (liberar, marcar `NO_SHOW`,
+  reasignar).
+
+## Check-ins pendientes (supervisor)
+
+`GET /turnos/check-ins/pending`
+
+Query opcional:
+
+- `atencionId` — filtra por una atención.
+- `recaladaId` — filtra por una recalada.
+- `page`, `pageSize` — paginación estándar.
+
+Devuelve los turnos en `ASSIGNED` con `checkInRequestedAt` registrado y sin
+confirmación ni rechazo, ordenados por `checkInRequestedAt` ascendente.
 
 ## Check-out
 

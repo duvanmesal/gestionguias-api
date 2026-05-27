@@ -18,6 +18,13 @@ export const turnoSelect = {
   checkInAt: true,
   checkOutAt: true,
 
+  checkInRequestedAt: true,
+  checkInConfirmedAt: true,
+  checkInConfirmedById: true,
+  checkInRejectedAt: true,
+  checkInRejectedById: true,
+  checkInRejectReason: true,
+
   canceledAt: true,
   cancelReason: true,
   canceledById: true,
