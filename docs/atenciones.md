@@ -1,6 +1,6 @@
 # Atenciones
 
-Última revisión contra código: 2026-05-16.
+Última revisión contra código: 2026-06-04.
 
 Fuente principal: `src/routes/atenciones.routes.ts`, `src/modules/atenciones/*`, `src/modules/recaladas/*`, `prisma/schema.prisma`.
 
@@ -30,7 +30,7 @@ Todas las rutas requieren autenticación.
 | --- | --- |
 | Listar, detalle, turnos, summary | `GUIA`, `SUPERVISOR`, `SUPER_ADMIN` |
 | Claim de atención | `GUIA` |
-| Crear, editar, cancelar, cerrar | `SUPERVISOR`, `SUPER_ADMIN` |
+| Crear, editar, cancelar, cerrar, evaluar | `SUPERVISOR`, `SUPER_ADMIN` |
 
 ## Rutas
 
@@ -45,6 +45,7 @@ Todas las rutas requieren autenticación.
 | `PATCH` | `/atenciones/:id` | Edita planificación/cupo/estado administrativo. |
 | `PATCH` | `/atenciones/:id/cancel` | Cancela atención. |
 | `PATCH` | `/atenciones/:id/close` | Cierra atención. |
+| `PATCH` | `/atenciones/:id/evaluation` | Crea o actualiza evaluación de cierre. |
 
 ## Crear atención
 
@@ -154,13 +155,48 @@ Reglas:
 
 `PATCH /atenciones/:id/close`
 
+Body opcional compatible:
+
+```json
+{
+  "evaluation": {
+    "calificacion": 5,
+    "estadoFinal": "SATISFACTORIA",
+    "observaciones": "Operación cerrada sin novedades"
+  }
+}
+```
+
 Reglas:
 
 - Si ya está `CLOSED`, la operación es idempotente y devuelve la atención.
+- Si ya está `CLOSED` y se envía evaluación, la evaluación se crea o actualiza sin reabrir la atención.
 - No se puede cerrar si está `CANCELED`.
 - No se puede cerrar si la recalada está `CANCELED` o `DEPARTED`.
 - No se puede cerrar si existen turnos `AVAILABLE`, `ASSIGNED` o `IN_PROGRESS`.
 - Al cerrar, `operationalStatus = CLOSED`.
+- Si el body incluye `evaluation`, se guarda en la misma operación.
+
+## Evaluar atención
+
+`PATCH /atenciones/:id/evaluation`
+
+```json
+{
+  "calificacion": 4,
+  "estadoFinal": "CON_NOVEDADES",
+  "observaciones": "Se reportaron ajustes menores de operación"
+}
+```
+
+Reglas:
+
+- Solo `SUPERVISOR` y `SUPER_ADMIN`.
+- `calificacion` debe estar entre `1` y `5`.
+- `estadoFinal` acepta `SATISFACTORIA`, `CON_NOVEDADES` o `NO_SATISFACTORIA`.
+- La operación es upsert one-to-one por atención.
+- No se puede evaluar una atención cancelada.
+- Emite realtime `atencion:evaluation:updated`.
 
 ## Turnos de una atención
 

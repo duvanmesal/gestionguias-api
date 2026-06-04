@@ -18,6 +18,8 @@ export const recaladaSelect = {
 
   terminal: true,
   muelle: true,
+  puertoId: true,
+  muelleId: true,
   pasajerosEstimados: true,
   tripulacionEstimada: true,
   observaciones: true,
@@ -28,6 +30,10 @@ export const recaladaSelect = {
 
   buque: { select: { id: true, nombre: true } },
   paisOrigen: { select: { id: true, codigo: true, nombre: true } },
+  puerto: { select: { id: true, codigo: true, nombre: true, ciudad: true } },
+  muelleCatalogo: {
+    select: { id: true, codigo: true, nombre: true, capacidadCruceros: true },
+  },
   supervisor: {
     select: {
       id: true,

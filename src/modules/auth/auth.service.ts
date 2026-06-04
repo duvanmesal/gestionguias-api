@@ -34,6 +34,7 @@ import { verifyEmailRequestUsecase } from "./_usecases/verifyEmailRequest.usecas
 import { verifyEmailConfirmUsecase } from "./_usecases/verifyEmailConfirm.usecase";
 import { changePasswordUsecase } from "./_usecases/changePassword.usecase";
 
+// Fachada anti-desastre: todos saludan aqui antes de tocar auth.
 export class AuthService {
   // -------------------------
   // Sessions + Tokens

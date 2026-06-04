@@ -25,6 +25,7 @@ import { deleteRecaladaSafeUsecase } from "./_usecases/deleteSafe.usecase"
  * Mantiene la API pública estable para NO afectar routes/.
  */
 export class RecaladaService {
+  // Barcos entran, estados salen, todos fingimos calma.
   static create(req: Request, input: CreateRecaladaInput, actorUserId: string) {
     return createRecaladaUsecase(req, input, actorUserId)
   }
@@ -50,6 +51,7 @@ export class RecaladaService {
   }
 
   static depart(req: Request, id: number, departedAt: Date | undefined, actorUserId: string) {
+    // Si el barco ya se fue, por favor avisenle a la base de datos.
     return departRecaladaUsecase(req, id, departedAt, actorUserId)
   }
 

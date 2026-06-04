@@ -22,6 +22,17 @@ export class RecaladaRepository {
     return prisma.pais.findUnique({ where: { id }, select: { id: true } })
   }
 
+  findPuertoById(id: number) {
+    return prisma.puerto.findUnique({ where: { id }, select: { id: true } })
+  }
+
+  findMuelleById(id: number) {
+    return prisma.muelle.findUnique({
+      where: { id },
+      select: { id: true, puertoId: true },
+    })
+  }
+
   // -------------------------
   // Supervisor
   // -------------------------
@@ -85,6 +96,8 @@ export class RecaladaRepository {
       select: {
         id: true,
         buqueId: true,
+        puertoId: true,
+        muelleId: true,
         operationalStatus: true,
         fechaLlegada: true,
         fechaSalida: true,
@@ -201,6 +214,8 @@ export class RecaladaRepository {
           buqueId: args.input.buqueId,
           paisOrigenId: args.input.paisOrigenId,
           supervisorId: args.supervisorId,
+          puertoId: args.input.puertoId ?? null,
+          muelleId: args.input.muelleId ?? null,
 
           codigoRecalada: tempCode,
 

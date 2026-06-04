@@ -1,3 +1,4 @@
+// MORIRE
 import type { Request } from "express"
 
 import { logger } from "../../../libs/logger"
@@ -22,6 +23,7 @@ export async function confirmCheckInUsecase(
   turnoId: number,
   actorUserId: string,
 ) {
+  // Supervisor entra, el check-in deja de estar en modo Schrodinger.
   const current = await turnoRepository.findGateForOperacion(turnoId)
 
   if (!current) {
@@ -94,6 +96,7 @@ export async function confirmCheckInUsecase(
 
   const now = new Date()
 
+  // al decimo intento, por que hacerlo bien a la primera era demasiado pa este mundo.
   const updated = await turnoRepository.transaction(async (tx) => {
     const result = await turnoRepository.confirmCheckInIfStillPending(
       { turnoId, supervisorUserId: actorUserId, now },
@@ -136,3 +139,4 @@ export async function confirmCheckInUsecase(
 
   return updated
 }
+// NO MORI :D

@@ -79,6 +79,7 @@ Los jobs automaticos tambien emiten eventos de turno y agregan `source: "job"` e
 | `atencion:updated` | Igual | Igual |
 | `atencion:canceled` | Igual | Igual |
 | `atencion:closed` | Igual | Igual |
+| `atencion:evaluation:updated` | Igual | `atencionId`, `recaladaId`, `status`, `operationalStatus`, `evaluationId` |
 | `atencion:nueva` | `guias` (sala broadcast de todos los guias) | `notificationId`, `atencionId`, `recaladaId`, `fechaInicio`, `fechaFin`, `turnosTotal`, `descripcion` |
 
 - `atencion:nueva` se emite cuando un supervisor crea una atencion, para que todos los guias puedan reaccionar (toast, badge, actualizar lista de atenciones pendientes de disponibilidad).
@@ -125,6 +126,12 @@ Cuando una atencion cancelada afecta turnos asignados, tambien se emite `turno:c
 | `catalog:buque:updated` | `admins`, `supervisors` | Refrescar buques. |
 | `catalog:buque:removed` | `admins`, `supervisors` | Refrescar buques. |
 | `catalog:buque:bulkChanged` | `admins`, `supervisors` | Refrescar buques. |
+| `catalog:puerto:created` | `admins`, `supervisors` | Refrescar puertos, lookup de puertos y recaladas. |
+| `catalog:puerto:updated` | `admins`, `supervisors` | Refrescar puertos, lookup de puertos y recaladas. |
+| `catalog:puerto:removed` | `admins`, `supervisors` | Refrescar puertos, lookup de puertos y recaladas. |
+| `catalog:muelle:created` | `admins`, `supervisors` | Refrescar muelles, lookup de muelles y recaladas. |
+| `catalog:muelle:updated` | `admins`, `supervisors` | Refrescar muelles, lookup de muelles y recaladas. |
+| `catalog:muelle:removed` | `admins`, `supervisors` | Refrescar muelles, lookup de muelles y recaladas. |
 
 ### Notificaciones operativas (Epica 7)
 
@@ -168,6 +175,7 @@ accionables al usuario y se respaldan con un push mobile equivalente (mismo
 | `auth:sessionsChanged` | Sesiones del usuario. |
 | `turno:*` | Turnos, mis turnos, turno detalle, atencion detalle/turnos/resumen, recalada detalle y dashboard. |
 | `atencion:*` | Atenciones, atencion detalle/turnos/resumen, recalada detalle/atenciones y dashboard. |
+| `atencion:evaluation:updated` | Atencion detalle, atenciones, recalada detalle/atenciones y dashboard. |
 | `atencion:nueva` | Atenciones, recalada detalle/atenciones si aplica y dashboard. |
 | `disponibilidad:marcada` | Cola legacy de disponibilidad de la atencion activa (supervisor). Posicion propia del guia. |
 | `disponibilidad:globalChanged` | Disponibilidad global propia, lookup de guias, usuarios/me y dashboard. |
@@ -180,6 +188,8 @@ accionables al usuario y se respaldan con un push mobile equivalente (mismo
 | `invitation:*` | Invitaciones admin. |
 | `catalog:pais:*` | Listas, lookup y detalle de paises. |
 | `catalog:buque:*` | Listas, lookup y detalle de buques. |
+| `catalog:puerto:*` | Listas, lookup y detalle de puertos; recaladas que referencian puerto. |
+| `catalog:muelle:*` | Listas, lookup y detalle de muelles; recaladas que referencian muelle. |
 | `notif:atencion:available` | Toast success al guía. Refresca `atenciones` y dashboard. |
 | `notif:turno:*` | Toast info al guía. Refresca `turnos`, mis turnos y turno detalle. |
 | `notif:guide:penalized` | Toast warning. Refresca `me` y lookup de guías. |

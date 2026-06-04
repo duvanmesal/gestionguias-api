@@ -27,6 +27,7 @@ import type { RolType } from "@prisma/client";
  * Mantiene la API pública estable para NO afectar routes/.
  */
 export class TurnoService {
+  // Turnos: donde el FIFO mira a todos con cara de juez.
   static list(req: Request, query: ListTurnosQuery) {
     return listTurnosUsecase(req, query);
   }
@@ -106,6 +107,7 @@ export class TurnoService {
   }
 
   static confirmCheckIn(req: Request, turnoId: number, actorUserId: string) {
+    // Segunda confirmacion, porque confiar una sola vez era demasiado optimista.
     return confirmCheckInUsecase(req, turnoId, actorUserId);
   }
 

@@ -1,12 +1,12 @@
-# Catálogos: países y buques
+# Catálogos: países, buques, puertos y muelles
 
-Última revisión contra código: 2026-05-04.
+Última revisión contra código: 2026-06-04.
 
-Fuente principal: `src/routes/pais.routes.ts`, `src/routes/buque.routes.ts`, `src/modules/paises/*`, `src/modules/buques/*`.
+Fuente principal: `src/routes/pais.routes.ts`, `src/routes/buque.routes.ts`, `src/routes/puerto.routes.ts`, `src/routes/muelle.routes.ts`, `src/modules/paises/*`, `src/modules/buques/*`, `src/modules/puertos/*`, `src/modules/muelles/*`.
 
 ## Propósito
 
-Los catálogos soportan la operación de recaladas. `Pais` representa países de origen o relación con buques. `Buque` representa embarcaciones usadas por recaladas.
+Los catálogos soportan la operación de recaladas. `Pais` representa países de origen o relación con buques. `Buque` representa embarcaciones usadas por recaladas. `Puerto` y `Muelle` representan referencias logísticas independientes; un muelle pertenece a un puerto y ambos pueden asociarse gradualmente a recaladas sin eliminar los campos de texto legados `terminal` y `muelle`.
 
 Ambos usan `StatusType`:
 
@@ -292,6 +292,74 @@ Buques:
 - `codigo` es obligatorio por fila.
 - `paisId`, si viene, debe existir.
 - En `UPSERT`, si un buque existente tiene recaladas y `force=false`, se bloquea cambiar `nombre` o `paisId`.
+
+## Puertos
+
+### Rutas
+
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| `GET` | `/puertos/lookup` | Lista reducida para selects operativos. |
+| `GET` | `/puertos` | Lista paginada con filtros. |
+| `GET` | `/puertos/:id` | Detalle por id. |
+| `POST` | `/puertos` | Crea puerto. |
+| `PATCH` | `/puertos/:id` | Edita puerto. |
+| `DELETE` | `/puertos/:id` | Inactiva puerto si no tiene dependencias. |
+
+### Campos principales
+
+```json
+{
+  "codigo": "CTG",
+  "nombre": "Puerto de Cartagena",
+  "ciudad": "Cartagena",
+  "paisId": 1,
+  "status": "ACTIVO"
+}
+```
+
+Filtros de listado: `q`, `paisId`, `status`, `page`, `pageSize`.
+
+Reglas:
+
+- `codigo` y `nombre` son únicos.
+- `paisId` debe existir.
+- No se elimina físicamente si tiene muelles o recaladas asociadas; se inactiva.
+- Emite eventos realtime `catalog:puerto:created`, `catalog:puerto:updated` y `catalog:puerto:removed`.
+
+## Muelles
+
+### Rutas
+
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| `GET` | `/muelles/lookup` | Lista reducida para selects operativos; acepta `puertoId`. |
+| `GET` | `/muelles` | Lista paginada con filtros. |
+| `GET` | `/muelles/:id` | Detalle por id. |
+| `POST` | `/muelles` | Crea muelle. |
+| `PATCH` | `/muelles/:id` | Edita muelle. |
+| `DELETE` | `/muelles/:id` | Inactiva muelle si no tiene dependencias. |
+
+### Campos principales
+
+```json
+{
+  "codigo": "M-1",
+  "nombre": "Muelle principal",
+  "puertoId": 1,
+  "capacidadCruceros": 2,
+  "status": "ACTIVO"
+}
+```
+
+Filtros de listado: `q`, `puertoId`, `status`, `page`, `pageSize`.
+
+Reglas:
+
+- `codigo` es único por puerto.
+- `puertoId` debe existir.
+- No se elimina físicamente si tiene recaladas asociadas; se inactiva.
+- Emite eventos realtime `catalog:muelle:created`, `catalog:muelle:updated` y `catalog:muelle:removed`.
 - Duplicados por `codigo` dentro del payload generan error por fila.
 
 ## Auditoría

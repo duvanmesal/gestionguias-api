@@ -37,6 +37,8 @@ export async function listRecaladasUsecase(
       operationalStatus: query.operationalStatus,
       buqueId: query.buqueId,
       paisOrigenId: query.paisOrigenId,
+      puertoId: query.puertoId,
+      muelleId: query.muelleId,
       overdueDeparture: query.overdueDeparture ?? false,
     },
   }
@@ -52,6 +54,8 @@ export async function listRecaladasUsecase(
       operationalStatus: query.operationalStatus,
       buqueId: query.buqueId,
       paisOrigenId: query.paisOrigenId,
+      puertoId: query.puertoId,
+      muelleId: query.muelleId,
     },
     "[Recaladas] list",
   )

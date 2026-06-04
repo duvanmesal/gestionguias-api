@@ -1,6 +1,6 @@
 # Recaladas
 
-Última revisión contra código: 2026-05-11.
+Última revisión contra código: 2026-06-04.
 
 Fuente principal: `src/routes/recaladas.routes.ts`, `src/modules/recaladas/*`, `prisma/schema.prisma`.
 
@@ -62,6 +62,8 @@ Todas las rutas requieren autenticación.
   "paisOrigenId": 1,
   "fechaLlegada": "2026-05-10T13:00:00.000Z",
   "fechaSalida": "2026-05-10T23:00:00.000Z",
+  "puertoId": 1,
+  "muelleId": 1,
   "terminal": "Terminal de Cruceros",
   "muelle": "Muelle 1",
   "pasajerosEstimados": 2500,
@@ -74,6 +76,9 @@ Todas las rutas requieren autenticación.
 Reglas:
 
 - `buqueId` y `paisOrigenId` deben existir.
+- `puertoId`, si se envía, debe existir.
+- `muelleId`, si se envía, debe existir. Si también se envía `puertoId`, el muelle debe pertenecer a ese puerto.
+- Si se envía `muelleId` sin `puertoId`, el sistema infiere el puerto del muelle.
 - `fechaSalida`, si se envía, debe ser mayor o igual a `fechaLlegada`.
 - Si `fuente` es `MANUAL` o no se envía, `fechaSalida` no puede estar en el pasado.
 - Si `fuente` es `IMPORT`, se permite importar fechas pasadas.
@@ -107,6 +112,8 @@ Query:
 | `operationalStatus` | enum | - |
 | `buqueId` | number | - |
 | `paisOrigenId` | number | - |
+| `puertoId` | number | - |
+| `muelleId` | number | - |
 | `q` | string | - |
 | `overdueDeparture` | boolean | `false` |
 | `page` | number | `1` |
@@ -144,8 +151,12 @@ Campos posibles cuando la recalada está `SCHEDULED`:
 
 - `buqueId`
 - `paisOrigenId`
+- `puertoId`
+- `muelleId`
 - `fechaLlegada`
 - `fechaSalida`
+- `puertoId`
+- `muelleId`
 - `terminal`
 - `muelle`
 - `pasajerosEstimados`
@@ -168,6 +179,8 @@ Reglas:
 - Debe enviarse al menos un campo permitido para el estado actual.
 - Si cambian buque o fechas, se revalida solapamiento del buque.
 - Si cambian fechas, no se permite dejar atenciones existentes fuera de la nueva ventana.
+- Si cambia `puertoId` sin enviar `muelleId`, el muelle de catálogo se limpia para evitar inconsistencias.
+- Si se envía `muelleId`, debe pertenecer al puerto indicado o inferido.
 - Si se cambia `buqueId` o `paisOrigenId`, deben existir.
 
 ## Marcar arribo

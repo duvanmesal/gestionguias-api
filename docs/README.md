@@ -1,6 +1,6 @@
 # Documentación funcional de gestionguias-api
 
-Última revisión contra código: 2026-05-16.
+Última revisión contra código: 2026-06-04.
 
 Esta carpeta documenta el comportamiento observable de la API principal. La fuente de verdad técnica sigue siendo el código en `src/routes`, `src/modules` y `prisma/schema.prisma`; estos documentos explican ese comportamiento para producto, frontend, mobile y pruebas manuales.
 
@@ -11,7 +11,7 @@ Esta carpeta documenta el comportamiento observable de la API principal. La fuen
 | [fundamentos.md](./fundamentos.md) | Convenciones globales: prefijo, envelope, errores, roles, plataformas y estados. |
 | [auth.md](./auth.md) | Autenticación, sesiones, refresh, logout, verificación de email y contraseñas. |
 | [usuarios.md](./usuarios.md) | Perfil, onboarding, listado administrativo, guías y administración de usuarios. |
-| [catalog.md](./catalog.md) | Países y buques. |
+| [catalog.md](./catalog.md) | Países, buques, puertos y muelles. |
 | [reacaladas.md](./reacaladas.md) | Agenda madre de recaladas y estados operativos. |
 | [atenciones.md](./atenciones.md) | Ventanas operativas dentro de una recalada y materialización de turnos. |
 | [turnos.md](./turnos.md) | Ciclo de vida de cupos, asignación, claim, check-in, check-out y no-show. |
@@ -39,6 +39,7 @@ El documento antiguo `auth-usuarios.md` mezclaba autenticación con administraci
 - `auth.md` documenta `isCurrent` en `GET /auth/sessions` para que los clientes identifiquen la sesion del access token actual.
 - `auth.md` aclara que refrescar una sesion revocada manualmente responde `401` sin cerrar las demas sesiones.
 - `historias-usuario/01-autenticacion-sesion.md` incluye criterios funcionales para revocar una sesion mobile desde web sin perder la sesion web.
+- `catalog.md`, `reacaladas.md` y `atenciones.md`: puertos/muelles como catálogos operativos, selección en recaladas y evaluación de cierre por supervisor.
 
 ## Convenciones de lectura
 

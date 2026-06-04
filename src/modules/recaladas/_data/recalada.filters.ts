@@ -29,6 +29,8 @@ export function buildRecaladasWhere(query: ListRecaladasQuery): Prisma.RecaladaW
   if (query.operationalStatus) AND.push({ operationalStatus: query.operationalStatus })
   if (query.buqueId) AND.push({ buqueId: query.buqueId })
   if (query.paisOrigenId) AND.push({ paisOrigenId: query.paisOrigenId })
+  if (query.puertoId) AND.push({ puertoId: query.puertoId })
+  if (query.muelleId) AND.push({ muelleId: query.muelleId })
 
   // Alerta operativa: recaladas vencidas pendientes de zarpe
   // (ACTIVO + ARRIVED + fechaSalida < ahora).
@@ -66,6 +68,8 @@ export function buildRecaladasWhere(query: ListRecaladasQuery): Prisma.RecaladaW
           { codigoRecalada: { contains: q, mode: "insensitive" } },
           { observaciones: { contains: q, mode: "insensitive" } },
           { buque: { nombre: { contains: q, mode: "insensitive" } } },
+          { puerto: { nombre: { contains: q, mode: "insensitive" } } },
+          { muelleCatalogo: { nombre: { contains: q, mode: "insensitive" } } },
         ],
       })
     }

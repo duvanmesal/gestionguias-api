@@ -1,4 +1,5 @@
 export const prismaMock = {
+  // Prisma de utileria: mucho gesto, cero base de datos.
   usuario: {
     findUnique: jest.fn(),
     findFirst: jest.fn(),

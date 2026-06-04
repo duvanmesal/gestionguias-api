@@ -355,6 +355,72 @@ export class AtencionRepository {
     })
   }
 
+  upsertEvaluation(
+    args: {
+      atencionId: number
+      calificacion: number
+      estadoFinal: "SATISFACTORIA" | "CON_NOVEDADES" | "NO_SATISFACTORIA"
+      observaciones?: string | null
+      evaluatedById: string
+      evaluatedAt: Date
+    },
+    tx?: Tx,
+  ) {
+    return db(tx).atencionEvaluation.upsert({
+      where: { atencionId: args.atencionId },
+      create: {
+        atencionId: args.atencionId,
+        calificacion: args.calificacion,
+        estadoFinal: args.estadoFinal,
+        observaciones: args.observaciones ?? null,
+        evaluatedById: args.evaluatedById,
+        evaluatedAt: args.evaluatedAt,
+      },
+      update: {
+        calificacion: args.calificacion,
+        estadoFinal: args.estadoFinal,
+        observaciones: args.observaciones ?? null,
+        evaluatedById: args.evaluatedById,
+        evaluatedAt: args.evaluatedAt,
+      },
+    })
+  }
+
+  closeAtencionWithEvaluation(
+    args: {
+      id: number
+      evaluation: {
+        calificacion: number
+        estadoFinal: "SATISFACTORIA" | "CON_NOVEDADES" | "NO_SATISFACTORIA"
+        observaciones?: string | null
+      }
+      actorUserId: string
+      evaluatedAt: Date
+    },
+  ) {
+    return prisma.$transaction(async (tx) => {
+      await tx.atencion.update({
+        where: { id: args.id },
+        data: { operationalStatus: "CLOSED" },
+        select: { id: true },
+      })
+
+      await this.upsertEvaluation(
+        {
+          atencionId: args.id,
+          calificacion: args.evaluation.calificacion,
+          estadoFinal: args.evaluation.estadoFinal,
+          observaciones: args.evaluation.observaciones,
+          evaluatedById: args.actorUserId,
+          evaluatedAt: args.evaluatedAt,
+        },
+        tx,
+      )
+
+      return tx.atencion.findUnique({ where: { id: args.id }, select: atencionSelect })
+    })
+  }
+
   // -------------------------
   // Turnos helpers
   // -------------------------

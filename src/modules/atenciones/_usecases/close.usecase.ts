@@ -7,8 +7,14 @@ import { atencionRepository } from "../_data/atencion.repository"
 import { auditFail, auditOk } from "../_shared/atencion.audit"
 import { atencionCapacityCache } from "../_shared/atencion-capacity.cache"
 import { emitAtencionRealtime } from "../../../core/socket/domain-events"
+import type { AtencionEvaluationBody } from "../atencion.schemas"
 
-export async function closeAtencionUsecase(req: Request, id: number, actorUserId: string) {
+export async function closeAtencionUsecase(
+  req: Request,
+  id: number,
+  actorUserId: string,
+  evaluation?: AtencionEvaluationBody,
+) {
   const gate = await atencionRepository.findGateForClose(id)
 
   if (!gate) {
@@ -32,6 +38,17 @@ export async function closeAtencionUsecase(req: Request, id: number, actorUserId
     )
 
     atencionCapacityCache.invalidate(id)
+
+    if (evaluation) {
+      await atencionRepository.upsertEvaluation({
+        atencionId: id,
+        calificacion: evaluation.calificacion,
+        estadoFinal: evaluation.estadoFinal,
+        observaciones: evaluation.observaciones,
+        evaluatedById: actorUserId,
+        evaluatedAt: new Date(),
+      })
+    }
 
     const item = await atencionRepository.findById(id)
     if (!item) throw new NotFoundError("Atención no encontrada")
@@ -87,7 +104,16 @@ export async function closeAtencionUsecase(req: Request, id: number, actorUserId
     )
   }
 
-  const updated = await atencionRepository.closeAtencion({ id })
+  const updated = evaluation
+    ? await atencionRepository.closeAtencionWithEvaluation({
+        id,
+        evaluation,
+        actorUserId,
+        evaluatedAt: new Date(),
+      })
+    : await atencionRepository.closeAtencion({ id })
+
+  if (!updated) throw new NotFoundError("Atención no encontrada")
 
   logger.info({ atencionId: id, actorUserId }, "[Atenciones] closed")
 
@@ -99,6 +125,7 @@ export async function closeAtencionUsecase(req: Request, id: number, actorUserId
       atencionId: id,
       recaladaId: updated.recaladaId,
       actorUserId,
+      evaluated: !!evaluation,
     },
     { entity: "Atencion", id: String(id) },
   )

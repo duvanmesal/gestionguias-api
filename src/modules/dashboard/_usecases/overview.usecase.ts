@@ -36,6 +36,7 @@ type CountAllRow = {
 };
 
 function countAll(row: CountAllRow): number {
+  // Prisma groupBy habla como rarito, aqui le hacemos traduccion simultanea.
   const c = row._count;
   if (!c || c === true) return 0;
   return c._all ?? 0;
@@ -69,6 +70,7 @@ export async function getDashboardOverviewUsecase(
   };
 
   if (role === RolType.SUPER_ADMIN || role === RolType.SUPERVISOR) {
+    // Vista supervisor: tablero de mando o tablero de "que paso ahora".
     const supervisor = await buildSupervisorOverview({
       start,
       end,
@@ -82,6 +84,7 @@ export async function getDashboardOverviewUsecase(
   }
 
   if (role === RolType.GUIA) {
+    // Vista guia: lo minimo para saber si correr, esperar o reclamar turno.
     const guia = await buildGuiaOverview({
       usuarioId: input.userId,
       now,

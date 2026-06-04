@@ -15,6 +15,9 @@ import {
   cancelAtencionParamsSchema,
   cancelAtencionBodySchema,
   closeAtencionParamsSchema,
+  closeAtencionBodySchema,
+  atencionEvaluationSchema,
+  updateAtencionEvaluationParamsSchema,
   getAtencionTurnosParamsSchema,
   getAtencionSummaryParamsSchema,
   claimAtencionParamsSchema,
@@ -133,6 +136,18 @@ router.patch(
 );
 
 /**
+ * PATCH /atenciones/:id/evaluation
+ * Crea/actualiza evaluación operativa de atención.
+ * Auth: SUPERVISOR / SUPER_ADMIN
+ */
+router.patch(
+  "/:id/evaluation",
+  requireSupervisor,
+  validate({ params: updateAtencionEvaluationParamsSchema, body: atencionEvaluationSchema }),
+  AtencionController.upsertEvaluation
+);
+
+/**
  * PATCH /atenciones/:id/cancel
  * Cancela atención con razón + auditoría (sin borrar)
  * Auth: SUPERVISOR / SUPER_ADMIN
@@ -152,7 +167,7 @@ router.patch(
 router.patch(
   "/:id/close",
   requireSupervisor,
-  validate({ params: closeAtencionParamsSchema }),
+  validate({ params: closeAtencionParamsSchema, body: closeAtencionBodySchema }),
   AtencionController.close
 );
 

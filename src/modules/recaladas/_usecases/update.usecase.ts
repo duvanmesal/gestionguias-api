@@ -119,6 +119,64 @@ export async function updateRecaladaUsecase(
     }
   }
 
+  const nextPuertoId = (data as any).puertoId as number | null | undefined
+  const nextMuelleId = (data as any).muelleId as number | null | undefined
+
+  if (typeof nextPuertoId === "number") {
+    const puerto = await recaladaRepository.findPuertoById(nextPuertoId)
+    if (!puerto) {
+      auditFail(
+        req,
+        "recaladas.update.failed",
+        "Update recalada failed",
+        { reason: "puerto_not_found", puertoId: nextPuertoId, recaladaId: id },
+        { entity: "Recalada", id: String(id) },
+      )
+      throw new NotFoundError("El puerto (puertoId) no existe")
+    }
+  }
+
+  if (typeof nextMuelleId === "number") {
+    const muelle = await recaladaRepository.findMuelleById(nextMuelleId)
+    if (!muelle) {
+      auditFail(
+        req,
+        "recaladas.update.failed",
+        "Update recalada failed",
+        { reason: "muelle_not_found", muelleId: nextMuelleId, recaladaId: id },
+        { entity: "Recalada", id: String(id) },
+      )
+      throw new NotFoundError("El muelle (muelleId) no existe")
+    }
+
+    if (typeof nextPuertoId === "number" && muelle.puertoId !== nextPuertoId) {
+      auditFail(
+        req,
+        "recaladas.update.failed",
+        "Update recalada failed",
+        {
+          reason: "muelle_puerto_mismatch",
+          puertoId: nextPuertoId,
+          muelleId: nextMuelleId,
+          muellePuertoId: muelle.puertoId,
+          recaladaId: id,
+        },
+        { entity: "Recalada", id: String(id) },
+      )
+      throw new ConflictError("El muelle informado no pertenece al puerto informado")
+    }
+
+    if (typeof nextPuertoId === "undefined") {
+      ;(data as any).puertoId = muelle.puertoId
+      built.updatedKeys = Array.from(new Set([...built.updatedKeys, "puertoId"]))
+    }
+  }
+
+  if (typeof nextPuertoId === "number" && typeof nextMuelleId === "undefined" && current.muelleId) {
+    ;(data as any).muelleId = null
+    built.updatedKeys = Array.from(new Set([...built.updatedKeys, "muelleId"]))
+  }
+
   // Revalidar solapamiento de buque si cambian buque o fechas
   const effectiveBuqueId = typeof nextBuqueId === "number" ? nextBuqueId : current.buqueId
   const effectiveFechaLlegada = (data.fechaLlegada as Date | undefined) ?? current.fechaLlegada

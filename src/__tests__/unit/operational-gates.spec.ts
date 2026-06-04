@@ -1,6 +1,19 @@
 import type { Request } from "express"
 import { TurnoAssignmentMode } from "@prisma/client"
 
+jest.mock("../../modules/notifications/operational-notifications", () => ({
+  notifyAtencionAvailableToGuides: jest.fn(() => Promise.resolve()),
+  notifyTurnoClaimedToGuide: jest.fn(() => Promise.resolve()),
+  notifyTurnoAssignedToGuide: jest.fn(() => Promise.resolve()),
+  notifyTurnoCanceledToGuide: jest.fn(() => Promise.resolve()),
+  notifyTurnoChangedToGuide: jest.fn(() => Promise.resolve()),
+  notifyCheckInReminder: jest.fn(() => Promise.resolve()),
+  notifyGuidePenalized: jest.fn(() => Promise.resolve()),
+  notifySupervisorCheckInPending: jest.fn(() => Promise.resolve()),
+  notifyRecaladaOverdue: jest.fn(() => Promise.resolve()),
+  notifyAtencionNearWithFreeTurnos: jest.fn(() => Promise.resolve()),
+}))
+
 import { ConflictError, BadRequestError } from "../../libs/errors"
 import { logsService } from "../../libs/logs/logs.service"
 import { atencionRepository } from "../../modules/atenciones/_data/atencion.repository"
@@ -19,6 +32,7 @@ import { claimTurnoUsecase } from "../../modules/turnos/_usecases/claim.usecase"
 const req = { headers: {}, method: "PATCH", originalUrl: "/test" } as Request
 
 function activeGate(status: "AVAILABLE" | "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "CANCELED" | "NO_SHOW") {
+  // Fabrica de portones operativos: abren, cierran y juzgan.
   return {
     id: 1,
     atencionId: 10,
@@ -45,6 +59,7 @@ function activeGate(status: "AVAILABLE" | "ASSIGNED" | "IN_PROGRESS" | "COMPLETE
 
 describe("operational guards", () => {
   beforeEach(() => {
+    // Congelar el tiempo: la unica forma sana de discutir con horarios.
     jest.useFakeTimers().setSystemTime(new Date("2026-05-04T14:30:00.000Z"))
     jest.spyOn(logsService, "audit").mockImplementation(() => undefined)
   })

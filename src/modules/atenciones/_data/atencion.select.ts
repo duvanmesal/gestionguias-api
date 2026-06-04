@@ -26,6 +26,23 @@ export const atencionSelect = {
   createdAt: true,
   updatedAt: true,
 
+  evaluation: {
+    select: {
+      id: true,
+      atencionId: true,
+      calificacion: true,
+      estadoFinal: true,
+      observaciones: true,
+      evaluatedById: true,
+      evaluatedAt: true,
+      createdAt: true,
+      updatedAt: true,
+      evaluatedBy: {
+        select: { id: true, email: true, nombres: true, apellidos: true },
+      },
+    },
+  },
+
   recalada: {
     select: {
       id: true,

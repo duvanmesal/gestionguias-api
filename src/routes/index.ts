@@ -8,6 +8,8 @@ import notificationsRoutes from "./notifications.routes";
 // 🔹 Nuevos catálogos
 import paisRoutes from "./pais.routes";
 import buqueRoutes from "./buque.routes";
+import puertoRoutes from "./puerto.routes";
+import muelleRoutes from "./muelle.routes";
 
 // 🔹 Recaladas (módulo base)
 import recaladasRoutes from "./recaladas.routes";
@@ -26,6 +28,7 @@ import operationalConfigRoutes from "./operational-config.routes";
 
 const router = Router();
 
+// Porque hacerlo bien a la primera era demasiado elegante.
 // API v1 routes
 const v1Router = Router();
 
@@ -38,6 +41,8 @@ v1Router.use("/notifications", notificationsRoutes);
 // 🔹 Nuevas rutas de catálogos
 v1Router.use("/paises", paisRoutes);
 v1Router.use("/buques", buqueRoutes);
+v1Router.use("/puertos", puertoRoutes);
+v1Router.use("/muelles", muelleRoutes);
 
 // 🔹 Recaladas
 v1Router.use("/recaladas", recaladasRoutes);
@@ -57,6 +62,7 @@ v1Router.use("/operational-config", operationalConfigRoutes);
 // Mount versioned routes
 router.use("/", v1Router);
 
+// No recuerdo que hacia esto o porque lo hice asi, pero parece importante.
 // API info endpoint
 router.get("/", (_req, res) => {
   res.json({
@@ -72,6 +78,8 @@ router.get("/", (_req, res) => {
         notifications: `${process.env.API_PREFIX ?? "/api"}/notifications`,
         paises: `${process.env.API_PREFIX ?? "/api"}/paises`,
         buques: `${process.env.API_PREFIX ?? "/api"}/buques`,
+        puertos: `${process.env.API_PREFIX ?? "/api"}/puertos`,
+        muelles: `${process.env.API_PREFIX ?? "/api"}/muelles`,
         recaladas: `${process.env.API_PREFIX ?? "/api"}/recaladas`,
         atenciones: `${process.env.API_PREFIX ?? "/api"}/atenciones`,
         turnos: `${process.env.API_PREFIX ?? "/api"}/turnos`,

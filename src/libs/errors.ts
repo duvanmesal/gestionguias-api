@@ -1,4 +1,5 @@
 export class AppError extends Error {
+  // Error con traje formal para que el caos llegue en JSON.
   constructor(
     public status: number,
     public code: string,

@@ -9,6 +9,8 @@ export const createRecaladaSchema = z
   .object({
     buqueId: z.coerce.number().int().positive(),
     paisOrigenId: z.coerce.number().int().positive(),
+    puertoId: z.coerce.number().int().positive().optional(),
+    muelleId: z.coerce.number().int().positive().optional(),
 
     // ISO string (DateTime)
     fechaLlegada: z.coerce.date(),
@@ -73,6 +75,8 @@ export const listRecaladasQuerySchema = z
 
     buqueId: z.coerce.number().int().positive().optional(),
     paisOrigenId: z.coerce.number().int().positive().optional(),
+    puertoId: z.coerce.number().int().positive().optional(),
+    muelleId: z.coerce.number().int().positive().optional(),
 
     q: z.string().trim().min(1).max(200).optional(),
 
@@ -99,6 +103,8 @@ export const updateRecaladaBodySchema = z
   .object({
     buqueId: z.coerce.number().int().positive().optional(),
     paisOrigenId: z.coerce.number().int().positive().optional(),
+    puertoId: z.coerce.number().int().positive().nullable().optional(),
+    muelleId: z.coerce.number().int().positive().nullable().optional(),
 
     fechaLlegada: z.coerce.date().optional(),
     fechaSalida: z.coerce.date().optional(),

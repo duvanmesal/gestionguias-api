@@ -36,11 +36,13 @@ const refreshOptions: SignOptions = {
 }
 
 export const signAccessToken = (payload: AccessTokenPayload): string => {
+  // Token con placa nueva para que no se clone en silencio.
   const jti = `access_${Date.now()}_${Math.random().toString(36).slice(2)}`
   return jwt.sign({ ...payload, jti }, env.JWT_ACCESS_SECRET as Secret, accessOptions)
 }
 
 export const verifyAccessToken = (token: string): JwtPayload => {
+  // Si esto falla, yo nunca estuve aqui.
   return jwt.verify(token, env.JWT_ACCESS_SECRET as Secret) as JwtPayload
 }
 

@@ -5,6 +5,8 @@ import type { UpdateRecaladaBody } from "../recalada.schemas"
 export type CreateRecaladaInput = {
   buqueId: number
   paisOrigenId: number
+  puertoId?: number | null
+  muelleId?: number | null
   fechaLlegada: Date
   fechaSalida?: Date
 
@@ -39,6 +41,8 @@ export type ListRecaladasResult = {
       operationalStatus?: RecaladaOperativeStatus
       buqueId?: number
       paisOrigenId?: number
+      puertoId?: number
+      muelleId?: number
     }
   }
 }
