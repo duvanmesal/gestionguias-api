@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { AtencionOperativeStatus, StatusType } from "@prisma/client";
+import {
+  AtencionEvaluationEstadoFinal,
+  AtencionOperativeStatus,
+  StatusType,
+} from "@prisma/client";
 
 export const createAtencionSchema = z
   .object({
@@ -112,6 +116,25 @@ export const closeAtencionParamsSchema = z.object({
   id: z.coerce.number().int().positive(),
 });
 
+export const atencionEvaluationSchema = z
+  .object({
+    calificacion: z.coerce.number().int().min(1).max(5),
+    estadoFinal: z.nativeEnum(AtencionEvaluationEstadoFinal),
+    observaciones: z.string().trim().max(2000).nullable().optional(),
+  })
+  .strict();
+
+export const updateAtencionEvaluationParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export const closeAtencionBodySchema = z
+  .object({
+    evaluation: atencionEvaluationSchema.optional(),
+  })
+  .strict()
+  .optional();
+
 export type CreateAtencionBody = z.infer<typeof createAtencionSchema>;
 export type ListAtencionesQuery = z.infer<typeof listAtencionesQuerySchema>;
 export type GetAtencionByIdParams = z.infer<typeof getAtencionByIdParamsSchema>;
@@ -127,3 +150,6 @@ export type CancelAtencionParams = z.infer<typeof cancelAtencionParamsSchema>;
 export type CancelAtencionBody = z.infer<typeof cancelAtencionBodySchema>;
 
 export type CloseAtencionParams = z.infer<typeof closeAtencionParamsSchema>;
+export type AtencionEvaluationBody = z.infer<typeof atencionEvaluationSchema>;
+export type UpdateAtencionEvaluationParams = z.infer<typeof updateAtencionEvaluationParamsSchema>;
+export type CloseAtencionBody = z.infer<typeof closeAtencionBodySchema>;

@@ -1,4 +1,5 @@
 export class AppError extends Error {
+  // Error con traje formal para que el caos llegue en JSON.
   constructor(
     public status: number,
     public code: string,
@@ -55,5 +56,17 @@ export class BadRequestError extends AppError {
 export class BadGatewayError extends AppError {
   constructor(message = "Bad gateway", details?: any) {
     super(502, "BAD_GATEWAY", message, details)
+  }
+}
+
+export class GatewayTimeoutError extends AppError {
+  constructor(message = "Upstream service timed out", details?: any) {
+    super(504, "GATEWAY_TIMEOUT", message, details)
+  }
+}
+
+export class ServiceUnavailableError extends AppError {
+  constructor(message = "Service unavailable", details?: any) {
+    super(503, "SERVICE_UNAVAILABLE", message, details)
   }
 }

@@ -18,6 +18,7 @@ function applyBaseEnv(overrides: NodeJS.ProcessEnv = {}) {
 }
 
 async function loadEmailModule() {
+  // Reset de modulos: la terapia de pareja entre env vars y Jest.
   jest.resetModules();
   return require("../../libs/email") as typeof import("../../libs/email.js");
 }
@@ -34,6 +35,7 @@ describe("email provider", () => {
   });
 
   it("uses outbox by default in test without calling the network", async () => {
+    // Correo fantasma: sale en test, no molesta a nadie.
     const email = await loadEmailModule();
 
     const result = await email.sendEmail({
@@ -152,3 +154,5 @@ describe("email provider", () => {
     });
   });
 });
+
+export {};

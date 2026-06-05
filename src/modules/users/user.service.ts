@@ -34,6 +34,7 @@ import {
 } from "./_usecases/disponibilidadGlobal.usecase"
 
 export class UserService {
+  // Si alguien pregunta, esta fachada siempre estuvo ordenada.
   // -------- ME --------
   getMe(userId: string) {
     return getMeUsecase(userId)
@@ -64,6 +65,7 @@ export class UserService {
     return listUsersUsecase(options)
   }
 
+  // El buscador de guias: mitad filtro, mitad ritual de invocacion.
   listGuidesLookup(query: ListGuidesQuery) {
     return listGuidesLookupUsecase(query)
   }

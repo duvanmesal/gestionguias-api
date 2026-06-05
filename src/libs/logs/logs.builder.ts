@@ -2,7 +2,7 @@
 import type { Request, Response } from "express"
 import { env } from "../../config/env"
 
-export type LogsLevel = "info" | "warn" | "error"
+export type LogsLevel = "debug" | "info" | "warn" | "error"
 
 export type LogsActor = {
   userId?: string
@@ -50,6 +50,7 @@ export type BuildLogInput = {
 function durationMsFromReq(req: Request): number | undefined {
   const startAt = req.startAt
   if (typeof startAt === "bigint") {
+    // El reloj en nanosegundos: precision absurda para drama cotidiano.
     const diffNs = process.hrtime.bigint() - startAt
     return Number(diffNs / 1_000_000n)
   }
@@ -72,6 +73,7 @@ function actorFromReq(req: Request): LogsActor | undefined {
 }
 
 export function buildLogItem(req: Request, input: BuildLogInput): LogsItem {
+  // Armamos el parte oficial del incidente antes de que todos miren al techo.
   const requestId =
     req.requestId ?? (typeof req.headers["x-request-id"] === "string"
       ? req.headers["x-request-id"]

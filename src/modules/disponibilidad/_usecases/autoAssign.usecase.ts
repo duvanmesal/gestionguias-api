@@ -40,6 +40,7 @@ async function findNextEligibleGlobalGuide(args: {
   fechaInicio: Date | null
   fechaFin: Date | null
 }): Promise<EligibleGuide | null> {
+  // FIFO no perdona, pero al menos ordena la fila.
   return prisma.guia.findFirst({
     where: {
       disponibleParaTurnos: true,
@@ -163,6 +164,7 @@ export async function assignForAtencion(atencionId: number): Promise<AutoAssignR
   let assigned = 0
 
   for (const turno of turnosDisponibles) {
+    // Si esto falla, ire a dormir a la cama y no me voy a levantar hasta que se arregle solo.
     const next = await findNextEligibleGlobalGuide({
       atencionId,
       fechaInicio: turno.fechaInicio,
@@ -254,6 +256,7 @@ export async function autoAssignNextInQueue(
   })
 
   if (!next) {
+    // No hay reemplazo: la fila miro al abismo y el abismo estaba vacio.
     logger.info({ atencionId, turnoId }, "[Disponibilidad] no hay guía FIFO elegible para reemplazar")
     return null
   }

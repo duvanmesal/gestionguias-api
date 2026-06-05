@@ -6,6 +6,7 @@ import { logger } from "../libs/logger"
 import { env } from "../config/env"
 import { logsService } from "../libs/logs/logs.service"
 
+// Si funciona, no se toca. Si no funciona, tampoco se toca hasta leer el log.
 function safeErrorMeta(err: any) {
   return {
     name: err?.name,
@@ -35,6 +36,7 @@ export function errorHandler(
   res: Response,
   _next: NextFunction,
 ) {
+  // Que se jodio todo y no se por que, edicion controlada.
   // Bad JSON
   if (
     err?.type === "entity.parse.failed" ||

@@ -114,6 +114,12 @@ enum TurnoAssignmentMode {
   FIFO_GLOBAL
 }
 
+enum AtencionEvaluationEstadoFinal {
+  SATISFACTORIA
+  CON_NOVEDADES
+  NO_SATISFACTORIA
+}
+
 model Usuario {
   id           String  @id @default(cuid())
   email        String  @unique
@@ -149,6 +155,7 @@ model Usuario {
   // Auditoría Atenciones
   atencionesCreadas    Atencion[] @relation("AtencionCreatedBy")
   atencionesCanceladas Atencion[] @relation("AtencionCanceledBy")
+  atencionesEvaluadas  AtencionEvaluation[] @relation("AtencionEvaluatedBy")
 
   // Auditoría Turnos
   turnosCreados    Turno[] @relation("TurnoCreatedBy")
@@ -380,9 +387,47 @@ model Pais {
 
   recaladas Recalada[]
   buques    Buque[]
+  puertos   Puerto[]
 
   @@index([status])
   @@map("paises")
+}
+
+model Puerto {
+  id        Int        @id @default(autoincrement())
+  codigo    String     @unique
+  nombre    String
+  ciudad    String
+  paisId    Int
+  status    StatusType @default(ACTIVO)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  pais      Pais       @relation(fields: [paisId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  muelles   Muelle[]
+  recaladas Recalada[]
+
+  @@index([paisId])
+  @@index([status])
+  @@map("puertos")
+}
+
+model Muelle {
+  id               Int        @id @default(autoincrement())
+  codigo           String     @unique
+  nombre           String
+  puertoId         Int
+  capacidadCruceros Int?
+  status           StatusType @default(ACTIVO)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  puerto    Puerto     @relation(fields: [puertoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  recaladas Recalada[]
+
+  @@index([puertoId])
+  @@index([status])
+  @@map("muelles")
 }
 
 model Buque {
@@ -409,6 +454,8 @@ model Recalada {
   buqueId      Int
   paisOrigenId Int
   supervisorId String
+  puertoId     Int?
+  muelleId     Int?
 
   // Identidad operativa (soporte/imports/búsqueda)
   codigoRecalada String @unique
@@ -443,6 +490,8 @@ model Recalada {
   buque      Buque      @relation(fields: [buqueId], references: [id])
   paisOrigen Pais       @relation(fields: [paisOrigenId], references: [id])
   supervisor Supervisor @relation(fields: [supervisorId], references: [id])
+  puerto     Puerto?    @relation(fields: [puertoId], references: [id])
+  muelleCatalogo Muelle? @relation(fields: [muelleId], references: [id])
   atenciones Atencion[]
 
   // Índices para filtros típicos (calendario/listados)
@@ -450,6 +499,8 @@ model Recalada {
   @@index([buqueId, fechaLlegada])
   @@index([operationalStatus, fechaLlegada])
   @@index([paisOrigenId, fechaLlegada])
+  @@index([puertoId, fechaLlegada])
+  @@index([muelleId, fechaLlegada])
   @@map("recaladas")
 }
 
@@ -490,6 +541,7 @@ model Atencion {
 
   turnos           Turno[]
   disponibilidades Disponibilidad[]
+  evaluation       AtencionEvaluation?
 
   @@index([recaladaId])
   @@index([supervisorId])
@@ -497,6 +549,25 @@ model Atencion {
   @@index([operationalStatus])
   @@index([recaladaId, fechaInicio])
   @@map("atenciones")
+}
+
+model AtencionEvaluation {
+  id            Int                            @id @default(autoincrement())
+  atencionId    Int                            @unique
+  calificacion  Int
+  estadoFinal   AtencionEvaluationEstadoFinal
+  observaciones String?
+  evaluatedById String
+  evaluatedAt   DateTime                       @default(now())
+  createdAt     DateTime                       @default(now())
+  updatedAt     DateTime                       @updatedAt
+
+  atencion    Atencion @relation(fields: [atencionId], references: [id], onDelete: Cascade)
+  evaluatedBy Usuario  @relation("AtencionEvaluatedBy", fields: [evaluatedById], references: [id], onDelete: Restrict)
+
+  @@index([estadoFinal])
+  @@index([evaluatedById])
+  @@map("atencion_evaluations")
 }
 
 model Turno {

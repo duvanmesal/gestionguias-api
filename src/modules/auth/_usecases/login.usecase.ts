@@ -22,6 +22,7 @@ export async function loginUsecase(
   ip?: string,
   userAgent?: string,
 ): Promise<LoginResult> {
+  // Mobile pidio trato especial y TypeScript saco la libreta.
   if (platform === "MOBILE" && !data.deviceId) {
     logsService.audit(req, {
       event: "auth.login.failed",
@@ -64,6 +65,7 @@ export async function loginUsecase(
 
   const isValidPassword = await verifyPassword(data.password, user.passwordHash)
   if (!isValidPassword) {
+    // Si esto falla, yo nunca estuve aqui.
     logsService.audit(req, {
       event: "auth.login.failed",
       level: "warn",
@@ -77,6 +79,7 @@ export async function loginUsecase(
   const refreshTokenValue = generateRefreshToken()
   const refreshTokenHash = hashRefreshToken(refreshTokenValue)
   const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_SEC * 1000)
+  // se su ponque esto es lo que le gusta a TypeScript
   const rememberMe = platform === "MOBILE" ? true : data.rememberMe === true
 
   const session = await authRepository.createSession({

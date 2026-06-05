@@ -63,6 +63,7 @@ type EnqueueArgs = {
 }
 
 async function enqueuePushAndEmit(args: EnqueueArgs): Promise<{ push: number }> {
+  // Primero gritamos por socket, luego dejamos papelitos para push.
   // Socket emit (best-effort).
   try {
     for (const room of args.socketRooms ?? []) {
@@ -99,6 +100,7 @@ async function enqueuePushAndEmit(args: EnqueueArgs): Promise<{ push: number }> 
   }
 
   const data = args.userIds.map((userId) => ({
+    // Si funciona, no se toca. Si se duplica, skipDuplicates lo mira feito. puro amor o odio?. Mejor odio...
     type: args.type,
     channel: "PUSH" as const,
     userId,
@@ -131,6 +133,9 @@ async function enqueuePushAndEmit(args: EnqueueArgs): Promise<{ push: number }> 
 async function listEligibleGuidesForClaim(): Promise<
   Array<{ id: string; userId: string }>
 > {
+  // Casting de guias: disponibles, activos y sin nube negra encima.
+  // osea que no tienen penalizacion vigente.
+  // pq escribo todas estas cosas? porque soy un idiota y no se que hacer.
   const now = new Date()
   const guides = await prisma.guia.findMany({
     where: {

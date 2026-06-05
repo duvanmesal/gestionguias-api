@@ -79,8 +79,12 @@ export function getUpdateAllowedFields(operationalStatus: RecaladaOperativeStatu
   const allowedWhenScheduled = [
     "buqueId",
     "paisOrigenId",
+    "puertoId",
+    "muelleId",
     "fechaLlegada",
     "fechaSalida",
+    "puertoId",
+    "muelleId",
     "terminal",
     "muelle",
     "pasajerosEstimados",

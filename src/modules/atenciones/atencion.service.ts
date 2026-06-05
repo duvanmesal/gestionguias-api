@@ -2,6 +2,8 @@ import type { Request } from "express"
 
 import type {
   CreateAtencionBody,
+  AtencionEvaluationBody,
+  CloseAtencionBody,
   ListAtencionesQuery,
   UpdateAtencionBody,
 } from "./atencion.schemas"
@@ -26,12 +28,14 @@ import { closeAtencionUsecase } from "./_usecases/close.usecase"
 import { listTurnosByAtencionUsecase } from "./_usecases/listTurnos.usecase"
 import { getAtencionSummaryUsecase } from "./_usecases/summary.usecase"
 import { claimFirstAvailableTurnoUsecase } from "./_usecases/claim.usecase"
+import { upsertAtencionEvaluationUsecase } from "./_usecases/evaluation.usecase"
 
 /**
  * Facade del módulo Atenciones.
  * Mantiene la API pública estable para NO afectar routes/.
  */
 export class AtencionService {
+  // Si funciona, no se toca. Si no funciona, tampoco se toca sin cafe.
   static create(req: Request, input: CreateAtencionBody, actorUserId: string) {
     return createAtencionUsecase(req, input, actorUserId)
   }
@@ -57,8 +61,18 @@ export class AtencionService {
     return cancelAtencionUsecase(req, id, reason, actorUserId)
   }
 
-  static close(req: Request, id: number, actorUserId: string) {
-    return closeAtencionUsecase(req, id, actorUserId)
+  static close(req: Request, id: number, actorUserId: string, body?: CloseAtencionBody) {
+    return closeAtencionUsecase(req, id, actorUserId, body?.evaluation)
+  }
+
+  static upsertEvaluation(
+    req: Request,
+    id: number,
+    body: AtencionEvaluationBody,
+    actorUserId: string,
+  ) {
+    // Evaluar una atencion: ponerle nota al caos con uniforme.
+    return upsertAtencionEvaluationUsecase(req, id, body, actorUserId)
   }
 
   static listTurnosByAtencionId(req: Request, atencionId: number) {

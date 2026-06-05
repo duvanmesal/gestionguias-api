@@ -8,6 +8,7 @@ export function validate(schemas: {
 }) {
   return (req: Request, _res: Response, next: NextFunction) => {
     try {
+      // Zod revisa la mochila antes de dejar pasar al request.
       if (schemas.body) {
         req.body = schemas.body.parse(req.body)
       }

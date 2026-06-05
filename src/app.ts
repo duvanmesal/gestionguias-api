@@ -16,6 +16,8 @@ const app = express()
 
 app.set("trust proxy", 1)
 
+// Aqui empieza la brujeria "legalmente" aceptada por TypeScript.
+// Salvenme porfavor :c
 // 1) Seguridad base
 app.use(
   helmet({
@@ -47,6 +49,7 @@ app.use(responseLog)
 app.use(`${env.API_PREFIX ?? "/api"}/health`, healthRouter)
 app.use(env.API_PREFIX, apiRouter)
 
+// Si esto falla, yo nunca estuve aqui.
 // 8) 404
 app.use((_req, res) => {
   res.status(404).json({

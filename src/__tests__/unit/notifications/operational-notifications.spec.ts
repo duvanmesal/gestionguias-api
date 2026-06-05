@@ -54,6 +54,8 @@ beforeEach(() => {
   applyBaseEnv()
 })
 
+export {}
+
 afterAll(() => {
   process.env = ORIGINAL_ENV
 })
@@ -246,3 +248,5 @@ describe("Epica 7 — Operational notifications", () => {
     })
   })
 })
+
+export {}

@@ -11,6 +11,9 @@ import type {
   CancelAtencionParams,
   CancelAtencionBody,
   CloseAtencionParams,
+  CloseAtencionBody,
+  AtencionEvaluationBody,
+  UpdateAtencionEvaluationParams,
   GetAtencionTurnosParams,
   GetAtencionSummaryParams,
   ClaimAtencionParams,
@@ -278,12 +281,55 @@ export class AtencionController {
         throw new UnauthorizedError("Authentication required");
 
       const params = req.params as unknown as CloseAtencionParams;
-      const item = await AtencionService.close(req, params.id, req.user.userId);
+      const body = req.body as CloseAtencionBody;
+      const item = await AtencionService.close(
+        req,
+        params.id,
+        req.user.userId,
+        body,
+      );
 
       logsService.audit(req, {
         event: "atenciones.close.http_ok",
         target: { entity: "Atencion", id: String(params.id) },
+        meta: { evaluated: !!body?.evaluation },
         message: "Close atencion response sent",
+      });
+
+      res.status(200).json({ data: item, meta: null, error: null });
+      return;
+    } catch (err) {
+      next(err);
+      return;
+    }
+  }
+
+  static async upsertEvaluation(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      if (!req.user?.userId)
+        throw new UnauthorizedError("Authentication required");
+
+      const params = req.params as unknown as UpdateAtencionEvaluationParams;
+      const body = req.body as AtencionEvaluationBody;
+      const item = await AtencionService.upsertEvaluation(
+        req,
+        params.id,
+        body,
+        req.user.userId,
+      );
+
+      logsService.audit(req, {
+        event: "atenciones.evaluation.http_ok",
+        target: { entity: "Atencion", id: String(params.id) },
+        meta: {
+          calificacion: body.calificacion,
+          estadoFinal: body.estadoFinal,
+        },
+        message: "Atencion evaluation response sent",
       });
 
       res.status(200).json({ data: item, meta: null, error: null });

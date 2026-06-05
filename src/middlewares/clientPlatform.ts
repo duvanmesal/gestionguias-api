@@ -3,6 +3,7 @@ import { BadRequestError } from "../libs/errors"
 
 export type ClientPlatform = "WEB" | "MOBILE"
 
+// Dos plataformas entran, un header decide quien sobrevive.
 declare global {
   namespace Express {
     interface Request {
@@ -45,6 +46,7 @@ export function detectClientPlatform(req: Request, _res: Response, next: NextFun
 export function optionalClientPlatform(req: Request, _res: Response, next: NextFunction) {
   const platformHeader = req.get("X-Client-Platform")
 
+  // Esto se arreglo solo y me da miedo preguntar.
   if (platformHeader) {
     const normalizedPlatform = platformHeader.toLowerCase()
     if (normalizedPlatform === "web" || normalizedPlatform === "mobile") {

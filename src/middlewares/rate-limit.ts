@@ -64,6 +64,27 @@ export const globalLimiter = rateLimit({
   message: tooManyMessage("Too many requests, please try later."),
 })
 
+// Admin logs: consultas de lectura por usuario autenticado / IP. Generoso para
+// permitir refrescos del panel, pero acotado para no martillar el LogService.
+export const adminLogsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as any).user?.userId || userOrIp(req),
+  message: tooManyMessage("Too many log queries. Please slow down."),
+})
+
+// Export de logs: operación pesada (pagina el LogService). Más estricto.
+export const adminLogsExportLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as any).user?.userId || userOrIp(req),
+  message: tooManyMessage("Too many exports. Please wait a few minutes."),
+})
+
 // Logout-all code request: authenticated, per-user, less aggressive for UX retries.
 export const logoutAllCodeRequestLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,

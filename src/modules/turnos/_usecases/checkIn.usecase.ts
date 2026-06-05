@@ -23,6 +23,7 @@ import { prisma } from "../../../prisma/client"
 export async function checkInTurnoUsecase(req: Request, turnoId: number, actorUserId: string) {
   const actorGuiaId = await turnoRepository.getActorGuiaIdOrThrow(actorUserId)
 
+  // Sin palabras para TypeScript .-.
   const current = await turnoRepository.findGateForOperacion(turnoId)
 
   if (!current) {
@@ -133,6 +134,7 @@ export async function checkInTurnoUsecase(req: Request, turnoId: number, actorUs
   }
 
   if (ENFORCE_FIFO_CHECKIN) {
+    // El turno anterior te esta mirando. Portese bien o lo sapeo.
     const prevPending = await turnoRepository.findPrevPendingAssignedTurno({
       atencionId: current.atencionId,
       numero: current.numero,

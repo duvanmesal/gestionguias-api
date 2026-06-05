@@ -1,5 +1,18 @@
 import type { Request } from "express"
 
+jest.mock("../../modules/notifications/operational-notifications", () => ({
+  notifyAtencionAvailableToGuides: jest.fn(() => Promise.resolve()),
+  notifyTurnoClaimedToGuide: jest.fn(() => Promise.resolve()),
+  notifyTurnoAssignedToGuide: jest.fn(() => Promise.resolve()),
+  notifyTurnoCanceledToGuide: jest.fn(() => Promise.resolve()),
+  notifyTurnoChangedToGuide: jest.fn(() => Promise.resolve()),
+  notifyCheckInReminder: jest.fn(() => Promise.resolve()),
+  notifyGuidePenalized: jest.fn(() => Promise.resolve()),
+  notifySupervisorCheckInPending: jest.fn(() => Promise.resolve()),
+  notifyRecaladaOverdue: jest.fn(() => Promise.resolve()),
+  notifyAtencionNearWithFreeTurnos: jest.fn(() => Promise.resolve()),
+}))
+
 import { BadRequestError, ConflictError } from "../../libs/errors"
 import { logsService } from "../../libs/logs/logs.service"
 import { turnoRepository } from "../../modules/turnos/_data/turno.repository"

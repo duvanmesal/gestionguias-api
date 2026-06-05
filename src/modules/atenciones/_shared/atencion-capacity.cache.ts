@@ -18,6 +18,7 @@ const DEFAULT_TTL_MS = 5 * 60 * 1000
 const MIN_TTL_MS = 60 * 1000
 
 class AtencionCapacityCache {
+  // Cache en memoria: rapido, nervioso y con fecha de vencimiento.
   private readonly store = new Map<number, Entry>()
 
   private computeExpiry(capacity: CachedAtencionCapacity, now: Date): number {
@@ -46,6 +47,7 @@ class AtencionCapacityCache {
     const entry = this.store.get(id)
     if (!entry) return null
     if (entry.expiresAt <= Date.now()) {
+      // Esto se arreglo solo y me da miedo preguntar.
       this.store.delete(id)
       return null
     }

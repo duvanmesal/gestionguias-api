@@ -86,9 +86,11 @@ export async function createRecaladaUsecase(
     }
   }
 
-  const [buque, pais, overlap] = await Promise.all([
+  const [buque, pais, puerto, muelle, overlap] = await Promise.all([
     recaladaRepository.findBuqueById(input.buqueId),
     recaladaRepository.findPaisById(input.paisOrigenId),
+    input.puertoId ? recaladaRepository.findPuertoById(input.puertoId) : Promise.resolve(null),
+    input.muelleId ? recaladaRepository.findMuelleById(input.muelleId) : Promise.resolve(null),
     recaladaRepository.findOverlappingForBuque({
       buqueId: input.buqueId,
       fechaLlegada: input.fechaLlegada,
@@ -136,6 +138,45 @@ export async function createRecaladaUsecase(
     throw new NotFoundError("El país (paisOrigenId) no existe")
   }
 
+  if (input.puertoId && !puerto) {
+    auditFail(
+      req,
+      "recaladas.create.failed",
+      "Create recalada failed",
+      { reason: "puerto_not_found", puertoId: input.puertoId },
+      { entity: "Recalada" },
+    )
+    throw new NotFoundError("El puerto (puertoId) no existe")
+  }
+
+  if (input.muelleId && !muelle) {
+    auditFail(
+      req,
+      "recaladas.create.failed",
+      "Create recalada failed",
+      { reason: "muelle_not_found", muelleId: input.muelleId },
+      { entity: "Recalada" },
+    )
+    throw new NotFoundError("El muelle (muelleId) no existe")
+  }
+
+  const resolvedPuertoId = input.puertoId ?? muelle?.puertoId ?? null
+  if (input.puertoId && muelle && muelle.puertoId !== input.puertoId) {
+    auditFail(
+      req,
+      "recaladas.create.failed",
+      "Create recalada failed",
+      {
+        reason: "muelle_puerto_mismatch",
+        puertoId: input.puertoId,
+        muelleId: input.muelleId,
+        muellePuertoId: muelle.puertoId,
+      },
+      { entity: "Recalada" },
+    )
+    throw new ConflictError("El muelle informado no pertenece al puerto informado")
+  }
+
   let supervisor = await recaladaRepository.findSupervisorByUserId(actorUserId)
 
   if (!supervisor) {
@@ -167,7 +208,11 @@ export async function createRecaladaUsecase(
   const arrivedAt = operationalStatus === "ARRIVED" ? now : null
 
   const created = await recaladaRepository.createWithCodigoAtomic({
-    input,
+    input: {
+      ...input,
+      puertoId: resolvedPuertoId,
+      muelleId: input.muelleId ?? null,
+    },
     supervisorId: supervisor.id,
     source,
     status,
@@ -192,6 +237,8 @@ export async function createRecaladaUsecase(
       actorUserId,
       buqueId: created.buque?.id ?? input.buqueId,
       paisOrigenId: created.paisOrigen?.id ?? input.paisOrigenId,
+      puertoId: created.puertoId,
+      muelleId: created.muelleId,
       operationalStatus: created.operationalStatus,
       status: created.status,
       fechaLlegada: created.fechaLlegada?.toISOString?.(),
