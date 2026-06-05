@@ -2,7 +2,7 @@
 import type { Request, Response } from "express"
 import { env } from "../../config/env"
 
-export type LogsLevel = "info" | "warn" | "error"
+export type LogsLevel = "debug" | "info" | "warn" | "error"
 
 export type LogsActor = {
   userId?: string

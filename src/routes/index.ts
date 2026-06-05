@@ -26,6 +26,9 @@ import dashboardRoutes from "./dashboard.routes";
 // 🔹 Configuración operativa global
 import operationalConfigRoutes from "./operational-config.routes";
 
+// 🔹 Admin: proxy de solo lectura hacia el LogService
+import adminLogsRoutes from "./admin-logs.routes";
+
 const router = Router();
 
 // Porque hacerlo bien a la primera era demasiado elegante.
@@ -59,6 +62,9 @@ v1Router.use("/dashboard", dashboardRoutes);
 // ✅ Configuración operativa global
 v1Router.use("/operational-config", operationalConfigRoutes);
 
+// ✅ Admin logs (proxy seguro de solo lectura)
+v1Router.use("/admin/logs", adminLogsRoutes);
+
 // Mount versioned routes
 router.use("/", v1Router);
 
@@ -85,6 +91,7 @@ router.get("/", (_req, res) => {
         turnos: `${process.env.API_PREFIX ?? "/api"}/turnos`,
         dashboard: `${process.env.API_PREFIX ?? "/api"}/dashboard`,
         operationalConfig: `${process.env.API_PREFIX ?? "/api"}/operational-config`,
+        adminLogs: `${process.env.API_PREFIX ?? "/api"}/admin/logs`,
         health: "/health",
       },
     },

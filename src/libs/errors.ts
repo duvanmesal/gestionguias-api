@@ -58,3 +58,15 @@ export class BadGatewayError extends AppError {
     super(502, "BAD_GATEWAY", message, details)
   }
 }
+
+export class GatewayTimeoutError extends AppError {
+  constructor(message = "Upstream service timed out", details?: any) {
+    super(504, "GATEWAY_TIMEOUT", message, details)
+  }
+}
+
+export class ServiceUnavailableError extends AppError {
+  constructor(message = "Service unavailable", details?: any) {
+    super(503, "SERVICE_UNAVAILABLE", message, details)
+  }
+}
