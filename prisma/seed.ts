@@ -3,6 +3,7 @@ import "dotenv/config"
 const env: Record<string, string | undefined> = (globalThis as any)?.process?.env ?? {}
 
 import {
+  Prisma,
   PrismaClient,
   RolType,
   ProfileStatus,
@@ -12,6 +13,11 @@ import {
   AtencionOperativeStatus,
   StatusType,
   TurnoAssignmentMode,
+  DocumentType,
+  AtencionEvaluationEstadoFinal,
+  NotificationType,
+  NotificationChannel,
+  NotificationStatus,
 } from "@prisma/client"
 import { hash as argonHash, argon2id } from "argon2"
 
@@ -48,6 +54,18 @@ async function resolveUserIdOrThrow(email: string) {
   return user.id
 }
 
+async function resolvePuertoIdOrThrow(codigoPuerto: string) {
+  const puerto = await prisma.puerto.findUnique({ where: { codigo: codigoPuerto } })
+  if (!puerto) throw new Error(`No existe puerto con codigo=${codigoPuerto}`)
+  return puerto.id
+}
+
+async function resolveMuelleIdOrThrow(codigoMuelle: string) {
+  const muelle = await prisma.muelle.findUnique({ where: { codigo: codigoMuelle } })
+  if (!muelle) throw new Error(`No existe muelle con codigo=${codigoMuelle}`)
+  return muelle.id
+}
+
 // ✅ Colombia (Bogotá) es UTC-05:00.
 // Construye una Date en UTC a partir de una fecha/hora local de Bogotá.
 function bogotaDate(y: number, m: number, d: number, hh: number, mm = 0, ss = 0) {
@@ -78,6 +96,10 @@ function normalizeShipCode(code: string) {
   return code.trim().toUpperCase()
 }
 
+function shouldSeedDemoData(nodeEnv: string) {
+  return nodeEnv === "development" || env.SEED_DEMO_DATA === "true"
+}
+
 async function main() {
   console.log("🌱 Starting database seeding...")
 
@@ -87,12 +109,16 @@ async function main() {
 
   await upsertSuperAdmin(SUPER_EMAIL, SUPER_PASS)
   await upsertCountries()
+  await upsertPortsAndDocks()
   await upsertShips()
 
   // Mini-backfill interno por si quedara algún buque sin país (de corridas anteriores)
   await fixShipsPaisIdIfNull()
 
-  if (NODE_ENV === "development") {
+  const superAdminId = await resolveUserIdOrThrow(SUPER_EMAIL)
+  await upsertOperationalConfig(superAdminId)
+
+  if (shouldSeedDemoData(NODE_ENV)) {
     // NOW dinámico (instante real actual)
     const NOW = new Date()
 
@@ -100,6 +126,8 @@ async function main() {
       nowBogota: NOW,
       superAdminEmail: SUPER_EMAIL,
     })
+  } else {
+    console.log("🧪 Demo data skipped (set SEED_DEMO_DATA=true to seed operational scenarios)")
   }
 
   console.log("✅ Database seeding completed!")
@@ -131,7 +159,7 @@ async function upsertSuperAdmin(email: string, password: string) {
     },
   })
 
-  console.log(`👤 SuperAdmin ready: ${email} (password: ${password})`)
+  console.log(`👤 SuperAdmin ready: ${email}`)
 }
 
 async function upsertCountries() {
@@ -152,6 +180,74 @@ async function upsertCountries() {
     })
   }
   console.log(`🌍 Countries upserted: ${countries.length}`)
+}
+
+async function upsertPortsAndDocks() {
+  const puertos = [
+    {
+      codigo: "CTG",
+      nombre: "Puerto de Cartagena",
+      ciudad: "Cartagena",
+      codigoPais: "CO",
+      muelles: [
+        { codigo: "CTG-M1", nombre: "Muelle de Cruceros 1", capacidadCruceros: 2 },
+        { codigo: "CTG-M2", nombre: "Muelle de Cruceros 2", capacidadCruceros: 2 },
+        { codigo: "CTG-FIFO", nombre: "Muelle FIFO Operativo", capacidadCruceros: 1 },
+      ],
+    },
+    {
+      codigo: "SMR",
+      nombre: "Puerto de Santa Marta",
+      ciudad: "Santa Marta",
+      codigoPais: "CO",
+      muelles: [
+        { codigo: "SMR-M1", nombre: "Muelle Internacional 1", capacidadCruceros: 1 },
+      ],
+    },
+  ]
+
+  let muellesCount = 0
+  for (const p of puertos) {
+    const paisId = await resolvePaisIdOrThrow(p.codigoPais)
+    const puerto = await prisma.puerto.upsert({
+      where: { codigo: p.codigo },
+      update: {
+        nombre: p.nombre,
+        ciudad: p.ciudad,
+        paisId,
+        status: StatusType.ACTIVO,
+      },
+      create: {
+        codigo: p.codigo,
+        nombre: p.nombre,
+        ciudad: p.ciudad,
+        paisId,
+        status: StatusType.ACTIVO,
+      },
+    })
+
+    for (const m of p.muelles) {
+      await prisma.muelle.upsert({
+        where: { codigo: m.codigo },
+        update: {
+          nombre: m.nombre,
+          puertoId: puerto.id,
+          capacidadCruceros: m.capacidadCruceros,
+          status: StatusType.ACTIVO,
+        },
+        create: {
+          codigo: m.codigo,
+          nombre: m.nombre,
+          puertoId: puerto.id,
+          capacidadCruceros: m.capacidadCruceros,
+          status: StatusType.ACTIVO,
+        },
+      })
+      muellesCount++
+    }
+  }
+
+  console.log(`⚓ Ports/docks upserted: ${puertos.length}/${muellesCount}`)
 }
 
 async function upsertShips() {
@@ -276,6 +372,9 @@ type SeedUser = {
   nombres: string
   apellidos: string
   rol: RolType
+  documentType: DocumentType
+  documentNumber: string
+  telefono: string
 }
 
 async function upsertSeedUsers(input: { nowBogota: Date }) {
@@ -286,6 +385,9 @@ async function upsertSeedUsers(input: { nowBogota: Date }) {
       nombres: "María",
       apellidos: "González",
       rol: RolType.SUPERVISOR,
+      documentType: DocumentType.CC,
+      documentNumber: "1001001001",
+      telefono: "+57 300 123 4567",
     },
     {
       email: env.SEED_SUPERVISOR_2_EMAIL ?? "supervisor2@test.com",
@@ -293,6 +395,9 @@ async function upsertSeedUsers(input: { nowBogota: Date }) {
       nombres: "Julián",
       apellidos: "Pérez",
       rol: RolType.SUPERVISOR,
+      documentType: DocumentType.CC,
+      documentNumber: "1001001002",
+      telefono: "+57 300 123 4568",
     },
     {
       email: env.SEED_GUIA_1_EMAIL ?? "guia1@test.com",
@@ -300,6 +405,9 @@ async function upsertSeedUsers(input: { nowBogota: Date }) {
       nombres: "Carlos",
       apellidos: "Rodríguez",
       rol: RolType.GUIA,
+      documentType: DocumentType.CC,
+      documentNumber: "73000101",
+      telefono: "+57 300 555 0001",
     },
     {
       email: env.SEED_GUIA_2_EMAIL ?? "guia2@test.com",
@@ -307,6 +415,9 @@ async function upsertSeedUsers(input: { nowBogota: Date }) {
       nombres: "Ana",
       apellidos: "Martínez",
       rol: RolType.GUIA,
+      documentType: DocumentType.CC,
+      documentNumber: "73000102",
+      telefono: "+57 300 555 0002",
     },
     {
       email: env.SEED_GUIA_3_EMAIL ?? "guia3@test.com",
@@ -314,6 +425,9 @@ async function upsertSeedUsers(input: { nowBogota: Date }) {
       nombres: "Sofía",
       apellidos: "López",
       rol: RolType.GUIA,
+      documentType: DocumentType.CC,
+      documentNumber: "73000103",
+      telefono: "+57 300 555 0003",
     },
     {
       email: env.SEED_GUIA_4_EMAIL ?? "guia4@test.com",
@@ -321,6 +435,9 @@ async function upsertSeedUsers(input: { nowBogota: Date }) {
       nombres: "Mateo",
       apellidos: "García",
       rol: RolType.GUIA,
+      documentType: DocumentType.CE,
+      documentNumber: "CE900104",
+      telefono: "+57 300 555 0004",
     },
   ]
 
@@ -340,6 +457,9 @@ async function upsertSeedUsers(input: { nowBogota: Date }) {
         profileStatus: ProfileStatus.COMPLETE,
         profileCompletedAt: input.nowBogota,
         emailVerifiedAt: input.nowBogota,
+        documentType: u.documentType,
+        documentNumber: u.documentNumber,
+        telefono: u.telefono,
       },
       create: {
         email: u.email,
@@ -351,14 +471,17 @@ async function upsertSeedUsers(input: { nowBogota: Date }) {
         profileStatus: ProfileStatus.COMPLETE,
         profileCompletedAt: input.nowBogota,
         emailVerifiedAt: input.nowBogota,
+        documentType: u.documentType,
+        documentNumber: u.documentNumber,
+        telefono: u.telefono,
       },
     })
 
     if (u.rol === RolType.SUPERVISOR) {
       const sup = await prisma.supervisor.upsert({
         where: { usuarioId: user.id },
-        update: { telefono: "+57 300 123 4567" },
-        create: { usuarioId: user.id, telefono: "+57 300 123 4567" },
+        update: { telefono: u.telefono },
+        create: { usuarioId: user.id, telefono: u.telefono },
       })
       created[u.email] = { userId: user.id, supervisorId: sup.id }
     }
@@ -367,7 +490,7 @@ async function upsertSeedUsers(input: { nowBogota: Date }) {
       const guia = await prisma.guia.upsert({
         where: { usuarioId: user.id },
         update: {
-          telefono: "+57 300 555 0000",
+          telefono: u.telefono,
           direccion: "Cartagena, Colombia",
           disponibleParaTurnos: false,
           disponibilidadUpdatedAt: null,
@@ -375,7 +498,7 @@ async function upsertSeedUsers(input: { nowBogota: Date }) {
         },
         create: {
           usuarioId: user.id,
-          telefono: "+57 300 555 0000",
+          telefono: u.telefono,
           direccion: "Cartagena, Colombia",
           disponibleParaTurnos: false,
           disponibilidadUpdatedAt: null,
@@ -466,9 +589,12 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
 
   // --- usuarios ---
   const seedUsers = await upsertSeedUsers({ nowBogota: now })
+  const supervisor1UserId = seedUsers[env.SEED_SUPERVISOR_1_EMAIL ?? "supervisor1@test.com"]?.userId
   const supervisor1Id = seedUsers[env.SEED_SUPERVISOR_1_EMAIL ?? "supervisor1@test.com"]?.supervisorId
   const supervisor2Id = seedUsers[env.SEED_SUPERVISOR_2_EMAIL ?? "supervisor2@test.com"]?.supervisorId
-  if (!supervisor1Id || !supervisor2Id) throw new Error("No se pudieron resolver supervisores del seed")
+  if (!supervisor1UserId || !supervisor1Id || !supervisor2Id) {
+    throw new Error("No se pudieron resolver supervisores del seed")
+  }
 
   const guiaIds = [
     seedUsers[env.SEED_GUIA_1_EMAIL ?? "guia1@test.com"]?.guiaId,
@@ -478,8 +604,15 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
   ].filter(Boolean) as string[]
   if (guiaIds.length < 4) throw new Error("No se pudieron resolver guías del seed")
 
+  const guiaUserIds = [
+    seedUsers[env.SEED_GUIA_1_EMAIL ?? "guia1@test.com"]?.userId,
+    seedUsers[env.SEED_GUIA_2_EMAIL ?? "guia2@test.com"]?.userId,
+    seedUsers[env.SEED_GUIA_3_EMAIL ?? "guia3@test.com"]?.userId,
+    seedUsers[env.SEED_GUIA_4_EMAIL ?? "guia4@test.com"]?.userId,
+  ].filter(Boolean) as string[]
+  if (guiaUserIds.length < 4) throw new Error("No se pudieron resolver usuarios guía del seed")
+
   const createdById = await resolveUserIdOrThrow(input.superAdminEmail)
-  await upsertOperationalConfig(createdById)
   await seedGuideAvailabilityStates({ now, guiaIds })
 
   // --- catálogos base ---
@@ -491,6 +624,10 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
   const paisUS = await resolvePaisIdOrThrow("US")
   const paisIT = await resolvePaisIdOrThrow("IT")
   const paisES = await resolvePaisIdOrThrow("ES")
+  const puertoCartagenaId = await resolvePuertoIdOrThrow("CTG")
+  const muelleCruceros1Id = await resolveMuelleIdOrThrow("CTG-M1")
+  const muelleCruceros2Id = await resolveMuelleIdOrThrow("CTG-M2")
+  const muelleFifoId = await resolveMuelleIdOrThrow("CTG-FIFO")
 
   // ==========================================================
   // ✅ Ventanas temporales RELATIVAS A NOW:
@@ -532,6 +669,8 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       departedAt: null,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.ARRIVED,
+      puertoId: puertoCartagenaId,
+      muelleId: muelleCruceros1Id,
       terminal: "Terminal de Cruceros",
       muelle: "Muelle 1",
       pasajerosEstimados: 5200,
@@ -551,6 +690,8 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       arrivedAt: arrivedArrivedAt,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperiveStatusFallback(RecaladaOperativeStatus.ARRIVED),
+      puertoId: puertoCartagenaId,
+      muelleId: muelleCruceros1Id,
       terminal: "Terminal de Cruceros",
       muelle: "Muelle 1",
       pasajerosEstimados: 5200,
@@ -572,6 +713,8 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       departedAt: null,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.SCHEDULED,
+      puertoId: puertoCartagenaId,
+      muelleId: muelleCruceros2Id,
       terminal: "Terminal de Cruceros",
       muelle: "Muelle 2",
       pasajerosEstimados: 4300,
@@ -590,6 +733,8 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       fechaSalida: schedSalida,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.SCHEDULED,
+      puertoId: puertoCartagenaId,
+      muelleId: muelleCruceros2Id,
       terminal: "Terminal de Cruceros",
       muelle: "Muelle 2",
       pasajerosEstimados: 4300,
@@ -611,6 +756,8 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       departedAt: departedDepartedAt,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.DEPARTED,
+      puertoId: puertoCartagenaId,
+      muelleId: muelleCruceros1Id,
       terminal: "Terminal de Cruceros",
       muelle: "Muelle 3",
       pasajerosEstimados: 3900,
@@ -631,6 +778,8 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       departedAt: departedDepartedAt,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.DEPARTED,
+      puertoId: puertoCartagenaId,
+      muelleId: muelleCruceros1Id,
       terminal: "Terminal de Cruceros",
       muelle: "Muelle 3",
       pasajerosEstimados: 3900,
@@ -652,6 +801,8 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       departedAt: null,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.CANCELED,
+      puertoId: puertoCartagenaId,
+      muelleId: muelleCruceros2Id,
       terminal: "Terminal de Cruceros",
       muelle: "Muelle 2",
       pasajerosEstimados: 4100,
@@ -670,6 +821,8 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       fechaSalida: canceledSalida,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.CANCELED,
+      puertoId: puertoCartagenaId,
+      muelleId: muelleCruceros2Id,
       terminal: "Terminal de Cruceros",
       muelle: "Muelle 2",
       pasajerosEstimados: 4100,
@@ -693,7 +846,7 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
   // ==========================================================
 
   // 1) Cerrada: hace 6h → hace 4h
-  await upsertAtencionWithSlots({
+  const closedAtencion = await upsertAtencionWithSlots({
     recaladaId: rArrived.id,
     supervisorId: supervisor1Id,
     createdById,
@@ -729,7 +882,7 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
   })
 
   // 2) OPEN activa ahora: -30min → +90min
-  await upsertAtencionWithSlots({
+  const activeAtencion = await upsertAtencionWithSlots({
     recaladaId: rArrived.id,
     supervisorId: supervisor1Id,
     createdById,
@@ -739,8 +892,21 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
     operationalStatus: AtencionOperativeStatus.OPEN,
     turnosTotal: 6,
     slotPlan: [
-      { numero: 1, status: TurnoStatus.IN_PROGRESS, guiaId: guiaIds[3], checkInAt: addMinutes(now, -25) },
-      { numero: 2, status: TurnoStatus.ASSIGNED, guiaId: guiaIds[2] },
+      {
+        numero: 1,
+        status: TurnoStatus.IN_PROGRESS,
+        guiaId: guiaIds[3],
+        checkInRequestedAt: addMinutes(now, -28),
+        checkInConfirmedAt: addMinutes(now, -25),
+        checkInConfirmedById: supervisor1UserId,
+        checkInAt: addMinutes(now, -25),
+      },
+      {
+        numero: 2,
+        status: TurnoStatus.ASSIGNED,
+        guiaId: guiaIds[2],
+        checkInRequestedAt: addMinutes(now, -5),
+      },
       { numero: 3, status: TurnoStatus.AVAILABLE, guiaId: null },
       { numero: 4, status: TurnoStatus.AVAILABLE, guiaId: null },
       { numero: 5, status: TurnoStatus.AVAILABLE, guiaId: null },
@@ -749,7 +915,7 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
   })
 
   // 3) OPEN futura (upcoming): +120min → +240min
-  await upsertAtencionWithSlots({
+  const upcomingAtencion = await upsertAtencionWithSlots({
     recaladaId: rArrived.id,
     supervisorId: supervisor1Id,
     createdById,
@@ -766,7 +932,7 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
   })
 
   // 4) OPEN asociada a recalada SCHEDULED: +150min → +330min
-  await upsertAtencionWithSlots({
+  const scheduledAtencion = await upsertAtencionWithSlots({
     recaladaId: rScheduled.id,
     supervisorId: supervisor2Id,
     createdById,
@@ -803,6 +969,49 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
 
   console.log("🧩 Atenciones + Turnos seed ready (OPEN/CLOSED/CANCELED + estados de turnos)")
 
+  const noShowTurnoId = await resolveTurnoIdOrThrow(closedAtencion.id, 3)
+  const pendingCheckInTurnoId = await resolveTurnoIdOrThrow(activeAtencion.id, 2)
+  await upsertAtencionEvaluationForSeed({
+    atencionId: closedAtencion.id,
+    evaluatedById: createdById,
+    calificacion: 4,
+    estadoFinal: AtencionEvaluationEstadoFinal.CON_NOVEDADES,
+    observaciones: "[SEED] Cierre con novedad: un guía no se presentó y se generó penalización.",
+  })
+  await upsertPenaltyForSeed({
+    guiaId: guiaIds[2],
+    turnoId: noShowTurnoId,
+    createdById,
+    startsAt: addMinutes(now, -220),
+    expiresAt: addMinutes(now, +48 * 60),
+    reason: "[SEED] No se presentó al turno asignado.",
+  })
+  await seedDisponibilidadesForAtencion({
+    atencionId: upcomingAtencion.id,
+    rows: [
+      { guiaId: guiaIds[0], marcadoAt: addMinutes(now, -35), penalizado: false },
+      { guiaId: guiaIds[1], marcadoAt: addMinutes(now, -25), penalizado: false },
+      { guiaId: guiaIds[2], marcadoAt: addMinutes(now, -15), penalizado: true },
+    ],
+  })
+  await seedDisponibilidadesForAtencion({
+    atencionId: scheduledAtencion.id,
+    rows: [
+      { guiaId: guiaIds[1], marcadoAt: addMinutes(now, -50), penalizado: false },
+      { guiaId: guiaIds[0], marcadoAt: addMinutes(now, -40), penalizado: false },
+    ],
+  })
+  await seedOperationalNotifications({
+    now,
+    supervisorUserId: supervisor1UserId,
+    guiaIds,
+    guiaUserIds,
+    activeAtencionId: activeAtencion.id,
+    upcomingAtencionId: upcomingAtencion.id,
+    pendingCheckInTurnoId,
+    noShowTurnoId,
+  })
+
   // ==========================================================
   // ⚡ DEMO FIFO GLOBAL:
   // - El seed deja el sistema en MANUAL_RECLAMO para probar reclamo manual.
@@ -827,6 +1036,8 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       departedAt: null,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.SCHEDULED,
+      puertoId: puertoCartagenaId,
+      muelleId: muelleFifoId,
       terminal: "Terminal de Cruceros",
       muelle: "Muelle FIFO",
       pasajerosEstimados: 3200,
@@ -846,6 +1057,8 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
       fechaSalida: fifoSalida,
       status: StatusType.ACTIVO,
       operationalStatus: RecaladaOperativeStatus.SCHEDULED,
+      puertoId: puertoCartagenaId,
+      muelleId: muelleFifoId,
       terminal: "Terminal de Cruceros",
       muelle: "Muelle FIFO",
       pasajerosEstimados: 3200,
@@ -856,7 +1069,7 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
     },
   })
 
-  await upsertAtencionWithSlots({
+  const fifoAtencion = await upsertAtencionWithSlots({
     recaladaId: rDemo.id,
     supervisorId: supervisor1Id,
     createdById,
@@ -875,6 +1088,13 @@ async function upsertDevWorkflows(input: DevWorkflowInput) {
   console.log(
     `⚡ FIFO demo ready — recalada ${recaladaDemoCode} (SCHEDULED, 3 cupos, 2 guías elegibles por disponibilidad global)`,
   )
+  await seedDisponibilidadesForAtencion({
+    atencionId: fifoAtencion.id,
+    rows: [
+      { guiaId: guiaIds[0], marcadoAt: addMinutes(now, -30), penalizado: false },
+      { guiaId: guiaIds[1], marcadoAt: addMinutes(now, -20), penalizado: false },
+    ],
+  })
 }
 
 type SlotPlanItem = {
@@ -883,6 +1103,12 @@ type SlotPlanItem = {
   guiaId: string | null
   checkInAt?: Date
   checkOutAt?: Date
+  checkInRequestedAt?: Date
+  checkInConfirmedAt?: Date
+  checkInConfirmedById?: string
+  checkInRejectedAt?: Date
+  checkInRejectedById?: string
+  checkInRejectReason?: string
   canceledAt?: Date
   cancelReason?: string
 }
@@ -975,6 +1201,12 @@ async function upsertAtencionWithSlots(input: UpsertAtencionInput) {
           guiaId: p.guiaId,
           checkInAt: p.checkInAt ?? null,
           checkOutAt: p.checkOutAt ?? null,
+          checkInRequestedAt: p.checkInRequestedAt ?? null,
+          checkInConfirmedAt: p.checkInConfirmedAt ?? null,
+          checkInConfirmedById: p.checkInConfirmedById ?? null,
+          checkInRejectedAt: p.checkInRejectedAt ?? null,
+          checkInRejectedById: p.checkInRejectedById ?? null,
+          checkInRejectReason: p.checkInRejectReason ?? null,
           canceledAt: p.canceledAt ?? null,
           cancelReason: p.cancelReason ?? null,
         },
@@ -994,6 +1226,209 @@ async function upsertAtencionWithSlots(input: UpsertAtencionInput) {
     `🎫 Atencion seed ok id=${atencion.id} recaladaId=${input.recaladaId} status=${input.operationalStatus} cupo=${input.turnosTotal}`
   )
   return atencion
+}
+
+async function resolveTurnoIdOrThrow(atencionId: number, numero: number) {
+  const turno = await prisma.turno.findUnique({
+    where: { atencionId_numero: { atencionId, numero } },
+    select: { id: true },
+  })
+  if (!turno) throw new Error(`No existe turno numero=${numero} para atencionId=${atencionId}`)
+  return turno.id
+}
+
+async function upsertAtencionEvaluationForSeed(input: {
+  atencionId: number
+  evaluatedById: string
+  calificacion: number
+  estadoFinal: AtencionEvaluationEstadoFinal
+  observaciones: string
+}) {
+  await prisma.atencionEvaluation.upsert({
+    where: { atencionId: input.atencionId },
+    update: {
+      calificacion: input.calificacion,
+      estadoFinal: input.estadoFinal,
+      observaciones: input.observaciones,
+      evaluatedById: input.evaluatedById,
+      evaluatedAt: new Date(),
+    },
+    create: {
+      atencionId: input.atencionId,
+      calificacion: input.calificacion,
+      estadoFinal: input.estadoFinal,
+      observaciones: input.observaciones,
+      evaluatedById: input.evaluatedById,
+    },
+  })
+  console.log(`📝 Evaluation seed ready for atencionId=${input.atencionId}`)
+}
+
+async function upsertPenaltyForSeed(input: {
+  guiaId: string
+  turnoId: number
+  reason: string
+  startsAt: Date
+  expiresAt: Date
+  createdById: string
+}) {
+  const existing = await prisma.guiaPenalty.findFirst({
+    where: { guiaId: input.guiaId, turnoId: input.turnoId, motivo: "NO_SHOW" },
+    select: { id: true },
+  })
+
+  if (existing) {
+    await prisma.guiaPenalty.update({
+      where: { id: existing.id },
+      data: {
+        reason: input.reason,
+        startsAt: input.startsAt,
+        expiresAt: input.expiresAt,
+        createdById: input.createdById,
+      },
+    })
+  } else {
+    await prisma.guiaPenalty.create({
+      data: {
+        guiaId: input.guiaId,
+        turnoId: input.turnoId,
+        motivo: "NO_SHOW",
+        reason: input.reason,
+        startsAt: input.startsAt,
+        expiresAt: input.expiresAt,
+        createdById: input.createdById,
+      },
+    })
+  }
+
+  await prisma.guia.update({
+    where: { id: input.guiaId },
+    data: { pendingPenalty: input.expiresAt > new Date() },
+  })
+  console.log(`🚫 Penalty seed ready for guiaId=${input.guiaId}`)
+}
+
+async function seedDisponibilidadesForAtencion(input: {
+  atencionId: number
+  rows: Array<{ guiaId: string; marcadoAt: Date; penalizado: boolean }>
+}) {
+  for (const row of input.rows) {
+    await prisma.disponibilidad.upsert({
+      where: { atencionId_guiaId: { atencionId: input.atencionId, guiaId: row.guiaId } },
+      update: {
+        marcadoAt: row.marcadoAt,
+        penalizado: row.penalizado,
+      },
+      create: {
+        atencionId: input.atencionId,
+        guiaId: row.guiaId,
+        marcadoAt: row.marcadoAt,
+        penalizado: row.penalizado,
+      },
+    })
+  }
+  console.log(`📋 Disponibilidades seed ready for atencionId=${input.atencionId}`)
+}
+
+async function seedOperationalNotifications(input: {
+  now: Date
+  supervisorUserId: string
+  guiaIds: string[]
+  guiaUserIds: string[]
+  activeAtencionId: number
+  upcomingAtencionId: number
+  pendingCheckInTurnoId: number
+  noShowTurnoId: number
+}) {
+  await upsertSeedNotification({
+    userId: input.guiaUserIds[0],
+    guiaId: input.guiaIds[0],
+    type: NotificationType.ATENCION_AVAILABLE_FOR_GUIDE,
+    notificationId: `seed:availability:${input.upcomingAtencionId}:${input.guiaUserIds[0]}`,
+    title: "Disponibilidad abierta",
+    body: "Hay una atención próxima disponible para registrar disponibilidad.",
+    atencionId: input.upcomingAtencionId,
+    payload: { source: "seed", atencionId: input.upcomingAtencionId },
+  })
+  await upsertSeedNotification({
+    userId: input.guiaUserIds[2],
+    guiaId: input.guiaIds[2],
+    type: NotificationType.CHECKIN_REMINDER,
+    notificationId: `seed:checkin:${input.pendingCheckInTurnoId}:${input.guiaUserIds[2]}`,
+    title: "Check-in pendiente",
+    body: "Tu check-in ya fue solicitado y está pendiente de confirmación del supervisor.",
+    atencionId: input.activeAtencionId,
+    turnoId: input.pendingCheckInTurnoId,
+    payload: { source: "seed", turnoId: input.pendingCheckInTurnoId },
+  })
+  await upsertSeedNotification({
+    userId: input.supervisorUserId,
+    type: NotificationType.SUPERVISOR_CHECKIN_PENDING,
+    notificationId: `seed:supervisor-checkin:${input.pendingCheckInTurnoId}:${input.supervisorUserId}`,
+    title: "Check-in por validar",
+    body: "Un guía solicitó check-in y requiere confirmación del supervisor.",
+    atencionId: input.activeAtencionId,
+    turnoId: input.pendingCheckInTurnoId,
+    payload: { source: "seed", turnoId: input.pendingCheckInTurnoId },
+  })
+  await upsertSeedNotification({
+    userId: input.guiaUserIds[2],
+    guiaId: input.guiaIds[2],
+    type: NotificationType.GUIDE_PENALIZED,
+    notificationId: `seed:penalty:${input.noShowTurnoId}:${input.guiaUserIds[2]}`,
+    title: "Penalización registrada",
+    body: "Se registró una penalización por no presentación a un turno asignado.",
+    turnoId: input.noShowTurnoId,
+    payload: { source: "seed", reason: "NO_SHOW", generatedAt: input.now.toISOString() },
+  })
+
+  console.log("🔔 Operational notifications seed ready")
+}
+
+async function upsertSeedNotification(input: {
+  userId: string
+  guiaId?: string
+  type: NotificationType
+  notificationId: string
+  title: string
+  body: string
+  recaladaId?: number
+  atencionId?: number
+  turnoId?: number
+  payload?: Prisma.InputJsonValue
+}) {
+  const baseData = {
+    type: input.type,
+    channel: NotificationChannel.PUSH,
+    status: NotificationStatus.PENDING,
+    guiaId: input.guiaId ?? null,
+    recaladaId: input.recaladaId ?? null,
+    atencionId: input.atencionId ?? null,
+    turnoId: input.turnoId ?? null,
+    title: input.title,
+    body: input.body,
+    payload: input.payload ?? Prisma.JsonNull,
+    attempts: 0,
+    lastError: null,
+    nextRetryAt: null,
+    sentAt: null,
+  }
+
+  await prisma.notificationDelivery.upsert({
+    where: {
+      uniq_user_channel_notification: {
+        userId: input.userId,
+        channel: NotificationChannel.PUSH,
+        notificationId: input.notificationId,
+      },
+    },
+    update: baseData,
+    create: {
+      ...baseData,
+      userId: input.userId,
+      notificationId: input.notificationId,
+    },
+  })
 }
 
 // 🔒 Pequeño helper para evitar TS raro si tu editor se pone quisquilloso
