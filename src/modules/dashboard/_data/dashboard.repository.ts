@@ -205,6 +205,35 @@ export const dashboardRepository = {
     });
   },
 
+  countPendingCheckIns() {
+    return prisma.turno.count({
+      where: {
+        checkInRequestedAt: { not: null },
+        checkInConfirmedAt: null,
+        checkInRejectedAt: null,
+        status: TurnoStatus.ASSIGNED,
+      },
+    });
+  },
+
+  listWeekAtencionesWithTurnos(args: { start: Date; end: Date }) {
+    return prisma.atencion.findMany({
+      where: {
+        status: StatusType.ACTIVO,
+        fechaInicio: { lt: args.end },
+        fechaFin: { gt: args.start },
+      },
+      select: {
+        id: true,
+        fechaInicio: true,
+        fechaFin: true,
+        turnos: {
+          select: { status: true },
+        },
+      },
+    });
+  },
+
   // =====================
   // Guia
   // =====================

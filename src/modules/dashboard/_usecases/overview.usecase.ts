@@ -76,6 +76,7 @@ export async function getDashboardOverviewUsecase(
       end,
       now,
       upcomingLimit: input.query.upcomingLimit ?? 8,
+      tzOffsetMinutes,
     });
 
     const widgets = buildSupervisorWidgets(supervisor);
@@ -114,21 +115,46 @@ async function buildSupervisorOverview(args: {
   end: Date;
   now: Date;
   upcomingLimit: number;
+  tzOffsetMinutes: number;
 }): Promise<SupervisorOverview> {
-  const { start, end, now, upcomingLimit } = args;
+  const { start, end, now, upcomingLimit, tzOffsetMinutes } = args;
 
-  const [recaladas, atenciones, turnos, overdueRecaladas] = await Promise.all([
+  // Build 7-day rolling window for trend (today-6 .. today)
+  const trendDayMeta: Array<{ dateStr: string; dayStart: Date; dayEnd: Date }> =
+    [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+    const dateStr = toLocalDateString(d, tzOffsetMinutes);
+    const { start: dayStart, end: dayEnd } = buildUtcDayRange(
+      dateStr,
+      tzOffsetMinutes,
+    );
+    trendDayMeta.push({ dateStr, dayStart, dayEnd });
+  }
+  const trendWindowStart = trendDayMeta[0].dayStart;
+  const trendWindowEnd = trendDayMeta[trendDayMeta.length - 1].dayEnd;
+
+  const [
+    recaladas,
+    atenciones,
+    turnos,
+    overdueRecaladas,
+    pendingCheckIns,
+  ] = await Promise.all([
     dashboardRepository.countRecaladasInDay({ start, end }),
     dashboardRepository.countAtencionesIntersectDay({ start, end }),
     dashboardRepository.countTurnosForAtencionesIntersectDay({ start, end }),
     dashboardRepository.countOverdueDepartures({ now }),
+    dashboardRepository.countPendingCheckIns(),
   ]);
 
-  const turnosByStatus =
-    await dashboardRepository.groupTurnosByStatusIntersectDay({
-      start,
-      end,
-    });
+  const [turnosByStatus, weekAtenciones] = await Promise.all([
+    dashboardRepository.groupTurnosByStatusIntersectDay({ start, end }),
+    dashboardRepository.listWeekAtencionesWithTurnos({
+      start: trendWindowStart,
+      end: trendWindowEnd,
+    }),
+  ]);
 
   const breakdown: Record<string, number> = {};
   for (const row of turnosByStatus) {
@@ -140,14 +166,20 @@ async function buildSupervisorOverview(args: {
   const turnosInProgress = breakdown[String(TurnoStatus.IN_PROGRESS)] ?? 0;
   const turnosDone = breakdown[String(TurnoStatus.COMPLETED)] ?? 0;
   const turnosCanceled = breakdown[String(TurnoStatus.CANCELED)] ?? 0;
+  const turnosNoShow = breakdown[String(TurnoStatus.NO_SHOW)] ?? 0;
 
-  const [guidesActivos, guidesAsignadosRows] = await Promise.all([
-    dashboardRepository.countGuidesActivos(),
-    dashboardRepository.groupGuidesAsignadosIntersectDay({ start, end }),
-  ]);
-  const [guidesDisponibles, guidesPenalizados] = await Promise.all([
-    dashboardRepository.countGuidesDisponibles(),
-    dashboardRepository.countGuidesPenalizados(),
+  const [
+    [guidesActivos, guidesAsignadosRows],
+    [guidesDisponibles, guidesPenalizados],
+  ] = await Promise.all([
+    Promise.all([
+      dashboardRepository.countGuidesActivos(),
+      dashboardRepository.groupGuidesAsignadosIntersectDay({ start, end }),
+    ]),
+    Promise.all([
+      dashboardRepository.countGuidesDisponibles(),
+      dashboardRepository.countGuidesPenalizados(),
+    ]),
   ]);
 
   const guidesAsignados = guidesAsignadosRows.length;
@@ -218,6 +250,51 @@ async function buildSupervisorOverview(args: {
     });
   }
 
+  // ── Rates ────────────────────────────────────────────────────────────────
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+  const assignedAndInProgress = turnosAssigned + turnosInProgress;
+  const closedTotal = turnosDone + turnosCanceled + turnosNoShow;
+
+  const rates = {
+    assignmentRate: round1(turnos > 0 ? (assignedAndInProgress / turnos) * 100 : 0),
+    executionRate: round1(closedTotal > 0 ? (turnosDone / closedTotal) * 100 : 0),
+    noShowRate: round1(closedTotal > 0 ? (turnosNoShow / closedTotal) * 100 : 0),
+    guideAvailabilityRate: round1(
+      guidesActivos > 0 ? (guidesDisponibles / guidesActivos) * 100 : 0,
+    ),
+  };
+
+  // ── Pending work ─────────────────────────────────────────────────────────
+  const pendingWork = {
+    pendingCheckIns,
+    overdueRecaladas,
+    unresolvedTurnos: turnosAvailable,
+  };
+
+  // ── 7-day trend ──────────────────────────────────────────────────────────
+  const trend7dDays = trendDayMeta.map(({ dateStr, dayStart, dayEnd }) => {
+    const matching = weekAtenciones.filter(
+      (a) => a.fechaInicio < dayEnd && a.fechaFin > dayStart,
+    );
+    let turnoCount = 0;
+    let completedCount = 0;
+    let noShowCount = 0;
+    for (const a of matching) {
+      turnoCount += a.turnos.length;
+      for (const t of a.turnos) {
+        if (t.status === TurnoStatus.COMPLETED) completedCount++;
+        else if (t.status === TurnoStatus.NO_SHOW) noShowCount++;
+      }
+    }
+    return {
+      date: dateStr,
+      atenciones: matching.length,
+      turnos: turnoCount,
+      completed: completedCount,
+      noShows: noShowCount,
+    };
+  });
+
   return {
     counts: {
       recaladas,
@@ -228,6 +305,7 @@ async function buildSupervisorOverview(args: {
       turnosInProgress,
       turnosDone,
       turnosCanceled,
+      turnosNoShow,
       overdueRecaladas,
     },
     guides: {
@@ -241,6 +319,9 @@ async function buildSupervisorOverview(args: {
     turnosBreakdown: breakdown,
     alerts,
     upcoming: milestones.slice(0, upcomingLimit),
+    pendingWork,
+    rates,
+    trend7d: { days: trend7dDays },
   };
 }
 

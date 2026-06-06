@@ -61,14 +61,13 @@ export type SupervisorOverview = {
     atenciones: number;
     turnos: number;
 
-    // extras útiles para widgets
     turnosAssigned?: number;
     turnosAvailable?: number;
     turnosInProgress?: number;
     turnosDone?: number;
     turnosCanceled?: number;
+    turnosNoShow?: number;
 
-    // Recaladas vencidas pendientes de zarpe (ACTIVO + ARRIVED + fechaSalida < now)
     overdueRecaladas?: number;
   };
 
@@ -86,6 +85,32 @@ export type SupervisorOverview = {
   alerts?: SupervisorAlert[];
 
   upcoming: DashboardMilestone[];
+
+  /** Trabajo pendiente de acción inmediata */
+  pendingWork?: {
+    pendingCheckIns: number;
+    overdueRecaladas: number;
+    unresolvedTurnos: number;
+  };
+
+  /** Tasas operativas del día (0–100, redondeadas a 1 decimal) */
+  rates?: {
+    assignmentRate: number;
+    executionRate: number;
+    noShowRate: number;
+    guideAvailabilityRate: number;
+  };
+
+  /** Serie diaria de los últimos 7 días */
+  trend7d?: {
+    days: Array<{
+      date: string;       // YYYY-MM-DD
+      atenciones: number;
+      turnos: number;
+      completed: number;
+      noShows: number;
+    }>;
+  };
 };
 
 export type DashboardMilestoneKind =
