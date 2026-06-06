@@ -315,6 +315,9 @@ Reglas (Epica 6):
 - Solo `SUPERVISOR` o `SUPER_ADMIN`.
 - La atención y recalada deben estar operables.
 - Solo se puede marcar desde `ASSIGNED`.
+- No se puede marcar mientras exista una solicitud de check-in pendiente
+  (`checkInRequestedAt` presente sin confirmación ni rechazo); primero el
+  supervisor debe confirmar o rechazar el check-in.
 - No se puede marcar antes de `fechaInicio`.
 - **`reason` es obligatorio** (mínimo 3 caracteres, máximo 500). Antes de Epica 6
   era opcional; ahora cualquier llamada sin motivo responde `400 BAD_REQUEST`.

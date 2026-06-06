@@ -69,6 +69,19 @@ describe("Epica 6 — NO_SHOW y penalizaciones con vigencia", () => {
   })
 
   describe("noShowTurnoUsecase crea penalización con vigencia", () => {
+    it("bloquea NO_SHOW mientras el check-in está pendiente de confirmación", async () => {
+      jest.spyOn(turnoRepository, "findGateForOperacion").mockResolvedValue(
+        gate({ checkInRequestedAt: new Date("2026-05-04T15:00:00.000Z") }) as any,
+      )
+      const noShow = jest.spyOn(turnoRepository, "noShowIfStillAssigned")
+
+      await expect(
+        noShowTurnoUsecase(req, 1, "El guía no se presentó", "sup-1"),
+      ).rejects.toBeInstanceOf(ConflictError)
+
+      expect(noShow).not.toHaveBeenCalled()
+    })
+
     it("crea GuiaPenalty con expiresAt = now + duration y NO_SHOW como motivo", async () => {
       const findGate = jest
         .spyOn(turnoRepository, "findGateForOperacion")
