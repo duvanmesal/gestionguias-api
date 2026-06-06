@@ -105,9 +105,64 @@ export const exportLogsQuerySchema = z
     },
   )
 
+export const facetsLogsQuerySchema = z
+  .object({
+    from: isoDatetime.optional(),
+    to: isoDatetime.optional(),
+    level: logLevelSchema.optional(),
+    service: z.string().min(1).max(120).optional(),
+    action: z.string().min(1).max(120).optional(),
+    userId: z.string().min(1).max(120).optional(),
+    requestId: z.string().min(1).max(120).optional(),
+    q: z.string().min(1).max(200).optional(),
+    ...advancedFilters,
+    limit: z.coerce.number().int().min(1).max(50).default(20),
+  })
+  .strict()
+
+export const timelineLogsQuerySchema = z
+  .object({
+    from: isoDatetime,
+    to: isoDatetime,
+    level: logLevelSchema.optional(),
+    service: z.string().min(1).max(120).optional(),
+    action: z.string().min(1).max(120).optional(),
+    userId: z.string().min(1).max(120).optional(),
+    requestId: z.string().min(1).max(120).optional(),
+    q: z.string().min(1).max(200).optional(),
+    ...advancedFilters,
+    bucket: z.enum(["minute", "hour", "day"]).default("hour"),
+    tz: z.string().min(1).max(80).default("America/Bogota"),
+  })
+  .strict()
+
+// Alert rules schemas
+export const createAlertRuleBodySchema = z.object({
+  name: z.string().min(1).max(120),
+  description: z.string().max(500).optional(),
+  level: z.enum(["error", "warn"]),
+  windowMinutes: z.number().int().min(1).max(1440),
+  threshold: z.number().int().min(1),
+  service: z.string().optional(),
+  module: z.string().optional(),
+  enabled: z.boolean().default(true),
+})
+
+export const updateAlertRuleBodySchema = createAlertRuleBodySchema.partial()
+
+export const alertRuleIdParamsSchema = z.object({
+  id: z.string().min(1).max(120),
+})
+
+export const alertsEvaluateQuerySchema = z.object({
+  service: z.string().min(1).max(120).optional(),
+})
+
 export type ListLogsQuery = z.infer<typeof listLogsQuerySchema>
 export type StatsLogsQuery = z.infer<typeof statsLogsQuerySchema>
 export type ExportLogsQuery = z.infer<typeof exportLogsQuerySchema>
+export type FacetsLogsQuery = z.infer<typeof facetsLogsQuerySchema>
+export type TimelineLogsQuery = z.infer<typeof timelineLogsQuerySchema>
 
 /**
  * Traduce la query del panel al contrato del LogService:
@@ -150,6 +205,41 @@ export function mapStatsQuery(query: StatsLogsQuery): Record<string, unknown> {
     statusCode: query.statusCode,
     module: query.module,
     topEventsLimit: query.topEventsLimit,
+    tz: query.tz,
+  }
+}
+
+export function mapFacetsQuery(query: FacetsLogsQuery): Record<string, unknown> {
+  return {
+    from: query.from,
+    to: query.to,
+    level: query.level,
+    service: query.service,
+    event: query.action,
+    actorUserId: query.userId,
+    requestId: query.requestId,
+    q: query.q,
+    method: query.method,
+    statusCode: query.statusCode,
+    module: query.module,
+    limit: query.limit,
+  }
+}
+
+export function mapTimelineQuery(query: TimelineLogsQuery): Record<string, unknown> {
+  return {
+    from: query.from,
+    to: query.to,
+    level: query.level,
+    service: query.service,
+    event: query.action,
+    actorUserId: query.userId,
+    requestId: query.requestId,
+    q: query.q,
+    method: query.method,
+    statusCode: query.statusCode,
+    module: query.module,
+    bucket: query.bucket,
     tz: query.tz,
   }
 }
