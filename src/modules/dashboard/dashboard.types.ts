@@ -55,6 +55,92 @@ export type SupervisorAlert = {
   count: number;
 };
 
+// ─── Analytics types ─────────────────────────────────────────────────────────
+
+export type WorkloadTrendDay = {
+  date: string;
+  atenciones: number;
+  turnos: number;
+  completed: number;
+  noShows: number;
+  canceled: number;
+  checkInsConfirmed: number;
+};
+
+export type CheckInFlowStats = {
+  solicitados: number;
+  pendientes: number;
+  confirmados: number;
+  rechazados: number;
+  avgResponseTimeMin: number | null;
+  pendientesAntiguos: number;
+};
+
+export type GuideCapacityStats = {
+  activos: number;
+  disponibles: number;
+  asignados: number;
+  libres: number;
+  noDisponibles: number;
+  penalizados: number;
+  disponibilidadRate: number;
+  utilizacionRate: number;
+  penalizacionRate: number;
+};
+
+export type EvaluationStats = {
+  atencionesEnRango: number;
+  evaluadas: number;
+  pendientesEval: number;
+  avgCalificacion: number | null;
+  distribucion: {
+    SATISFACTORIA: number;
+    CON_NOVEDADES: number;
+    NO_SATISFACTORIA: number;
+  };
+};
+
+export type PriorityAction = {
+  type:
+    | "OVERDUE_RECALADAS"
+    | "UNASSIGNED_TURNOS"
+    | "PENDING_CHECKINS"
+    | "OLD_PENDING_CHECKINS"
+    | "PENDING_EVALS";
+  count: number;
+  label: string;
+  to: string;
+};
+
+export type SupervisorAnalytics = {
+  range: {
+    startDate: string;
+    endDate: string;
+    days: number;
+    tz: string;
+  };
+  kpis: {
+    assignmentRate: number;
+    executionRate: number;
+    noShowRate: number;
+    guideAvailabilityRate: number;
+    utilizacionRate: number;
+    penalizacionRate: number;
+    pendingCheckIns: number;
+    overdueRecaladas: number;
+    unresolvedTurnos: number;
+    pendientesEval: number;
+  };
+  workloadTrend: WorkloadTrendDay[];
+  turnoStatus: Record<string, number>;
+  checkInFlow: CheckInFlowStats;
+  guideCapacity: GuideCapacityStats;
+  evaluations: EvaluationStats;
+  priorityActions: PriorityAction[];
+};
+
+// ─── Main supervisor/guia overviews ──────────────────────────────────────────
+
 export type SupervisorOverview = {
   counts: {
     recaladas: number;
@@ -101,7 +187,7 @@ export type SupervisorOverview = {
     guideAvailabilityRate: number;
   };
 
-  /** Serie diaria de los últimos 7 días */
+  /** Serie diaria de los últimos 7 días (backward compat) */
   trend7d?: {
     days: Array<{
       date: string;       // YYYY-MM-DD
@@ -111,6 +197,9 @@ export type SupervisorOverview = {
       noShows: number;
     }>;
   };
+
+  /** Bloque extendido de analytics (7 o 30 días según rangeDays) */
+  analytics?: SupervisorAnalytics;
 };
 
 export type DashboardMilestoneKind =

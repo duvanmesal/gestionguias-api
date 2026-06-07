@@ -10,6 +10,7 @@ import type {
   DashboardWidget,
   GuiaOverview,
   SupervisorAlert,
+  SupervisorAnalytics,
   SupervisorOverview,
   TurnoLite,
 } from "../dashboard.types";
@@ -77,6 +78,7 @@ export async function getDashboardOverviewUsecase(
       now,
       upcomingLimit: input.query.upcomingLimit ?? 8,
       tzOffsetMinutes,
+      rangeDays: input.query.rangeDays ?? 30,
     });
 
     const widgets = buildSupervisorWidgets(supervisor);
@@ -116,8 +118,9 @@ async function buildSupervisorOverview(args: {
   now: Date;
   upcomingLimit: number;
   tzOffsetMinutes: number;
+  rangeDays: number;
 }): Promise<SupervisorOverview> {
-  const { start, end, now, upcomingLimit, tzOffsetMinutes } = args;
+  const { start, end, now, upcomingLimit, tzOffsetMinutes, rangeDays } = args;
 
   // Build 7-day rolling window for trend (today-6 .. today)
   const trendDayMeta: Array<{ dateStr: string; dayStart: Date; dayEnd: Date }> =
@@ -295,6 +298,30 @@ async function buildSupervisorOverview(args: {
     };
   });
 
+  // ── Analytics (range-based) ──────────────────────────────────────────────
+  const analytics = await buildSupervisorAnalytics({
+    now,
+    rangeDays,
+    tzOffsetMinutes,
+    // pass current-day data for rates/turnoStatus
+    breakdown,
+    turnos,
+    turnosAssigned,
+    turnosAvailable,
+    turnosInProgress,
+    turnosDone,
+    turnosCanceled,
+    turnosNoShow,
+    guidesActivos,
+    guidesDisponibles,
+    guidesAsignados,
+    guidesPenalizados,
+    guidesLibres,
+    guidesNoDisponibles,
+    overdueRecaladas,
+    pendingCheckIns,
+  });
+
   return {
     counts: {
       recaladas,
@@ -322,6 +349,185 @@ async function buildSupervisorOverview(args: {
     pendingWork,
     rates,
     trend7d: { days: trend7dDays },
+    analytics,
+  };
+}
+
+// ─── Analytics builder ────────────────────────────────────────────────────────
+
+async function buildSupervisorAnalytics(args: {
+  now: Date;
+  rangeDays: number;
+  tzOffsetMinutes: number;
+  breakdown: Record<string, number>;
+  turnos: number;
+  turnosAssigned: number;
+  turnosAvailable: number;
+  turnosInProgress: number;
+  turnosDone: number;
+  turnosCanceled: number;
+  turnosNoShow: number;
+  guidesActivos: number;
+  guidesDisponibles: number;
+  guidesAsignados: number;
+  guidesPenalizados: number;
+  guidesLibres: number;
+  guidesNoDisponibles: number;
+  overdueRecaladas: number;
+  pendingCheckIns: number;
+}): Promise<SupervisorAnalytics> {
+  const {
+    now, rangeDays, tzOffsetMinutes,
+    breakdown, turnos,
+    turnosAssigned, turnosAvailable, turnosInProgress,
+    turnosDone, turnosCanceled, turnosNoShow,
+    guidesActivos, guidesDisponibles, guidesAsignados,
+    guidesPenalizados, guidesLibres, guidesNoDisponibles,
+    overdueRecaladas, pendingCheckIns,
+  } = args;
+
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+
+  // ── Range window ────────────────────────────────────────────────────────────
+  const rangeMeta: Array<{ dateStr: string; dayStart: Date; dayEnd: Date }> = [];
+  for (let i = rangeDays - 1; i >= 0; i--) {
+    const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+    const dateStr = toLocalDateString(d, tzOffsetMinutes);
+    const { start: dayStart, end: dayEnd } = buildUtcDayRange(dateStr, tzOffsetMinutes);
+    rangeMeta.push({ dateStr, dayStart, dayEnd });
+  }
+  const rangeStart = rangeMeta[0].dayStart;
+  const rangeEnd   = rangeMeta[rangeMeta.length - 1].dayEnd;
+
+  const startDateStr = toLocalDateString(rangeMeta[0].dayStart, tzOffsetMinutes);
+  const endDateStr   = toLocalDateString(rangeMeta[rangeMeta.length - 1].dayEnd, tzOffsetMinutes);
+
+  // ── Parallel data fetching ──────────────────────────────────────────────────
+  const FIFTEEN_MIN_AGO = new Date(now.getTime() - 15 * 60 * 1000);
+
+  const [
+    rangeAtenciones,
+    evalStats,
+    checkInsRequested,
+    checkInsConfirmed,
+    checkInsRejected,
+    oldPendingCheckIns,
+    avgResponseTimeMin,
+  ] = await Promise.all([
+    dashboardRepository.listNdayAtencionesWithTurnos({ start: rangeStart, end: rangeEnd }),
+    dashboardRepository.getEvaluationStats({ start: rangeStart, end: rangeEnd }),
+    dashboardRepository.countCheckInsRequestedInRange({ start: rangeStart, end: rangeEnd }),
+    dashboardRepository.countCheckInsConfirmedInRange({ start: rangeStart, end: rangeEnd }),
+    dashboardRepository.countCheckInsRejectedInRange({ start: rangeStart, end: rangeEnd }),
+    dashboardRepository.countOldPendingCheckIns({ cutoff: FIFTEEN_MIN_AGO }),
+    dashboardRepository.getAvgCheckInResponseTimeMin(),
+  ]);
+
+  // ── Workload trend ──────────────────────────────────────────────────────────
+  const workloadTrend = rangeMeta.map(({ dateStr, dayStart, dayEnd }) => {
+    const matching = rangeAtenciones.filter(
+      (a) => a.fechaInicio < dayEnd && a.fechaFin > dayStart,
+    );
+    let turnoCount = 0, completedCount = 0, noShowCount = 0, canceledCount = 0, confirmedCount = 0;
+    for (const a of matching) {
+      turnoCount += a.turnos.length;
+      for (const t of a.turnos) {
+        if (t.status === TurnoStatus.COMPLETED) completedCount++;
+        else if (t.status === TurnoStatus.NO_SHOW) noShowCount++;
+        else if (t.status === TurnoStatus.CANCELED) canceledCount++;
+        if (t.checkInConfirmedAt && t.checkInConfirmedAt >= dayStart && t.checkInConfirmedAt < dayEnd) {
+          confirmedCount++;
+        }
+      }
+    }
+    return {
+      date: dateStr,
+      atenciones: matching.length,
+      turnos: turnoCount,
+      completed: completedCount,
+      noShows: noShowCount,
+      canceled: canceledCount,
+      checkInsConfirmed: confirmedCount,
+    };
+  });
+
+  // ── KPIs ───────────────────────────────────────────────────────────────────
+  const assignedAndInProgress = turnosAssigned + turnosInProgress;
+  const closedTotal = turnosDone + turnosCanceled + turnosNoShow;
+
+  const kpis = {
+    assignmentRate:       round1(turnos > 0 ? (assignedAndInProgress / turnos) * 100 : 0),
+    executionRate:        round1(closedTotal > 0 ? (turnosDone / closedTotal) * 100 : 0),
+    noShowRate:           round1(closedTotal > 0 ? (turnosNoShow / closedTotal) * 100 : 0),
+    guideAvailabilityRate: round1(guidesActivos > 0 ? (guidesDisponibles / guidesActivos) * 100 : 0),
+    utilizacionRate:      round1(guidesActivos > 0 ? (guidesAsignados / guidesActivos) * 100 : 0),
+    penalizacionRate:     round1(guidesActivos > 0 ? (guidesPenalizados / guidesActivos) * 100 : 0),
+    pendingCheckIns,
+    overdueRecaladas,
+    unresolvedTurnos:     turnosAvailable,
+    pendientesEval:       evalStats.pendientesEval,
+  };
+
+  // ── Check-in flow ──────────────────────────────────────────────────────────
+  const checkInFlow = {
+    solicitados: checkInsRequested,
+    pendientes: pendingCheckIns,
+    confirmados: checkInsConfirmed,
+    rechazados: checkInsRejected,
+    avgResponseTimeMin,
+    pendientesAntiguos: oldPendingCheckIns,
+  };
+
+  // ── Guide capacity ─────────────────────────────────────────────────────────
+  const guideCapacity = {
+    activos: guidesActivos,
+    disponibles: guidesDisponibles,
+    asignados: guidesAsignados,
+    libres: guidesLibres,
+    noDisponibles: guidesNoDisponibles,
+    penalizados: guidesPenalizados,
+    disponibilidadRate: kpis.guideAvailabilityRate,
+    utilizacionRate:    kpis.utilizacionRate,
+    penalizacionRate:   kpis.penalizacionRate,
+  };
+
+  // ── Priority actions ───────────────────────────────────────────────────────
+  const priorityActions: SupervisorAnalytics["priorityActions"] = [];
+  if (overdueRecaladas > 0)
+    priorityActions.push({ type: "OVERDUE_RECALADAS", count: overdueRecaladas,
+      label: `${overdueRecaladas} recalada${overdueRecaladas !== 1 ? "s" : ""} vencida${overdueRecaladas !== 1 ? "s" : ""}`,
+      to: "/recaladas?overdueDeparture=true" });
+  if (oldPendingCheckIns > 0)
+    priorityActions.push({ type: "OLD_PENDING_CHECKINS", count: oldPendingCheckIns,
+      label: `${oldPendingCheckIns} check-in${oldPendingCheckIns !== 1 ? "s" : ""} sin respuesta +15 min`,
+      to: "/turnos?checkInPending=1" });
+  if (pendingCheckIns > 0)
+    priorityActions.push({ type: "PENDING_CHECKINS", count: pendingCheckIns,
+      label: `${pendingCheckIns} check-in${pendingCheckIns !== 1 ? "s" : ""} pendiente${pendingCheckIns !== 1 ? "s" : ""}`,
+      to: "/turnos?checkInPending=1" });
+  if (turnosAvailable > 0)
+    priorityActions.push({ type: "UNASSIGNED_TURNOS", count: turnosAvailable,
+      label: `${turnosAvailable} turno${turnosAvailable !== 1 ? "s" : ""} sin asignar`,
+      to: "/turnos?status=AVAILABLE" });
+  if (evalStats.pendientesEval > 0)
+    priorityActions.push({ type: "PENDING_EVALS", count: evalStats.pendientesEval,
+      label: `${evalStats.pendientesEval} atención${evalStats.pendientesEval !== 1 ? "es" : ""} sin evaluar`,
+      to: "/atenciones?pendingEval=true" });
+
+  return {
+    range: {
+      startDate: startDateStr,
+      endDate: endDateStr,
+      days: rangeDays,
+      tz: tzHintFromOffset(tzOffsetMinutes),
+    },
+    kpis,
+    workloadTrend,
+    turnoStatus: breakdown,
+    checkInFlow,
+    guideCapacity,
+    evaluations: evalStats,
+    priorityActions,
   };
 }
 
