@@ -74,6 +74,7 @@ const Env = z.object({
   // Read key: usada SOLO en servidor por el proxy /admin/logs para consultar el
   // LogService. Si falta, solo fallan esos endpoints, no el arranque de la API.
   LOGS_READ_API_KEY: z.string().default(""),
+  LOGS_ADMIN_API_KEY: z.string().default(""),
   LOGS_ENABLED: envBoolean(true),
   LOGS_TIMEOUT_MS: z.coerce.number().int().min(100).max(30_000).default(1500),
 

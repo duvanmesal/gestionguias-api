@@ -29,6 +29,16 @@ export const overviewQuerySchema = z.object({
    * Límite de atenciones disponibles para guía
    */
   availableAtencionesLimit: z.coerce.number().int().min(1).max(50).default(10),
+
+  /**
+   * Rango en días para las estadísticas históricas del supervisor.
+   * 7 = última semana, 30 = último mes. Máximo 30.
+   */
+  rangeDays: z.coerce
+    .number()
+    .int()
+    .refine((v) => v === 7 || v === 30, { message: "rangeDays must be 7 or 30" })
+    .default(30),
 });
 
 export type OverviewQuery = z.infer<typeof overviewQuerySchema>;

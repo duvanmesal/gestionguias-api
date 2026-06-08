@@ -79,6 +79,19 @@ export async function noShowTurnoUsecase(
     throw new ConflictError("Solo se puede marcar NO_SHOW si el turno está ASSIGNED")
   }
 
+  if (current.checkInRequestedAt && !current.checkInConfirmedAt && !current.checkInRejectedAt) {
+    auditFail(
+      req,
+      "turnos.noShow.failed",
+      "NO_SHOW failed",
+      { reason: "checkin_pending", turnoId },
+      { entity: "Turno", id: String(turnoId) },
+    )
+    throw new ConflictError(
+      "No se puede marcar NO_SHOW mientras el check-in está pendiente de confirmación",
+    )
+  }
+
   const now = new Date()
   if (current.fechaInicio && now < current.fechaInicio) {
     auditFail(

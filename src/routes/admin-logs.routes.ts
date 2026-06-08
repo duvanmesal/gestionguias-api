@@ -1,14 +1,13 @@
 // src/routes/admin-logs.routes.ts
 //
-// Proxy administrativo de SOLO LECTURA hacia el LogService.
-// Acceso restringido a SUPER_ADMIN y SUPERVISOR (requireSupervisor).
-// El JWT del usuario NUNCA llega al LogService: el controller usa la READ key
-// del servidor internamente.
+// Proxy administrativo hacia el LogService.
+// Rutas con path literal SIEMPRE declaradas antes de "/:id".
+// Auth mínimo: SUPERVISOR (reads). Mutaciones de alert_rules: SUPER_ADMIN.
 import { Router } from "express"
 import { detectClientPlatform } from "../middlewares/clientPlatform"
 import { requireAuth } from "../libs/auth"
 import { requireCompletedProfile } from "../middlewares/require-completed-profile"
-import { requireSupervisor } from "../libs/rbac"
+import { requireSupervisor, requireSuperAdmin } from "../libs/rbac"
 import { adminLogsLimiter, adminLogsExportLimiter } from "../middlewares/rate-limit"
 import { validate } from "../libs/zod-mw"
 
@@ -18,11 +17,17 @@ import {
   statsLogsQuerySchema,
   logIdParamsSchema,
   exportLogsQuerySchema,
+  facetsLogsQuerySchema,
+  timelineLogsQuerySchema,
+  createAlertRuleBodySchema,
+  updateAlertRuleBodySchema,
+  alertRuleIdParamsSchema,
+  alertsEvaluateQuerySchema,
 } from "../modules/admin-logs/admin-logs.schemas"
 
 const router = Router()
 
-// Cadena común: plataforma -> auth -> perfil completo -> rol -> rate limit.
+// Cadena común: plataforma -> auth -> perfil completo -> rol mínimo -> rate limit.
 router.use(
   detectClientPlatform,
   requireAuth,
@@ -31,24 +36,14 @@ router.use(
   adminLogsLimiter,
 )
 
-/**
- * GET /admin/logs/stats
- * Agregados (byLevel, topEvents, errorsByDay) para el dashboard.
- * Auth: SUPER_ADMIN / SUPERVISOR
- * Nota: declarado antes de "/:id" para que "stats" no se interprete como id.
- */
+// ── Rutas literales — deben ir ANTES de /:id ────────────────────────────
+
 router.get(
   "/stats",
   validate({ query: statsLogsQuerySchema }),
   AdminLogsController.stats,
 )
 
-/**
- * GET /admin/logs/export
- * Descarga CSV/JSON. Rango de fechas obligatorio + cap de filas.
- * Limiter dedicado (más estricto). Declarado antes de "/:id".
- * Auth: SUPER_ADMIN / SUPERVISOR
- */
 router.get(
   "/export",
   adminLogsExportLimiter,
@@ -56,22 +51,59 @@ router.get(
   AdminLogsController.export,
 )
 
-/**
- * GET /admin/logs
- * Lista paginada de logs con filtros.
- * Auth: SUPER_ADMIN / SUPERVISOR
- */
+router.get(
+  "/facets",
+  validate({ query: facetsLogsQuerySchema }),
+  AdminLogsController.facets,
+)
+
+router.get(
+  "/timeline",
+  validate({ query: timelineLogsQuerySchema }),
+  AdminLogsController.timeline,
+)
+
+// Alert rules — reads (SUPERVISOR)
+router.get("/alerts/rules", AdminLogsController.alertRulesList)
+router.get(
+  "/alerts/rules/:id",
+  validate({ params: alertRuleIdParamsSchema }),
+  AdminLogsController.alertRulesGetById,
+)
+router.get(
+  "/alerts/evaluate",
+  validate({ query: alertsEvaluateQuerySchema }),
+  AdminLogsController.alertsEvaluate,
+)
+
+// Alert rules — mutations (SUPER_ADMIN)
+router.post(
+  "/alerts/rules",
+  requireSuperAdmin,
+  validate({ body: createAlertRuleBodySchema }),
+  AdminLogsController.alertRulesCreate,
+)
+router.patch(
+  "/alerts/rules/:id",
+  requireSuperAdmin,
+  validate({ params: alertRuleIdParamsSchema, body: updateAlertRuleBodySchema }),
+  AdminLogsController.alertRulesUpdate,
+)
+router.delete(
+  "/alerts/rules/:id",
+  requireSuperAdmin,
+  validate({ params: alertRuleIdParamsSchema }),
+  AdminLogsController.alertRulesDelete,
+)
+
+// ── Lista paginada ───────────────────────────────────────────────────────
 router.get(
   "/",
   validate({ query: listLogsQuerySchema }),
   AdminLogsController.list,
 )
 
-/**
- * GET /admin/logs/:id
- * Detalle de un log. Preserva 404 si no existe.
- * Auth: SUPER_ADMIN / SUPERVISOR
- */
+// ── Detalle por id — al final para no capturar rutas literales ───────────
 router.get(
   "/:id",
   validate({ params: logIdParamsSchema }),

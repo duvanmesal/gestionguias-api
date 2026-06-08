@@ -8,6 +8,12 @@ import type { TurnoDetail } from "./turno.select"
 
 export type Tx = Prisma.TransactionClient
 
+const pendingCheckInWhere: Prisma.TurnoWhereInput = {
+  checkInRequestedAt: { not: null },
+  checkInConfirmedAt: null,
+  checkInRejectedAt: null,
+}
+
 function db(tx?: Tx) {
   return tx ?? prisma
 }
@@ -366,7 +372,7 @@ export class TurnoRepository {
 
   noShowIfStillAssigned(args: { turnoId: number; mergedObs: string }, tx: Tx) {
     return tx.turno.updateMany({
-      where: { id: args.turnoId, status: "ASSIGNED" },
+      where: { id: args.turnoId, status: "ASSIGNED", NOT: pendingCheckInWhere },
       data: { status: "NO_SHOW", observaciones: args.mergedObs },
     })
   }
@@ -377,7 +383,11 @@ export class TurnoRepository {
   findExpiredAssigned(gracePeriodMs: number) {
     const cutoff = new Date(Date.now() - gracePeriodMs)
     return prisma.turno.findMany({
-      where: { status: "ASSIGNED", fechaInicio: { lte: cutoff } },
+      where: {
+        status: "ASSIGNED",
+        fechaInicio: { lte: cutoff },
+        NOT: pendingCheckInWhere,
+      },
       select: {
         id: true,
         atencionId: true,
@@ -404,7 +414,7 @@ export class TurnoRepository {
 
   bulkNoShow(turnoIds: number[], now: Date) {
     return prisma.turno.updateMany({
-      where: { id: { in: turnoIds }, status: "ASSIGNED" },
+      where: { id: { in: turnoIds }, status: "ASSIGNED", NOT: pendingCheckInWhere },
       data: { status: "NO_SHOW", observaciones: "NO_SHOW automático por inasistencia" },
     })
   }

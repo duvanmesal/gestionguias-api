@@ -14,6 +14,14 @@ import {
   mapListQuery,
   mapStatsQuery,
   mapExportFilters,
+  facetsLogsQuerySchema,
+  timelineLogsQuerySchema,
+  createAlertRuleBodySchema,
+  updateAlertRuleBodySchema,
+  alertRuleIdParamsSchema,
+  alertsEvaluateQuerySchema,
+  mapFacetsQuery,
+  mapTimelineQuery,
 } from "./admin-logs.schemas"
 import { collectLogsForExport, toCsv, toJson } from "./admin-logs.export"
 import { logsService } from "../../libs/logs/logs.service"
@@ -139,6 +147,95 @@ export const AdminLogsController = {
         res.setHeader("Content-Type", "text/csv; charset=utf-8")
         res.status(200).send(toCsv(rows))
       }
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  /** GET /admin/logs/facets */
+  async facets(req: Request, res: Response, next: NextFunction) {
+    try {
+      const query = facetsLogsQuerySchema.parse(req.query)
+      const upstream = await adminLogsClient.facets(mapFacetsQuery(query))
+      logsService.audit(req, { event: "adminLogs.facets" })
+      res.status(200).json(upstream)
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  /** GET /admin/logs/timeline */
+  async timeline(req: Request, res: Response, next: NextFunction) {
+    try {
+      const query = timelineLogsQuerySchema.parse(req.query)
+      const upstream = await adminLogsClient.timeline(mapTimelineQuery(query))
+      logsService.audit(req, { event: "adminLogs.timeline", meta: { bucket: query.bucket } })
+      res.status(200).json(upstream)
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  // ── Alert Rules ─────────────────────────────────────────────────────────
+
+  async alertRulesList(req: Request, res: Response, next: NextFunction) {
+    try {
+      const upstream = await adminLogsClient.alertRulesList()
+      res.status(200).json(upstream)
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async alertRulesGetById(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = alertRuleIdParamsSchema.parse(req.params)
+      const upstream = await adminLogsClient.alertRulesGetById(id)
+      res.status(200).json(upstream)
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async alertsEvaluate(req: Request, res: Response, next: NextFunction) {
+    try {
+      const query = alertsEvaluateQuerySchema.parse(req.query)
+      const upstream = await adminLogsClient.alertsEvaluate(query)
+      res.status(200).json(upstream)
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async alertRulesCreate(req: Request, res: Response, next: NextFunction) {
+    try {
+      const body = createAlertRuleBodySchema.parse(req.body)
+      const upstream = await adminLogsClient.alertRulesCreate(body)
+      logsService.audit(req, { event: "adminLogs.alertRules.create", meta: { name: body.name } })
+      res.status(201).json(upstream)
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async alertRulesUpdate(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = alertRuleIdParamsSchema.parse(req.params)
+      const patch = updateAlertRuleBodySchema.parse(req.body)
+      const upstream = await adminLogsClient.alertRulesUpdate(id, patch)
+      logsService.audit(req, { event: "adminLogs.alertRules.update", target: { entity: "alert_rule", id } })
+      res.status(200).json(upstream)
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async alertRulesDelete(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = alertRuleIdParamsSchema.parse(req.params)
+      const upstream = await adminLogsClient.alertRulesDelete(id)
+      logsService.audit(req, { event: "adminLogs.alertRules.delete", target: { entity: "alert_rule", id } })
+      res.status(200).json(upstream)
     } catch (err) {
       next(err)
     }

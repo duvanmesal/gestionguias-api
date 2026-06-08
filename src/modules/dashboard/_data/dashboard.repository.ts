@@ -5,6 +5,7 @@ import {
   StatusType,
   TurnoStatus,
 } from "@prisma/client";
+// Note: AtencionEvaluation.estadoFinal is typed via Prisma but compared as string for safety.
 
 import { prisma } from "../../../prisma/client";
 
@@ -203,6 +204,161 @@ export const dashboardRepository = {
         },
       },
     });
+  },
+
+  countPendingCheckIns() {
+    return prisma.turno.count({
+      where: {
+        checkInRequestedAt: { not: null },
+        checkInConfirmedAt: null,
+        checkInRejectedAt: null,
+        status: TurnoStatus.ASSIGNED,
+      },
+    });
+  },
+
+  listWeekAtencionesWithTurnos(args: { start: Date; end: Date }) {
+    return prisma.atencion.findMany({
+      where: {
+        status: StatusType.ACTIVO,
+        fechaInicio: { lt: args.end },
+        fechaFin: { gt: args.start },
+      },
+      select: {
+        id: true,
+        fechaInicio: true,
+        fechaFin: true,
+        turnos: {
+          select: { status: true },
+        },
+      },
+    });
+  },
+
+  // ── Analytics range queries ────────────────────────────────────────────────
+
+  listNdayAtencionesWithTurnos(args: { start: Date; end: Date }) {
+    return prisma.atencion.findMany({
+      where: {
+        status: StatusType.ACTIVO,
+        fechaInicio: { lt: args.end },
+        fechaFin: { gt: args.start },
+      },
+      select: {
+        id: true,
+        fechaInicio: true,
+        fechaFin: true,
+        operationalStatus: true,
+        turnos: {
+          select: {
+            status: true,
+            checkInConfirmedAt: true,
+          },
+        },
+      },
+    });
+  },
+
+  async getEvaluationStats(args: { start: Date; end: Date }) {
+    const closed = await prisma.atencion.findMany({
+      where: {
+        status: StatusType.ACTIVO,
+        operationalStatus: AtencionOperativeStatus.CLOSED,
+        fechaFin: { gte: args.start, lt: args.end },
+      },
+      select: {
+        id: true,
+        evaluation: {
+          select: { calificacion: true, estadoFinal: true },
+        },
+      },
+    });
+
+    const evaluadas = closed.filter((a) => a.evaluation !== null);
+    const dist = { SATISFACTORIA: 0, CON_NOVEDADES: 0, NO_SATISFACTORIA: 0 };
+    let totalCal = 0;
+
+    for (const a of evaluadas) {
+      if (a.evaluation) {
+        const ef = a.evaluation.estadoFinal as string;
+        if (ef in dist) dist[ef as keyof typeof dist]++;
+        totalCal += a.evaluation.calificacion;
+      }
+    }
+
+    return {
+      atencionesEnRango: closed.length,
+      evaluadas: evaluadas.length,
+      pendientesEval: closed.length - evaluadas.length,
+      avgCalificacion:
+        evaluadas.length > 0
+          ? Math.round((totalCal / evaluadas.length) * 10) / 10
+          : null,
+      distribucion: dist,
+    };
+  },
+
+  countCheckInsRequestedInRange(args: { start: Date; end: Date }) {
+    return prisma.turno.count({
+      where: { checkInRequestedAt: { gte: args.start, lt: args.end } },
+    });
+  },
+
+  countCheckInsConfirmedInRange(args: { start: Date; end: Date }) {
+    return prisma.turno.count({
+      where: { checkInConfirmedAt: { gte: args.start, lt: args.end } },
+    });
+  },
+
+  countCheckInsRejectedInRange(args: { start: Date; end: Date }) {
+    return prisma.turno.count({
+      where: { checkInRejectedAt: { gte: args.start, lt: args.end } },
+    });
+  },
+
+  countOldPendingCheckIns(args: { cutoff: Date }) {
+    return prisma.turno.count({
+      where: {
+        checkInRequestedAt: { not: null, lt: args.cutoff },
+        checkInConfirmedAt: null,
+        checkInRejectedAt: null,
+        status: TurnoStatus.ASSIGNED,
+      },
+    });
+  },
+
+  async getAvgCheckInResponseTimeMin() {
+    const resolved = await prisma.turno.findMany({
+      where: {
+        checkInRequestedAt: { not: null },
+        OR: [
+          { checkInConfirmedAt: { not: null } },
+          { checkInRejectedAt: { not: null } },
+        ],
+      },
+      select: {
+        checkInRequestedAt: true,
+        checkInConfirmedAt: true,
+        checkInRejectedAt: true,
+      },
+      take: 500,
+    });
+
+    if (!resolved.length) return null;
+
+    let totalMs = 0;
+    let count = 0;
+    for (const t of resolved) {
+      const resolvedAt = t.checkInConfirmedAt ?? t.checkInRejectedAt;
+      if (t.checkInRequestedAt && resolvedAt) {
+        const diff = resolvedAt.getTime() - t.checkInRequestedAt.getTime();
+        if (diff >= 0) { totalMs += diff; count++; }
+      }
+    }
+
+    return count > 0
+      ? Math.round((totalMs / count / 60_000) * 10) / 10
+      : null;
   },
 
   // =====================

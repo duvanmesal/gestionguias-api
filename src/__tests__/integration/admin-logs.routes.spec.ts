@@ -63,6 +63,11 @@ jest.mock("../../libs/rbac", () => ({
     if (role === "SUPERVISOR" || role === "SUPER_ADMIN") return next()
     return res.status(403).json({ data: null, meta: null, error: { code: "FORBIDDEN" } })
   },
+  requireSuperAdmin: (req: any, res: any, next: any) => {
+    const role = req.user?.rol
+    if (role === "SUPER_ADMIN") return next()
+    return res.status(403).json({ data: null, meta: null, error: { code: "FORBIDDEN" } })
+  },
 }))
 
 import adminLogsRoutes from "../../routes/admin-logs.routes"
