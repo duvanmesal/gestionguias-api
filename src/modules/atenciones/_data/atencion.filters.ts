@@ -32,6 +32,12 @@ export function buildAtencionesWhere(query: ListAtencionesQuery): Prisma.Atencio
   if (query.status) AND.push({ status: query.status })
   if (query.operationalStatus) AND.push({ operationalStatus: query.operationalStatus })
 
+  // Atenciones cerradas que aún no tienen evaluación registrada.
+  if (query.pendingEval) {
+    AND.push({ operationalStatus: "CLOSED" })
+    AND.push({ evaluation: { is: null } })
+  }
+
   if (query.from || query.to) {
     const from = query.from
     const to = query.to

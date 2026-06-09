@@ -35,6 +35,12 @@ export const listAtencionesQuerySchema = z
     status: z.nativeEnum(StatusType).optional(),
     operationalStatus: z.nativeEnum(AtencionOperativeStatus).optional(),
 
+    // Atenciones cerradas sin evaluación asociada (pendientes de evaluar).
+    pendingEval: z
+      .union([z.literal("true"), z.literal("false"), z.boolean()])
+      .transform((v) => v === true || v === "true")
+      .optional(),
+
     page: z.coerce.number().int().positive().default(1),
     pageSize: z.coerce.number().int().positive().max(100).default(20),
   })

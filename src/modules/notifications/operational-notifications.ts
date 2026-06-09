@@ -43,6 +43,31 @@ export type OperationalNotificationPayload = {
   source?: string | null
 }
 
+/**
+ * Cooldown de socket en memoria para alertas automáticas de job.
+ *
+ * Las alertas job-driven (recalada vencida sin zarpe, atención próxima con
+ * turnos libres) se recalculan cada minuto, pero su contenido no cambia hasta
+ * que el supervisor actúa. Emitir socket cada minuto genera ruido; en su lugar
+ * limitamos el socket a una vez cada `socketCooldownMs` por `notificationId`.
+ *
+ * El push (NotificationDelivery) sigue su propia deduplicación por DB
+ * (skipDuplicates sobre notificationId), así que este gate no lo afecta.
+ */
+const socketCooldownByNotificationId = new Map<string, number>()
+
+/** Alertas job-driven repiten cada minuto; sólo gritamos cada 30 min. */
+const JOB_ALERT_SOCKET_COOLDOWN_MS = 30 * 60 * 1000
+
+function shouldEmitSocket(notificationId: string, cooldownMs?: number): boolean {
+  if (!cooldownMs || cooldownMs <= 0) return true
+  const now = Date.now()
+  const last = socketCooldownByNotificationId.get(notificationId)
+  if (last !== undefined && now - last < cooldownMs) return false
+  socketCooldownByNotificationId.set(notificationId, now)
+  return true
+}
+
 type EnqueueArgs = {
   userIds: string[]
   guiaIdByUserId?: Map<string, string>
@@ -51,6 +76,11 @@ type EnqueueArgs = {
   body: string
   payload: OperationalNotificationPayload
   socketEvent: string
+  /**
+   * Si se define, el socket se emite como máximo una vez por este intervalo
+   * (ms) por `payload.notificationId`. El push no se ve afectado.
+   */
+  socketCooldownMs?: number
   socketRooms?: Array<
     | { kind: "guia"; userId: string }
     | { kind: "user"; userId: string }
@@ -64,9 +94,10 @@ type EnqueueArgs = {
 
 async function enqueuePushAndEmit(args: EnqueueArgs): Promise<{ push: number }> {
   // Primero gritamos por socket, luego dejamos papelitos para push.
-  // Socket emit (best-effort).
+  // Socket emit (best-effort) — sujeto a cooldown por notificationId.
+  const emitSocket = shouldEmitSocket(args.payload.notificationId, args.socketCooldownMs)
   try {
-    for (const room of args.socketRooms ?? []) {
+    for (const room of emitSocket ? args.socketRooms ?? [] : []) {
       switch (room.kind) {
         case "guia":
           socketService.emitToGuia(room.userId, args.socketEvent, args.payload)
@@ -555,6 +586,7 @@ export async function notifyRecaladaOverdue(args: {
     body,
     payload,
     socketEvent: "notif:recalada:overdue",
+    socketCooldownMs: JOB_ALERT_SOCKET_COOLDOWN_MS,
     socketRooms: [{ kind: "supervisors" }],
   })
 }
@@ -604,6 +636,7 @@ export async function notifyAtencionNearWithFreeTurnos(args: {
     body,
     payload,
     socketEvent: "notif:atencion:nearWithFreeTurnos",
+    socketCooldownMs: JOB_ALERT_SOCKET_COOLDOWN_MS,
     socketRooms: [{ kind: "supervisors" }],
   })
 }
