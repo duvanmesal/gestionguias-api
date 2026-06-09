@@ -38,6 +38,7 @@ export async function listAtencionesUsecase(
         supervisorId: query.supervisorId,
         status: query.status,
         operationalStatus: query.operationalStatus,
+        pendingEval: query.pendingEval,
       },
     },
   }

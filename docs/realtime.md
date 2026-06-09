@@ -164,6 +164,13 @@ accionables al usuario y se respaldan con un push mobile equivalente (mismo
 - Las alertas de supervisor (`recalada:overdue`, `atencion:nearWithFreeTurnos`,
   `supervisor:checkInPending`) usan `notificationId` estable por entidad para
   evitar tormentas si el job corre múltiples veces.
+- **Cooldown de socket (job-driven).** Las alertas automáticas que el job
+  recalcula cada minuto (`notif:recalada:overdue` y
+  `notif:atencion:nearWithFreeTurnos`) sólo se **emiten por socket** una vez
+  cada **30 minutos** por `notificationId` (cooldown en memoria del proceso).
+  El push (`notification_deliveries`) no se ve afectado: sigue su propia
+  deduplicación por DB con `skipDuplicates`. Tras un reinicio del proceso el
+  cooldown se reinicia (es in-memory, no persistente).
 - Cada payload incluye `route` (e.g. `/turnos/123`) para navegación profunda
   desde el push mobile.
 
@@ -201,5 +208,14 @@ accionables al usuario y se respaldan con un push mobile equivalente (mismo
 
 - Las invalidaciones son silenciosas por defecto.
 - Mostrar toast solo cuando el evento sea relevante para el usuario actual o para la pantalla activa.
-- No hay centro persistente de eventos en esta fase.
+- **Web y mobile (Epica 7+):** los `notif:*` se convierten en **alertas
+  accionables**: cada uno registra una entrada en una bandeja (campana, sesión
+  en memoria, últimas 50) y dispara un toast con botón **Ver** que navega a
+  `route` (normalizada en cliente). El toast se silencia por `notificationId`
+  durante una ventana de cooldown para no repetir; la entrada en la bandeja sí
+  se conserva. Web: campana en el Topbar (`gestion-guias-front/docs/operatividad-web.md`).
+  Mobile: campana flotante + hoja
+  (`gestion-guias-mobile-1/docs/Operational_Alerts_Module-Technical_documentation.md`).
+- `GUIDE_PENALIZED` trae `route: /perfil/penalizaciones` (ruta mobile). En web
+  no existe esa ruta: el cliente la normaliza a `/profile`.
 - Si el servidor envia `auth:sessionRevoked`, el cliente debe limpiar estado local, desconectar socket y volver a login.

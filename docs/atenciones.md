@@ -93,10 +93,17 @@ Query:
 | `supervisorId` | string | - |
 | `status` | `StatusType` | - |
 | `operationalStatus` | `AtencionOperativeStatus` | - |
+| `pendingEval` | `"true" \| "false" \| boolean` | - |
 | `page` | number | `1` |
 | `pageSize` | number | `20`, máximo `100` |
 
 Regla: `to` debe ser mayor o igual a `from`.
+
+`pendingEval=true` filtra **atenciones cerradas sin evaluación registrada**
+(equivale a `operationalStatus = CLOSED` y sin `AtencionEvaluation` asociada).
+Es la lista que alimenta la alerta accionable "pendientes de evaluar" del
+dashboard/bandeja web (`/atenciones?pendingEval=true`). Se combina con los
+demás filtros (`from`, `to`, `recaladaId`, etc.).
 
 ## Editar atención
 

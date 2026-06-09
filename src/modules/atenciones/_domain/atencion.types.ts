@@ -16,6 +16,7 @@ export type ListAtencionesResult = {
       supervisorId?: string
       status?: StatusType
       operationalStatus?: AtencionOperativeStatus
+      pendingEval?: boolean
     }
   }
 }

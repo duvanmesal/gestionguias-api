@@ -221,6 +221,28 @@ describe("Epica 7 — Operational notifications", () => {
       expect(args.skipDuplicates).toBe(true)
       expect(args.data[0].notificationId).toBe("atencion:81:near-free-turnos")
     })
+
+    it("aplica cooldown de socket: re-emisiones consecutivas no repiten socket pero sí encolan push", async () => {
+      const prisma = makePrismaMock()
+      const socket = makeSocketMock()
+      prisma.usuario.findMany.mockResolvedValue([{ id: "sup-1" }])
+      prisma.notificationDelivery.createMany.mockResolvedValue({ count: 1 })
+
+      const helpers = await loadHelpers(prisma, socket)
+      const params = {
+        recaladaId: 42,
+        codigoRecalada: "REC-042",
+        fechaSalida: new Date("2026-05-26T12:00:00Z"),
+      }
+
+      await helpers.notifyRecaladaOverdue(params)
+      await helpers.notifyRecaladaOverdue(params)
+
+      // El socket sólo se emite la primera vez (cooldown por notificationId)...
+      expect(socket.emitToSupervisors).toHaveBeenCalledTimes(1)
+      // ...pero el push se intenta en ambas (dedup lo resuelve la DB).
+      expect(prisma.notificationDelivery.createMany).toHaveBeenCalledTimes(2)
+    })
   })
 
   describe("notifyGuidePenalized — push al guía con metadatos", () => {

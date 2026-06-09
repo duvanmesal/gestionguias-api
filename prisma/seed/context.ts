@@ -10,6 +10,14 @@ export type SeedContext = {
   superAdminPassword: string
 }
 
+function requireSeedEnv(env: SeedEnv, name: string) {
+  const value = env[name]
+  if (!value) {
+    throw new Error(`Missing required seed environment variable: ${name}`)
+  }
+  return value
+}
+
 export function buildSeedContext(prisma: PrismaClient): SeedContext {
   const env = process.env as SeedEnv
   return {
@@ -17,7 +25,7 @@ export function buildSeedContext(prisma: PrismaClient): SeedContext {
     env,
     now: new Date(),
     superAdminEmail: env.SEED_SUPERADMIN_EMAIL ?? "duvandev@test.com",
-    superAdminPassword: env.SEED_SUPERADMIN_PASS ?? "Dev!123456",
+    superAdminPassword: requireSeedEnv(env, "SEED_SUPERADMIN_PASS"),
   }
 }
 
