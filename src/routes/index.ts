@@ -11,6 +11,9 @@ import buqueRoutes from "./buque.routes";
 import puertoRoutes from "./puerto.routes";
 import muelleRoutes from "./muelle.routes";
 
+// 🔹 Slots operativos
+import slotsRoutes from "./slots.routes";
+
 // 🔹 Recaladas (módulo base)
 import recaladasRoutes from "./recaladas.routes";
 
@@ -46,6 +49,9 @@ v1Router.use("/paises", paisRoutes);
 v1Router.use("/buques", buqueRoutes);
 v1Router.use("/puertos", puertoRoutes);
 v1Router.use("/muelles", muelleRoutes);
+
+// 🔹 Slots operativos
+v1Router.use("/slots", slotsRoutes);
 
 // 🔹 Recaladas
 v1Router.use("/recaladas", recaladasRoutes);
@@ -91,6 +97,7 @@ router.get("/", (_req, res) => {
         turnos: `${process.env.API_PREFIX ?? "/api"}/turnos`,
         dashboard: `${process.env.API_PREFIX ?? "/api"}/dashboard`,
         operationalConfig: `${process.env.API_PREFIX ?? "/api"}/operational-config`,
+        slots: `${process.env.API_PREFIX ?? "/api"}/slots`,
         adminLogs: `${process.env.API_PREFIX ?? "/api"}/admin/logs`,
         health: "/health",
       },

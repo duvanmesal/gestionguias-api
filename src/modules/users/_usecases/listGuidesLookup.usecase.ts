@@ -40,16 +40,23 @@ export async function listGuidesLookupUsecase(query: ListGuidesQuery): Promise<G
     const active = penaltyMap.get(g.id) ?? null
     return {
       guiaId: g.id,
+      usuarioId: g.usuario.id,
       nombres: g.usuario.nombres,
       apellidos: g.usuario.apellidos,
       email: g.usuario.email,
+      telefono: g.telefono ?? g.usuario.telefono ?? null,
+      documentType: g.usuario.documentType ?? null,
+      documentNumber: g.usuario.documentNumber ?? null,
+      direccion: g.direccion ?? null,
+      profileStatus: g.usuario.profileStatus ?? null,
       activo: g.usuario.activo,
       disponibleParaTurnos: g.disponibleParaTurnos,
       disponibilidadUpdatedAt: g.disponibilidadUpdatedAt,
-      // Reflejo derivado: si pendingPenalty=true pero no hay vigente, reportar false.
       pendingPenalty: g.pendingPenalty && !!active,
       penaltyExpiresAt: active?.expiresAt ?? null,
       penaltyReason: active?.reason ?? null,
+      createdAt: g.createdAt,
+      updatedAt: g.updatedAt,
     }
   })
 }

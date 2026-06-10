@@ -1,8 +1,8 @@
-import { Router } from "express";
+import express, { Router } from "express";
 import { RecaladaController } from "../modules/recaladas/recalada.controller";
 
 import { requireAuth } from "../libs/auth";
-import { requireSupervisor } from "../libs/rbac";
+import { requireSuperAdmin, requireSupervisor } from "../libs/rbac";
 import { validate } from "../libs/zod-mw";
 
 import {
@@ -19,11 +19,42 @@ import {
   departRecaladaBodySchema,
   cancelRecaladaParamsSchema,
   cancelRecaladaBodySchema,
+  bulkRecaladaRequestSchema,
+  bulkRecaladaUploadQuerySchema,
 } from "../modules/recaladas/recalada.schemas";
 
 const router = Router();
 
 router.use(requireAuth);
+
+/**
+ * POST /recaladas/bulk — Carga masiva JSON
+ */
+router.post(
+  "/bulk",
+  requireSuperAdmin,
+  validate({ body: bulkRecaladaRequestSchema }),
+  RecaladaController.bulk
+);
+
+/**
+ * POST /recaladas/bulk/file — Carga masiva CSV/XLSX
+ */
+router.post(
+  "/bulk/file",
+  requireSuperAdmin,
+  validate({ query: bulkRecaladaUploadQuerySchema }),
+  express.raw({
+    type: [
+      "text/csv",
+      "text/plain",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/octet-stream",
+    ],
+    limit: "5mb",
+  }),
+  RecaladaController.bulkFile
+);
 
 /**
  * DELETE /recaladas/:id

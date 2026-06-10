@@ -130,3 +130,33 @@ export type CompleteProfileRequest = z.infer<typeof completeProfileSchema>;
 
 export type ListGuidesQuery = z.infer<typeof listGuidesQuerySchema>;
 export type UpdateDisponibilidadGlobalRequest = z.infer<typeof updateDisponibilidadGlobalSchema>;
+
+// ─── Bulk Guides ─────────────────────────────────────────────────────────────
+
+export const bulkGuiaItemSchema = z.object({
+  email: z.string().email(),
+  nombres: z.string().trim().min(1).max(100),
+  apellidos: z.string().trim().min(1).max(100),
+  telefono: z.string().trim().min(7).max(20).optional(),
+  documentType: z.string().trim().optional(),
+  documentNumber: z.string().trim().optional(),
+  direccion: z.string().trim().max(300).optional(),
+  activo: z.coerce.boolean().optional(),
+  disponibleParaTurnos: z.coerce.boolean().optional(),
+})
+
+export const bulkGuiaRequestSchema = z.object({
+  mode: z.enum(["UPSERT", "CREATE_ONLY"]).default("UPSERT"),
+  dryRun: z.coerce.boolean().default(false),
+  sendInvites: z.coerce.boolean().default(true),
+  items: z.array(bulkGuiaItemSchema).min(1).max(500),
+})
+
+export const bulkGuiaUploadQuerySchema = z.object({
+  mode: z.enum(["UPSERT", "CREATE_ONLY"]).default("UPSERT"),
+  dryRun: z.coerce.boolean().default(false),
+  sendInvites: z.coerce.boolean().default(true),
+})
+
+export type BulkGuiaRequest = z.infer<typeof bulkGuiaRequestSchema>
+export type BulkGuiaUploadQuery = z.infer<typeof bulkGuiaUploadQuerySchema>

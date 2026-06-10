@@ -33,6 +33,14 @@ export class RecaladaRepository {
     })
   }
 
+  findSlotById(id: number) {
+    return prisma.slotOperativo.findUnique({ where: { id } })
+  }
+
+  findSlotByNumero(numero: number) {
+    return prisma.slotOperativo.findUnique({ where: { numero } })
+  }
+
   // -------------------------
   // Supervisor
   // -------------------------
@@ -98,6 +106,7 @@ export class RecaladaRepository {
         buqueId: true,
         puertoId: true,
         muelleId: true,
+        slotId: true,
         operationalStatus: true,
         fechaLlegada: true,
         fechaSalida: true,
@@ -216,6 +225,7 @@ export class RecaladaRepository {
           supervisorId: args.supervisorId,
           puertoId: args.input.puertoId ?? null,
           muelleId: args.input.muelleId ?? null,
+          slotId: (args.input as any).slotId ?? null,
 
           codigoRecalada: tempCode,
 

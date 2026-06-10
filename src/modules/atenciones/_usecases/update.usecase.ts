@@ -17,6 +17,7 @@ import {
   assertRecaladaOperable,
   assertTurnosTotalValid,
   assertWindowDatesValid,
+  assertWindowInColombiaBusinessHours,
   assertWindowNotPast,
   assertWindowWithinRecalada,
 } from "../_domain/atencion.rules"
@@ -68,6 +69,24 @@ export async function updateAtencionUsecase(
       "atenciones.update.failed",
       "Update atencion failed",
       { reason: "fechaFin_lt_fechaInicio", atencionId: id },
+      { entity: "Atencion", id: String(id) },
+    )
+    throw e
+  }
+
+  try {
+    assertWindowInColombiaBusinessHours(newFechaInicio, newFechaFin)
+  } catch (e: any) {
+    auditFail(
+      req,
+      "atenciones.update.failed",
+      "Update atencion failed",
+      {
+        reason: "window_outside_business_hours",
+        atencionId: id,
+        fechaInicio: newFechaInicio.toISOString(),
+        fechaFin: newFechaFin.toISOString(),
+      },
       { entity: "Atencion", id: String(id) },
     )
     throw e

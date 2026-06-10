@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { RecaladaService } from "./recalada.service";
-import { UnauthorizedError } from "../../libs/errors";
+import { UnauthorizedError, BadRequestError } from "../../libs/errors";
 import type {
   ListRecaladasQuery,
   GetRecaladaByIdParams,
@@ -13,10 +13,19 @@ import type {
   DepartRecaladaBody,
   CancelRecaladaParams,
   CancelRecaladaBody,
+  BulkRecaladaRequest,
+  BulkRecaladaUploadQuery,
 } from "./recalada.schemas";
+import { parseTabularBuffer, normalizeHeaderKey } from "../../libs/bulk/bulk-file";
+import type { BulkRecaladaItemInput } from "./_usecases/bulk.usecase";
 
 // ✅ logs facade
 import { logsService } from "../../libs/logs/logs.service";
+
+function toNumOrUndef(v: string): number | undefined {
+  const n = Number(String(v ?? "").trim())
+  return Number.isFinite(n) ? n : undefined
+}
 
 export class RecaladaController {
   static async create(
@@ -310,6 +319,79 @@ export class RecaladaController {
     } catch (err) {
       next(err);
       return;
+    }
+  }
+
+  /**
+   * POST /recaladas/bulk
+   */
+  static async bulk(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.user?.userId) throw new UnauthorizedError("Authentication required")
+      const body = req.body as BulkRecaladaRequest
+      const result = await RecaladaService.bulk(req, body)
+      logsService.audit(req, {
+        event: "recaladas.bulk.http_ok",
+        target: { entity: "Recalada" },
+        meta: result,
+        message: "Bulk recaladas response sent",
+      })
+      res.status(200).json({ data: result, meta: null, error: null })
+    } catch (err) {
+      next(err)
+    }
+  }
+
+  /**
+   * POST /recaladas/bulk/file
+   */
+  static async bulkFile(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.user?.userId) throw new UnauthorizedError("Authentication required")
+      const query = req.query as unknown as BulkRecaladaUploadQuery
+
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+        throw new BadRequestError("Se esperaba un archivo CSV o XLSX en el body")
+      }
+
+      const parsed = parseTabularBuffer({
+        buffer: req.body,
+        contentType: req.headers["content-type"],
+      })
+      const items: BulkRecaladaItemInput[] = parsed.rows.map((r) => {
+        const out: BulkRecaladaItemInput = {}
+        for (const [k, v] of Object.entries(r)) {
+          const nk = normalizeHeaderKey(k)
+          const val = String(v ?? "").trim()
+          if (!val) continue
+          if (nk === "codigorecalada" || nk === "codigo") out.codigoRecalada = val
+          else if (nk === "buquecodigo") out.buqueCodigo = val
+          else if (nk === "buqueid") out.buqueId = toNumOrUndef(val)
+          else if (nk === "paisorigencodigo") out.paisOrigenCodigo = val
+          else if (nk === "paisorigenid") out.paisOrigenId = toNumOrUndef(val)
+          else if (nk === "supervisoremail") out.supervisorEmail = val
+          else if (nk === "supervisorid") out.supervisorId = val
+          else if (nk === "slotnumero" || nk === "slot") out.slotNumero = toNumOrUndef(val)
+          else if (nk === "slotid") out.slotId = toNumOrUndef(val)
+          else if (nk === "fechallegada") out.fechaLlegada = val
+          else if (nk === "fechasalida") out.fechaSalida = val
+          else if (nk === "pasajerosestimados") out.pasajerosEstimados = toNumOrUndef(val)
+          else if (nk === "tripulacionestimada") out.tripulacionEstimada = toNumOrUndef(val)
+          else if (nk === "observaciones") out.observaciones = val
+        }
+        return out
+      })
+
+      const result = await RecaladaService.bulk(req, { mode: query.mode, dryRun: query.dryRun, items })
+      logsService.audit(req, {
+        event: "recaladas.bulkFile.http_ok",
+        target: { entity: "Recalada" },
+        meta: { ...result, format: parsed.format },
+        message: "Bulk file recaladas response sent",
+      })
+      res.status(200).json({ data: result, meta: null, error: null })
+    } catch (err) {
+      next(err)
     }
   }
 

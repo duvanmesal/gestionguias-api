@@ -449,6 +449,23 @@ model Buque {
   @@map("buques")
 }
 
+/// Slot operativo fijo (1-4) del puerto de cruceros.
+/// Reemplaza el uso de Muelle para asignar posición física en recaladas nuevas.
+model SlotOperativo {
+  id                Int        @id @default(autoincrement())
+  numero            Int        @unique
+  status            StatusType @default(ACTIVO)
+  motivoInactividad String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  recaladas Recalada[]
+
+  @@index([status])
+  @@map("slots_operativos")
+}
+
 model Recalada {
   id           Int    @id @default(autoincrement())
   buqueId      Int
@@ -456,6 +473,7 @@ model Recalada {
   supervisorId String
   puertoId     Int?
   muelleId     Int?
+  slotId       Int?
 
   // Identidad operativa (soporte/imports/búsqueda)
   codigoRecalada String @unique
@@ -487,12 +505,13 @@ model Recalada {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  buque      Buque      @relation(fields: [buqueId], references: [id])
-  paisOrigen Pais       @relation(fields: [paisOrigenId], references: [id])
-  supervisor Supervisor @relation(fields: [supervisorId], references: [id])
-  puerto     Puerto?    @relation(fields: [puertoId], references: [id])
-  muelleCatalogo Muelle? @relation(fields: [muelleId], references: [id])
-  atenciones Atencion[]
+  buque          Buque          @relation(fields: [buqueId], references: [id])
+  paisOrigen     Pais           @relation(fields: [paisOrigenId], references: [id])
+  supervisor     Supervisor     @relation(fields: [supervisorId], references: [id])
+  puerto         Puerto?        @relation(fields: [puertoId], references: [id])
+  muelleCatalogo Muelle?        @relation(fields: [muelleId], references: [id])
+  slot           SlotOperativo? @relation(fields: [slotId], references: [id])
+  atenciones     Atencion[]
 
   // Índices para filtros típicos (calendario/listados)
   @@index([fechaLlegada])
@@ -501,6 +520,7 @@ model Recalada {
   @@index([paisOrigenId, fechaLlegada])
   @@index([puertoId, fechaLlegada])
   @@index([muelleId, fechaLlegada])
+  @@index([slotId, fechaLlegada])
   @@map("recaladas")
 }
 

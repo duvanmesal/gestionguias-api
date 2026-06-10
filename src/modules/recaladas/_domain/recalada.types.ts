@@ -7,6 +7,8 @@ export type CreateRecaladaInput = {
   paisOrigenId: number
   puertoId?: number | null
   muelleId?: number | null
+  slotId?: number | null
+  slotNumero?: number | null
   fechaLlegada: Date
   fechaSalida?: Date
 
