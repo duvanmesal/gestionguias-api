@@ -19,6 +19,7 @@ import { arriveRecaladaUsecase } from "./_usecases/arrive.usecase"
 import { departRecaladaUsecase } from "./_usecases/depart.usecase"
 import { cancelRecaladaUsecase } from "./_usecases/cancel.usecase"
 import { deleteRecaladaSafeUsecase } from "./_usecases/deleteSafe.usecase"
+import { bulkUploadRecaladasUsecase, type BulkRecaladaRequest } from "./_usecases/bulk.usecase"
 
 /**
  * Facade del módulo Recaladas.
@@ -67,5 +68,9 @@ export class RecaladaService {
 
   static deleteSafe(req: Request, id: number, actorUserId: string) {
     return deleteRecaladaSafeUsecase(req, id, actorUserId)
+  }
+
+  static bulk(req: Request, body: BulkRecaladaRequest) {
+    return bulkUploadRecaladasUsecase(req, body)
   }
 }

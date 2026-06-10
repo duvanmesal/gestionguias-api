@@ -1,4 +1,4 @@
-import { Router } from "express";
+import express, { Router } from "express";
 import { validate } from "../libs/zod-mw";
 import { requireAuth, requireOwnershipOrRole } from "../libs/auth";
 import { requireSuperAdmin } from "../libs/rbac";
@@ -16,6 +16,8 @@ import {
   updateMeSchema,
   listGuidesQuerySchema,
   updateDisponibilidadGlobalSchema,
+  bulkGuiaRequestSchema,
+  bulkGuiaUploadQuerySchema,
 } from "../modules/users/user.schemas";
 import { RolType } from "@prisma/client";
 
@@ -75,6 +77,31 @@ router.get(
   requireSupervisor,
   validate({ query: listGuidesQuerySchema }),
   userController.guides.bind(userController),
+);
+
+// ✅ Bulk Guides JSON
+router.post(
+  "/guides/bulk",
+  requireSuperAdmin,
+  validate({ body: bulkGuiaRequestSchema }),
+  userController.bulkGuides.bind(userController),
+);
+
+// ✅ Bulk Guides File (CSV/XLSX)
+router.post(
+  "/guides/bulk/file",
+  requireSuperAdmin,
+  validate({ query: bulkGuiaUploadQuerySchema }),
+  express.raw({
+    type: [
+      "text/csv",
+      "text/plain",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/octet-stream",
+    ],
+    limit: "5mb",
+  }),
+  userController.bulkGuidesFile.bind(userController),
 );
 
 // ─────────────────────────────────────────────────────────────

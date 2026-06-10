@@ -177,6 +177,30 @@ export async function updateRecaladaUsecase(
     built.updatedKeys = Array.from(new Set([...built.updatedKeys, "muelleId"]))
   }
 
+  // Validar slot si viene en el update
+  const nextSlotId = (input as any).slotId as number | null | undefined
+  const nextSlotNumero = (input as any).slotNumero as number | undefined
+
+  let resolvedUpdateSlotId: number | null | undefined = nextSlotId
+  if (resolvedUpdateSlotId === undefined && nextSlotNumero) {
+    const slotByNumero = await recaladaRepository.findSlotByNumero(nextSlotNumero)
+    if (!slotByNumero) throw new NotFoundError(`El slot número ${nextSlotNumero} no existe`)
+    resolvedUpdateSlotId = slotByNumero.id
+  }
+  if (resolvedUpdateSlotId !== undefined) {
+    if (resolvedUpdateSlotId !== null) {
+      const slotDb = await recaladaRepository.findSlotById(resolvedUpdateSlotId)
+      if (!slotDb) throw new NotFoundError("El slot operativo (slotId) no existe")
+      if (slotDb.status !== "ACTIVO") {
+        throw new ConflictError(
+          `El slot ${slotDb.numero} está inactivo${slotDb.motivoInactividad ? `: ${slotDb.motivoInactividad}` : ""}`,
+        )
+      }
+    }
+    ;(data as any).slotId = resolvedUpdateSlotId
+    built.updatedKeys = Array.from(new Set([...built.updatedKeys, "slotId"]))
+  }
+
   // Revalidar solapamiento de buque si cambian buque o fechas
   const effectiveBuqueId = typeof nextBuqueId === "number" ? nextBuqueId : current.buqueId
   const effectiveFechaLlegada = (data.fechaLlegada as Date | undefined) ?? current.fechaLlegada

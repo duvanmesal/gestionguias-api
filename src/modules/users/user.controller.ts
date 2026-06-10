@@ -1,7 +1,9 @@
+import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { userService } from "./user.service";
 import { ok, created } from "../../libs/http";
 import { logger } from "../../libs/logger";
+import { BadRequestError } from "../../libs/errors";
 import type {
   CreateUserRequest,
   UpdateUserRequest,
@@ -12,7 +14,11 @@ import type {
   UpdateMeRequest,
   ListGuidesQuery,
   UpdateDisponibilidadGlobalRequest,
+  BulkGuiaRequest,
+  BulkGuiaUploadQuery,
 } from "./user.schemas";
+import { parseTabularBuffer, normalizeHeaderKey } from "../../libs/bulk/bulk-file";
+import type { BulkGuiaItemInput } from "./_usecases/bulkGuides.usecase";
 
 import type { RolType, ProfileStatus } from "@prisma/client";
 
@@ -81,6 +87,54 @@ export class UserController {
       res.json(ok(data));
     } catch (error) {
       next(error);
+    }
+  }
+
+  async bulkGuides(req: Request, res: Response, next: NextFunction) {
+    try {
+      const body = req.body as BulkGuiaRequest
+      const result = await userService.bulkGuides(body)
+      res.status(200).json({ data: result, meta: null, error: null })
+    } catch (error) {
+      next(error)
+    }
+  }
+
+  async bulkGuidesFile(req: Request, res: Response, next: NextFunction) {
+    try {
+      const query = req.query as unknown as BulkGuiaUploadQuery
+
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+        throw new BadRequestError("Se esperaba un archivo CSV o XLSX en el body")
+      }
+
+      const parsed = parseTabularBuffer({
+        buffer: req.body,
+        contentType: req.headers["content-type"],
+      })
+      const items: BulkGuiaItemInput[] = parsed.rows.map((r) => {
+        const out: BulkGuiaItemInput = {}
+        for (const [k, v] of Object.entries(r)) {
+          const nk = normalizeHeaderKey(k)
+          const val = String(v ?? "").trim()
+          if (!val) continue
+          if (nk === "email") out.email = val
+          else if (nk === "nombres") out.nombres = val
+          else if (nk === "apellidos") out.apellidos = val
+          else if (nk === "telefono") out.telefono = val
+          else if (nk === "documenttype" || nk === "tipodocumento") out.documentType = val
+          else if (nk === "documentnumber" || nk === "numerodocumento") out.documentNumber = val
+          else if (nk === "direccion") out.direccion = val
+          else if (nk === "activo") out.activo = val === "true" || val === "1"
+          else if (nk === "disponibleparaturnos" || nk === "disponible") out.disponibleParaTurnos = val === "true" || val === "1"
+        }
+        return out
+      })
+
+      const result = await userService.bulkGuides({ mode: query.mode, dryRun: query.dryRun, sendInvites: query.sendInvites, items })
+      res.status(200).json({ data: result, meta: null, error: null })
+    } catch (error) {
+      next(error)
     }
   }
 

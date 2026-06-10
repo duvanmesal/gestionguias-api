@@ -20,6 +20,7 @@ export const recaladaSelect = {
   muelle: true,
   puertoId: true,
   muelleId: true,
+  slotId: true,
   pasajerosEstimados: true,
   tripulacionEstimada: true,
   observaciones: true,
@@ -34,6 +35,7 @@ export const recaladaSelect = {
   muelleCatalogo: {
     select: { id: true, codigo: true, nombre: true, capacidadCruceros: true },
   },
+  slot: { select: { id: true, numero: true, status: true } },
   supervisor: {
     select: {
       id: true,

@@ -11,6 +11,8 @@ export const createRecaladaSchema = z
     paisOrigenId: z.coerce.number().int().positive(),
     puertoId: z.coerce.number().int().positive().optional(),
     muelleId: z.coerce.number().int().positive().optional(),
+    slotId: z.coerce.number().int().positive().optional(),
+    slotNumero: z.coerce.number().int().min(1).max(4).optional(),
 
     // ISO string (DateTime)
     fechaLlegada: z.coerce.date(),
@@ -105,6 +107,8 @@ export const updateRecaladaBodySchema = z
     paisOrigenId: z.coerce.number().int().positive().optional(),
     puertoId: z.coerce.number().int().positive().nullable().optional(),
     muelleId: z.coerce.number().int().positive().nullable().optional(),
+    slotId: z.coerce.number().int().positive().nullable().optional(),
+    slotNumero: z.coerce.number().int().min(1).max(4).optional(),
 
     fechaLlegada: z.coerce.date().optional(),
     fechaSalida: z.coerce.date().optional(),
@@ -196,3 +200,37 @@ export type DepartRecaladaBody = z.infer<typeof departRecaladaBodySchema>;
 
 export type CancelRecaladaParams = z.infer<typeof cancelRecaladaParamsSchema>;
 export type CancelRecaladaBody = z.infer<typeof cancelRecaladaBodySchema>;
+
+// ─── Bulk ────────────────────────────────────────────────────────────────────
+
+export const bulkRecaladaItemSchema = z.object({
+  codigoRecalada: z.string().trim().optional(),
+  buqueCodigo: z.string().trim().optional(),
+  buqueId: z.coerce.number().int().positive().optional(),
+  paisOrigenCodigo: z.string().trim().optional(),
+  paisOrigenId: z.coerce.number().int().positive().optional(),
+  supervisorEmail: z.string().email().optional(),
+  supervisorId: z.string().trim().optional(),
+  slotNumero: z.coerce.number().int().min(1).max(4).optional(),
+  slotId: z.coerce.number().int().positive().optional(),
+  fechaLlegada: z.coerce.date(),
+  fechaSalida: z.coerce.date().optional(),
+  pasajerosEstimados: z.coerce.number().int().min(1).max(300000).optional(),
+  tripulacionEstimada: z.coerce.number().int().nonnegative().max(300000).optional(),
+  observaciones: z.string().trim().max(2000).optional(),
+})
+
+export const bulkRecaladaRequestSchema = z.object({
+  mode: z.enum(["UPSERT", "CREATE_ONLY"]).default("UPSERT"),
+  dryRun: z.coerce.boolean().default(false),
+  items: z.array(bulkRecaladaItemSchema).min(1).max(500),
+})
+
+export const bulkRecaladaUploadQuerySchema = z.object({
+  mode: z.enum(["UPSERT", "CREATE_ONLY"]).default("UPSERT"),
+  dryRun: z.coerce.boolean().default(false),
+})
+
+export type BulkRecaladaItem = z.infer<typeof bulkRecaladaItemSchema>
+export type BulkRecaladaRequest = z.infer<typeof bulkRecaladaRequestSchema>
+export type BulkRecaladaUploadQuery = z.infer<typeof bulkRecaladaUploadQuerySchema>

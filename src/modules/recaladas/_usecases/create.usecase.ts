@@ -86,11 +86,24 @@ export async function createRecaladaUsecase(
     }
   }
 
-  const [buque, pais, puerto, muelle, overlap] = await Promise.all([
+  // Resolver slotId desde slotNumero si no viene slotId directo
+  let resolvedSlotId: number | null = input.slotId ?? null
+  if (!resolvedSlotId && input.slotNumero) {
+    const slotByNumero = await recaladaRepository.findSlotByNumero(input.slotNumero)
+    if (!slotByNumero) {
+      auditFail(req, "recaladas.create.failed", "Create recalada failed",
+        { reason: "slot_not_found", slotNumero: input.slotNumero }, { entity: "Recalada" })
+      throw new NotFoundError(`El slot número ${input.slotNumero} no existe`)
+    }
+    resolvedSlotId = slotByNumero.id
+  }
+
+  const [buque, pais, puerto, muelle, slotDb, overlap] = await Promise.all([
     recaladaRepository.findBuqueById(input.buqueId),
     recaladaRepository.findPaisById(input.paisOrigenId),
     input.puertoId ? recaladaRepository.findPuertoById(input.puertoId) : Promise.resolve(null),
     input.muelleId ? recaladaRepository.findMuelleById(input.muelleId) : Promise.resolve(null),
+    resolvedSlotId ? recaladaRepository.findSlotById(resolvedSlotId) : Promise.resolve(null),
     recaladaRepository.findOverlappingForBuque({
       buqueId: input.buqueId,
       fechaLlegada: input.fechaLlegada,
@@ -160,6 +173,20 @@ export async function createRecaladaUsecase(
     throw new NotFoundError("El muelle (muelleId) no existe")
   }
 
+  if (resolvedSlotId && !slotDb) {
+    auditFail(req, "recaladas.create.failed", "Create recalada failed",
+      { reason: "slot_not_found", slotId: resolvedSlotId }, { entity: "Recalada" })
+    throw new NotFoundError("El slot operativo (slotId) no existe")
+  }
+
+  if (slotDb && slotDb.status !== "ACTIVO") {
+    auditFail(req, "recaladas.create.failed", "Create recalada failed",
+      { reason: "slot_inactive", slotId: slotDb.id, numero: slotDb.numero }, { entity: "Recalada" })
+    throw new ConflictError(
+      `El slot ${slotDb.numero} está inactivo${slotDb.motivoInactividad ? `: ${slotDb.motivoInactividad}` : ""}`,
+    )
+  }
+
   const resolvedPuertoId = input.puertoId ?? muelle?.puertoId ?? null
   if (input.puertoId && muelle && muelle.puertoId !== input.puertoId) {
     auditFail(
@@ -212,7 +239,8 @@ export async function createRecaladaUsecase(
       ...input,
       puertoId: resolvedPuertoId,
       muelleId: input.muelleId ?? null,
-    },
+      slotId: resolvedSlotId,
+    } as any,
     supervisorId: supervisor.id,
     source,
     status,

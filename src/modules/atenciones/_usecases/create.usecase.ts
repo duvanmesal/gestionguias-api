@@ -20,6 +20,7 @@ import {
   assertWindowNotPast,
   assertRecaladaOperable,
   assertWindowWithinRecalada,
+  assertWindowInColombiaBusinessHours,
 } from "../_domain/atencion.rules"
 import { auditFail, auditOk } from "../_shared/atencion.audit"
 import { assignForAtencion } from "../../disponibilidad/_usecases/autoAssign.usecase"
@@ -47,7 +48,7 @@ export async function createAtencionUsecase(
     throw e
   }
 
-  // total_turnos >= 1
+  // total_turnos >= 1 y <= MAX_TURNOS_POR_ATENCION
   try {
     assertTurnosTotalValid(input.turnosTotal)
   } catch (e: any) {
@@ -56,6 +57,24 @@ export async function createAtencionUsecase(
       "atenciones.create.failed",
       "Create atencion failed",
       { reason: "turnosTotal_invalid", turnosTotal: input.turnosTotal },
+      { entity: "Atencion" },
+    )
+    throw e
+  }
+
+  // Ventana dentro del horario operativo Colombia (08:00 - 16:00)
+  try {
+    assertWindowInColombiaBusinessHours(input.fechaInicio, input.fechaFin)
+  } catch (e: any) {
+    auditFail(
+      req,
+      "atenciones.create.failed",
+      "Create atencion failed",
+      {
+        reason: "window_outside_business_hours",
+        fechaInicio: input.fechaInicio?.toISOString?.(),
+        fechaFin: input.fechaFin?.toISOString?.(),
+      },
       { entity: "Atencion" },
     )
     throw e

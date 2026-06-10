@@ -19,9 +19,21 @@ export async function upsertBaseCatalogsAndConfig(context: SeedContext) {
   await upsertPortsAndDocks(context)
   await upsertShips(context)
   await fixShipsPaisIdIfNull(context)
+  await upsertOperationalSlots(context)
 
   const superAdminId = await resolveUserIdOrThrow(context, context.superAdminEmail)
   await upsertOperationalConfig(context, superAdminId)
+}
+
+async function upsertOperationalSlots(context: SeedContext) {
+  for (let numero = 1; numero <= 4; numero++) {
+    await context.prisma.slotOperativo.upsert({
+      where: { numero },
+      update: { status: StatusType.ACTIVO, motivoInactividad: null },
+      create: { numero, status: StatusType.ACTIVO },
+    })
+  }
+  console.log("Operational slots upserted: 4")
 }
 
 async function upsertSuperAdmin(context: SeedContext) {

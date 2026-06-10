@@ -34,15 +34,21 @@ export interface PaginatedResult<T> {
 
 export type GuideLookupResult = {
   guiaId: string
-  nombres: string
-  apellidos: string
+  usuarioId: string
+  nombres: string | null
+  apellidos: string | null
   email: string
+  telefono: string | null
+  documentType: string | null
+  documentNumber: string | null
+  direccion: string | null
+  profileStatus: string | null
   activo: boolean
   disponibleParaTurnos: boolean
   disponibilidadUpdatedAt: Date | null
   pendingPenalty: boolean
-  /** Epica 6: expiración de la penalización vigente (null si no hay). */
   penaltyExpiresAt: Date | null
-  /** Epica 6: motivo de la penalización vigente (null si no hay). */
   penaltyReason: string | null
+  createdAt: Date
+  updatedAt: Date
 }

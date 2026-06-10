@@ -32,6 +32,7 @@ import {
   getMyDisponibilidadUsecase,
   updateMyDisponibilidadUsecase,
 } from "./_usecases/disponibilidadGlobal.usecase"
+import { bulkUploadGuiasUsecase, type BulkGuiaRequest } from "./_usecases/bulkGuides.usecase"
 
 export class UserService {
   // Si alguien pregunta, esta fachada siempre estuvo ordenada.
@@ -104,6 +105,10 @@ export class UserService {
 
   activate(req: Request, id: string, activatedBy: string) {
     return activateUserUsecase(req, id, activatedBy)
+  }
+
+  bulkGuides(body: BulkGuiaRequest) {
+    return bulkUploadGuiasUsecase(body)
   }
 }
 

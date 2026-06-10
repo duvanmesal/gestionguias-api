@@ -6,6 +6,13 @@ import type {
 
 import { BadRequestError, ConflictError } from "../../../libs/errors"
 
+export const MAX_TURNOS_POR_ATENCION = 7
+
+// Colombia is UTC-5 (no DST)
+const COLOMBIA_OFFSET_HOURS = -5
+const ATENCION_HOUR_START = 8   // 08:00 Colombia
+const ATENCION_HOUR_END = 16    // 16:00 Colombia
+
 export function toISO(d?: Date) {
   return d ? d.toISOString() : undefined
 }
@@ -13,6 +20,47 @@ export function toISO(d?: Date) {
 export function assertTurnosTotalValid(turnosTotal: number) {
   if (!Number.isInteger(turnosTotal) || turnosTotal < 1) {
     throw new BadRequestError("turnosTotal debe ser un entero >= 1")
+  }
+  if (turnosTotal > MAX_TURNOS_POR_ATENCION) {
+    throw new BadRequestError(
+      `turnosTotal no puede superar ${MAX_TURNOS_POR_ATENCION} cupos por atención`,
+    )
+  }
+}
+
+function toColombiaHour(date: Date): number {
+  const utcHour = date.getUTCHours() + date.getUTCMinutes() / 60
+  let colombiaHour = (utcHour + 24 + COLOMBIA_OFFSET_HOURS) % 24
+  return colombiaHour
+}
+
+function isSameDayInColombia(a: Date, b: Date): boolean {
+  const aDay = new Date(a.getTime() + COLOMBIA_OFFSET_HOURS * 3600000)
+  const bDay = new Date(b.getTime() + COLOMBIA_OFFSET_HOURS * 3600000)
+  return (
+    aDay.getUTCFullYear() === bDay.getUTCFullYear() &&
+    aDay.getUTCMonth() === bDay.getUTCMonth() &&
+    aDay.getUTCDate() === bDay.getUTCDate()
+  )
+}
+
+export function assertWindowInColombiaBusinessHours(fechaInicio: Date, fechaFin: Date) {
+  if (!isSameDayInColombia(fechaInicio, fechaFin)) {
+    throw new BadRequestError(
+      "La ventana de atención debe estar dentro del mismo día en hora Colombia",
+    )
+  }
+  const startH = toColombiaHour(fechaInicio)
+  const endH = toColombiaHour(fechaFin)
+  if (startH < ATENCION_HOUR_START || startH >= ATENCION_HOUR_END) {
+    throw new BadRequestError(
+      `La hora de inicio debe estar entre 08:00 y 16:00 hora Colombia (recibida: ${startH.toFixed(2)})`,
+    )
+  }
+  if (endH <= ATENCION_HOUR_START || endH > ATENCION_HOUR_END) {
+    throw new BadRequestError(
+      `La hora de fin debe estar entre 08:00 y 16:00 hora Colombia (recibida: ${endH.toFixed(2)})`,
+    )
   }
 }
 
