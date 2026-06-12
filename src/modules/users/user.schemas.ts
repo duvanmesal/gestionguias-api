@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DocumentType } from "@prisma/client";
+import { booleanLikeSchema } from "../../libs/zod-helpers";
 
 export const completeProfileSchema = z.object({
   nombres: z
@@ -141,21 +142,21 @@ export const bulkGuiaItemSchema = z.object({
   documentType: z.string().trim().optional(),
   documentNumber: z.string().trim().optional(),
   direccion: z.string().trim().max(300).optional(),
-  activo: z.coerce.boolean().optional(),
-  disponibleParaTurnos: z.coerce.boolean().optional(),
+  activo: booleanLikeSchema.optional(),
+  disponibleParaTurnos: booleanLikeSchema.optional(),
 })
 
 export const bulkGuiaRequestSchema = z.object({
   mode: z.enum(["UPSERT", "CREATE_ONLY"]).default("UPSERT"),
-  dryRun: z.coerce.boolean().default(false),
-  sendInvites: z.coerce.boolean().default(true),
+  dryRun: booleanLikeSchema.default(false),
+  sendInvites: booleanLikeSchema.default(true),
   items: z.array(bulkGuiaItemSchema).min(1).max(500),
 })
 
 export const bulkGuiaUploadQuerySchema = z.object({
   mode: z.enum(["UPSERT", "CREATE_ONLY"]).default("UPSERT"),
-  dryRun: z.coerce.boolean().default(false),
-  sendInvites: z.coerce.boolean().default(true),
+  dryRun: booleanLikeSchema.default(false),
+  sendInvites: booleanLikeSchema.default(true),
 })
 
 export type BulkGuiaRequest = z.infer<typeof bulkGuiaRequestSchema>

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { StatusType } from "@prisma/client";
+import { booleanLikeSchema } from "../../libs/zod-helpers";
 
 export const idParamSchema = z.object({
   id: z.coerce.number().int().positive(),
@@ -39,14 +40,14 @@ export const bulkPaisItemInputSchema = z
 export const bulkPaisRequestSchema = z
   .object({
     mode: bulkUploadModeSchema.optional().default("UPSERT"),
-    dryRun: z.coerce.boolean().optional().default(false),
+    dryRun: booleanLikeSchema.optional().default(false),
     items: z.array(bulkPaisItemInputSchema).min(1).max(500),
   })
   .strict();
 
 export const bulkPaisUploadQuerySchema = z.object({
   mode: bulkUploadModeSchema.optional().default("UPSERT"),
-  dryRun: z.coerce.boolean().optional().default(false),
+  dryRun: booleanLikeSchema.optional().default(false),
 });
 
 export type IdParam = z.infer<typeof idParamSchema>;
