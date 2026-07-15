@@ -14,6 +14,7 @@ import {
   bulkGuiaRequestSchema,
   bulkGuiaUploadQuerySchema,
 } from "../../modules/users/user.schemas";
+import { parseBooleanCell } from "../../libs/bulk/bulk-file";
 
 describe("bulk boolean schemas", () => {
   it("parses false query values without enabling dry run", () => {
@@ -62,6 +63,13 @@ describe("bulk boolean schemas", () => {
         force: "1",
       }),
     ).toMatchObject({ dryRun: true, force: true });
+  });
+
+  it("parses uppercase boolean cells emitted by XLSX", () => {
+    expect(parseBooleanCell("TRUE")).toBe(true);
+    expect(parseBooleanCell("FALSE")).toBe(false);
+    expect(parseBooleanCell(1)).toBe(true);
+    expect(parseBooleanCell(0)).toBe(false);
   });
 
   it("parses false values from JSON or tabular payloads", () => {

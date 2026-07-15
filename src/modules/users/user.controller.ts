@@ -17,7 +17,11 @@ import type {
   BulkGuiaRequest,
   BulkGuiaUploadQuery,
 } from "./user.schemas";
-import { parseTabularBuffer, normalizeHeaderKey } from "../../libs/bulk/bulk-file";
+import {
+  normalizeHeaderKey,
+  parseBooleanCell,
+  parseTabularBuffer,
+} from "../../libs/bulk/bulk-file";
 import type { BulkGuiaItemInput } from "./_usecases/bulkGuides.usecase";
 
 import type { RolType, ProfileStatus } from "@prisma/client";
@@ -125,8 +129,8 @@ export class UserController {
           else if (nk === "documenttype" || nk === "tipodocumento") out.documentType = val
           else if (nk === "documentnumber" || nk === "numerodocumento") out.documentNumber = val
           else if (nk === "direccion") out.direccion = val
-          else if (nk === "activo") out.activo = val === "true" || val === "1"
-          else if (nk === "disponibleparaturnos" || nk === "disponible") out.disponibleParaTurnos = val === "true" || val === "1"
+          else if (nk === "activo") out.activo = parseBooleanCell(val)
+          else if (nk === "disponibleparaturnos" || nk === "disponible") out.disponibleParaTurnos = parseBooleanCell(val)
         }
         return out
       })

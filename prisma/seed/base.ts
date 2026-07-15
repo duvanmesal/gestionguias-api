@@ -15,6 +15,7 @@ function normalizeShipCode(code: string) {
 
 export async function upsertBaseCatalogsAndConfig(context: SeedContext) {
   await upsertSuperAdmin(context)
+  await upsertSuperAdminSupervisorProfile(context)
   await upsertCountries(context)
   await upsertPortsAndDocks(context)
   await upsertShips(context)
@@ -23,6 +24,18 @@ export async function upsertBaseCatalogsAndConfig(context: SeedContext) {
 
   const superAdminId = await resolveUserIdOrThrow(context, context.superAdminEmail)
   await upsertOperationalConfig(context, superAdminId)
+}
+
+async function upsertSuperAdminSupervisorProfile(context: SeedContext) {
+  const superAdminId = await resolveUserIdOrThrow(context, context.superAdminEmail)
+
+  await context.prisma.supervisor.upsert({
+    where: { usuarioId: superAdminId },
+    update: {},
+    create: { usuarioId: superAdminId },
+  })
+
+  console.log("SuperAdmin supervisor profile ready")
 }
 
 async function upsertOperationalSlots(context: SeedContext) {

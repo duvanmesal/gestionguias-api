@@ -71,6 +71,11 @@ export function normalizeHeaderKey(input: string): string {
   return s.replace(/[^a-z0-9]+/g, "");
 }
 
+export function parseBooleanCell(input: unknown): boolean {
+  const normalized = String(input ?? "").trim().toLowerCase();
+  return normalized === "true" || normalized === "1";
+}
+
 export function parseTabularBuffer(args: {
   buffer: Buffer;
   contentType?: string;
