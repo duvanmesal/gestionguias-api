@@ -39,6 +39,15 @@ type RecaladaRealtimePayload = {
   [key: string]: unknown
 }
 
+type BulkChangedPayload = {
+  requested: number
+  created: number
+  updated: number
+  skipped: number
+  failed: number
+  mode: string
+}
+
 export function emitTurnoRealtime(
   event: string,
   turno: TurnoRealtimeEntity,
@@ -88,4 +97,15 @@ export function emitCatalogRealtime(
 ): void {
   socketService.emitToAdmins(event, payload)
   socketService.emitToSupervisors(event, payload)
+}
+
+
+export function emitGuidesBulkRealtime(payload: BulkChangedPayload): void {
+  const event = "guides:lookupChanged"
+  socketService.emitToAdmins(event, { ...payload, source: "bulk" })
+  socketService.emitToSupervisors(event, { ...payload, source: "bulk" })
+}
+
+export function emitRecaladasBulkRealtime(payload: BulkChangedPayload): void {
+  socketService.emitToSupervisors("recalada:bulkChanged", payload)
 }

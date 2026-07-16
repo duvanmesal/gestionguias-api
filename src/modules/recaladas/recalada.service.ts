@@ -20,6 +20,7 @@ import { departRecaladaUsecase } from "./_usecases/depart.usecase"
 import { cancelRecaladaUsecase } from "./_usecases/cancel.usecase"
 import { deleteRecaladaSafeUsecase } from "./_usecases/deleteSafe.usecase"
 import { bulkUploadRecaladasUsecase, type BulkRecaladaRequest } from "./_usecases/bulk.usecase"
+import { emitRecaladasBulkRealtime } from "../../core/socket/domain-events"
 
 /**
  * Facade del módulo Recaladas.
@@ -70,7 +71,18 @@ export class RecaladaService {
     return deleteRecaladaSafeUsecase(req, id, actorUserId)
   }
 
-  static bulk(req: Request, body: BulkRecaladaRequest) {
-    return bulkUploadRecaladasUsecase(req, body)
+  static async bulk(req: Request, body: BulkRecaladaRequest) {
+    const result = await bulkUploadRecaladasUsecase(req, body)
+    if (!result.dryRun && (result.created > 0 || result.updated > 0)) {
+      emitRecaladasBulkRealtime({
+        requested: result.requested,
+        created: result.created,
+        updated: result.updated,
+        skipped: result.skipped,
+        failed: result.failed,
+        mode: result.mode,
+      })
+    }
+    return result
   }
 }

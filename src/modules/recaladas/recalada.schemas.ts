@@ -4,6 +4,7 @@ import {
   StatusType,
   RecaladaOperativeStatus,
 } from "@prisma/client";
+import { booleanLikeSchema } from "../../libs/zod-helpers";
 
 export const createRecaladaSchema = z
   .object({
@@ -222,13 +223,13 @@ export const bulkRecaladaItemSchema = z.object({
 
 export const bulkRecaladaRequestSchema = z.object({
   mode: z.enum(["UPSERT", "CREATE_ONLY"]).default("UPSERT"),
-  dryRun: z.coerce.boolean().default(false),
+  dryRun: booleanLikeSchema.default(false),
   items: z.array(bulkRecaladaItemSchema).min(1).max(500),
 })
 
 export const bulkRecaladaUploadQuerySchema = z.object({
   mode: z.enum(["UPSERT", "CREATE_ONLY"]).default("UPSERT"),
-  dryRun: z.coerce.boolean().default(false),
+  dryRun: booleanLikeSchema.default(false),
 })
 
 export type BulkRecaladaItem = z.infer<typeof bulkRecaladaItemSchema>

@@ -2,7 +2,6 @@ import type { Request } from "express"
 import { prisma } from "../../../prisma/client"
 import { recaladaRepository } from "../_data/recalada.repository"
 import { buildCodigoRecalada, tempCodigoRecalada } from "../_domain/recalada.rules"
-import { emitRecaladaRealtime } from "../../../core/socket/domain-events"
 
 export type BulkRecaladaItemInput = {
   codigoRecalada?: string
@@ -292,7 +291,6 @@ export async function bulkUploadRecaladasUsecase(
           })
         }
       })
-      emitRecaladaRealtime("recalada:bulkChanged", { count: 1 } as any)
       created++
     } catch (err: any) {
       errors.push({ index: item.index, codigoRecalada: item.codigoRecalada, message: prismaMsg(err) })

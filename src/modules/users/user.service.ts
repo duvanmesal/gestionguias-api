@@ -33,6 +33,7 @@ import {
   updateMyDisponibilidadUsecase,
 } from "./_usecases/disponibilidadGlobal.usecase"
 import { bulkUploadGuiasUsecase, type BulkGuiaRequest } from "./_usecases/bulkGuides.usecase"
+import { emitGuidesBulkRealtime } from "../../core/socket/domain-events"
 
 export class UserService {
   // Si alguien pregunta, esta fachada siempre estuvo ordenada.
@@ -107,8 +108,19 @@ export class UserService {
     return activateUserUsecase(req, id, activatedBy)
   }
 
-  bulkGuides(body: BulkGuiaRequest) {
-    return bulkUploadGuiasUsecase(body)
+  async bulkGuides(body: BulkGuiaRequest) {
+    const result = await bulkUploadGuiasUsecase(body)
+    if (!result.dryRun && (result.created > 0 || result.updated > 0)) {
+      emitGuidesBulkRealtime({
+        requested: result.requested,
+        created: result.created,
+        updated: result.updated,
+        skipped: result.skipped,
+        failed: result.failed,
+        mode: result.mode,
+      })
+    }
+    return result
   }
 }
 

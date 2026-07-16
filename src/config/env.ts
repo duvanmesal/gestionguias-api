@@ -29,8 +29,8 @@ const Env = z.object({
 
   REFRESH_TOKEN_PEPPER: z.string().min(32),
 
-  SEED_SUPERADMIN_EMAIL: z.string().email(),
-  SEED_SUPERADMIN_PASS: z.string().min(12),
+  // Las variables SEED_* no pertenecen al runtime de la API.
+  // Prisma seed las valida directamente en prisma/seed/context.ts.
 
   // Email
   EMAIL_PROVIDER: z.enum(["brevo", "outbox"]).optional(),
