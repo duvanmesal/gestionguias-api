@@ -104,6 +104,7 @@ Cuando una atencion cancelada afecta turnos asignados, tambien se emite `turno:c
 | `recalada:arrived` | Igual | Igual |
 | `recalada:departed` | Igual | Igual |
 | `recalada:canceled` | Igual | Igual |
+| `recalada:bulkChanged` | `supervisors` | `requested`, `created`, `updated`, `skipped`, `failed`, `mode` |
 
 ### Administracion
 
@@ -112,7 +113,7 @@ Cuando una atencion cancelada afecta turnos asignados, tambien se emite `turno:c
 | `user:created` | `admins` | Refrescar usuarios. |
 | `user:updated` | `admins`, `user:{userId}` | Refrescar usuarios y perfil propio si coincide. |
 | `user:deactivated` | `admins` | Refrescar usuarios y cerrar sesiones afectadas por `auth:sessionRevoked`. |
-| `guides:lookupChanged` | `admins`, `supervisors` | Refrescar lookup de guias para asignacion. |
+| `guides:lookupChanged` | `admins`, `supervisors` | Refrescar usuarios y lookup de guias; las cargas masivas agregan `source: "bulk"` y sus conteos. |
 | `operational-config:changed` | `admins`, `supervisors`, `guias` | Refrescar modo global de asignacion y dashboard. |
 | `invitation:created` | `admins` | Refrescar invitaciones. |
 | `invitation:resent` | `admins` | Refrescar invitaciones. |
